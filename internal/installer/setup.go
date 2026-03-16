@@ -25,14 +25,12 @@ import (
 const (
 	bitcoinVersion = "29.3"
 	lndVersion     = "0.20.0-beta"
-	litVersion     = "0.16.0-alpha"
 	systemUser     = "bitcoin"
 )
 
 var appVersion = "dev"
 
 func SetVersion(v string)   { appVersion = v }
-func LitVersionStr() string { return litVersion }
 func LndVersionStr() string { return lndVersion }
 
 func NeedsInstall() bool {
@@ -629,70 +627,6 @@ func RunP2PModeUpgrade(cfg *config.AppConfig) error {
 		cfg.P2PMode = "tor"
 		return err
 	}
-	return config.Save(cfg)
-}
-
-// ── LIT installation ─────────────────────────────────────
-
-func RunLITInstall(cfg *config.AppConfig) error {
-	confirmMsg := theme.Header.Render("Install Lightning Terminal") + "\n\n" +
-		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  • Download Lightning Terminal v"+litVersion) + "\n" +
-		theme.Value.Render("  • Modify LND config (enable rpcmiddleware)") + "\n" +
-		theme.Value.Render("  • Restart LND") + "\n" +
-		theme.Value.Render("  • Create Tor hidden service for LIT web UI") + "\n" +
-		theme.Value.Render("  • Restart Tor") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
-	if !ShowConfirmBox(confirmMsg) {
-		return nil
-	}
-
-	passBytes := make([]byte, 12)
-	if _, err := randRead(passBytes); err != nil {
-		return fmt.Errorf("generate password: %w", err)
-	}
-	litPassword := hexEncode(passBytes)
-
-	cfg.LITInstalled = true
-
-	steps := []installStep{
-		{name: "Importing LIT signing key", fn: importLITKey},
-		{name: "Downloading Lightning Terminal " + litVersion,
-			fn: func() error { return downloadLIT(litVersion) }},
-		{name: "Verifying LIT signature",
-			fn: func() error { return verifyLITSig(litVersion) }},
-		{name: "Verifying LIT checksum", fn: verifyLIT},
-		{name: "Installing Lightning Terminal",
-			fn: func() error { return extractAndInstallLIT(litVersion) }},
-		{name: "Enabling RPC middleware in LND",
-			fn: enableRPCMiddleware},
-		{name: "Restarting LND", fn: func() error {
-			return system.SudoRun("systemctl", "restart", "lnd")
-		}},
-		{name: "Restarting LndHub", fn: func() error {
-			if cfg.LndHubInstalled {
-				return system.SudoRun(
-					"systemctl", "restart", "lndhub")
-			}
-			return nil
-		}},
-		{name: "Creating LIT directories", fn: createLITDirs},
-		{name: "Creating LIT configuration",
-			fn: func() error { return writeLITConfig(cfg, litPassword) }},
-		{name: "Creating litd service",
-			fn: func() error { return writeLITDService(systemUser) }},
-		{name: "Rebuilding Tor config",
-			fn: func() error { return RebuildTorConfig(cfg) }},
-		{name: "Restarting Tor", fn: restartTor},
-		{name: "Starting Lightning Terminal", fn: startLITD},
-	}
-	if err := RunInstallTUI(steps, appVersion); err != nil {
-		cfg.LITInstalled = false
-		RebuildTorConfig(cfg)
-		restartTor()
-		return err
-	}
-	cfg.LITPassword = litPassword
 	return config.Save(cfg)
 }
 

@@ -18,9 +18,6 @@ const (
 	LNDConf = "/etc/lnd/lnd.conf"
 	LNDDir  = "/etc/lnd"
 
-	LITConf = "/etc/lit/lit.conf"
-	LITDir  = "/etc/lit"
-
 	SyncthingDir = "/etc/syncthing"
 )
 
@@ -29,7 +26,6 @@ const (
 const (
 	BitcoinDataDir   = "/var/lib/bitcoin"
 	LNDDataDir       = "/var/lib/lnd"
-	LITDataDir       = "/var/lib/lit"
 	SyncthingDataDir = "/var/lib/syncthing"
 	SyncthingBackup  = "/var/lib/syncthing/lnd-backup"
 )
@@ -65,8 +61,6 @@ const (
 	TorLNDGRPC           = "/var/lib/tor/lnd-grpc"
 	TorLNDREST           = "/var/lib/tor/lnd-rest"
 	TorLNDRESTHostname   = "/var/lib/tor/lnd-rest/hostname"
-	TorLNDLIT            = "/var/lib/tor/lnd-lit"
-	TorLNDLITHostname    = "/var/lib/tor/lnd-lit/hostname"
 	TorSyncthing         = "/var/lib/tor/syncthing"
 	TorSyncthingHostname = "/var/lib/tor/syncthing/hostname"
 	TorSyncthingSync     = "/var/lib/tor/syncthing-sync"
@@ -77,7 +71,6 @@ const (
 const (
 	BitcoindService    = "/etc/systemd/system/bitcoind.service"
 	LNDService         = "/etc/systemd/system/lnd.service"
-	LITDService        = "/etc/systemd/system/litd.service"
 	SyncthingService   = "/etc/systemd/system/syncthing.service"
 	BackupWatchPath    = "/etc/systemd/system/lnd-backup-watch.path"
 	BackupCopyService  = "/etc/systemd/system/lnd-backup-copy.service"

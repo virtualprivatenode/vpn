@@ -51,14 +51,6 @@ HiddenServicePort 8080 127.0.0.1:8080
 `)
 	}
 
-	if cfg.LITInstalled {
-		b.WriteString(`
-# Lightning Terminal web UI (Tor only)
-HiddenServiceDir /var/lib/tor/lnd-lit/
-HiddenServicePort 8443 127.0.0.1:8443
-`)
-	}
-
 	if cfg.SyncthingInstalled {
 		b.WriteString(`
 # Syncthing web UI (Tor only, HTTP)

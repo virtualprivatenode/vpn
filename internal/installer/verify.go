@@ -56,16 +56,6 @@ var lndSigner = struct {
 	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
 }
 
-var litSigner = struct {
-	name        string
-	fingerprint string
-	keyID       string
-}{
-	name:        "ViktorT-11",
-	fingerprint: "C20A78516A0944900EBFCA29961CC8259AE675D4",
-	keyID:       "C20A78516A0944900EBFCA29961CC8259AE675D4",
-}
-
 // ── GPG setup ────────────────────────────────────────────
 
 func ensureGPG() error {
@@ -127,36 +117,6 @@ func importLNDKey() error {
 	}
 
 	logger.Verify("OK roasbeef: imported (fingerprint %s)", lndSigner.fingerprint)
-	return nil
-}
-
-func importLITKey() error {
-	logger.Verify("--- LIT key import ---")
-
-	// Download key through torsocks instead of using gpg --keyserver.
-	// This avoids dirmngr proxy issues and ensures Tor routing.
-	keyFile := "/tmp/lit-key-ViktorT-11.asc"
-	keyURL := fmt.Sprintf(
-		"https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x%s",
-		litSigner.keyID)
-	if err := system.DownloadRequireTor(keyURL, keyFile); err != nil {
-		logger.Verify("FAIL: download LIT signing key: %v", err)
-		return fmt.Errorf("download LIT signing key: %w", err)
-	}
-	defer os.Remove(keyFile)
-
-	output, err := system.RunCombinedOutput("gpg", "--batch", "--import", keyFile)
-	if err != nil {
-		logger.Verify("FAIL: import LIT key: %s", output)
-		return fmt.Errorf("import LIT key: %w: %s", err, output)
-	}
-
-	if !gpgHasFingerprint(litSigner.fingerprint) {
-		logger.Verify("FAIL: LIT key fingerprint mismatch (expected %s)", litSigner.fingerprint)
-		return fmt.Errorf("LIT key fingerprint mismatch")
-	}
-
-	logger.Verify("OK ViktorT-11: imported (fingerprint %s)", litSigner.fingerprint)
 	return nil
 }
 
@@ -248,43 +208,6 @@ func verifyLNDSig(version string) error {
 	return nil
 }
 
-func verifyLITSig(version string) error {
-	logger.Verify("--- LIT signature verification ---")
-	manifestFile := "/tmp/lit-manifest.txt"
-	sigFile := fmt.Sprintf("/tmp/manifest-ViktorT-11-v%s.sig", version)
-
-	if _, err := os.Stat(manifestFile); err != nil {
-		logger.Verify("FAIL: LIT manifest not found")
-		return fmt.Errorf("LIT manifest not found at %s", manifestFile)
-	}
-
-	sigURL := fmt.Sprintf(
-		"https://github.com/lightninglabs/lightning-terminal/releases/download/v%s/manifest-ViktorT-11-v%s.sig",
-		version, version)
-	if err := system.DownloadRequireTor(sigURL, sigFile); err != nil {
-		logger.Verify("FAIL: download LIT signature: %v", err)
-		return fmt.Errorf("download LIT signature: %w", err)
-	}
-	defer os.Remove(sigFile)
-
-	outputStr, _ := system.RunCombinedOutput("gpg", "--batch", "--verify",
-		"--status-fd", "1", sigFile, manifestFile)
-
-	if !strings.Contains(outputStr, "GOODSIG") {
-		logger.Verify("FAIL: LIT signature invalid: %s", outputStr)
-		return fmt.Errorf("LIT signature verification failed")
-	}
-
-	for _, line := range strings.Split(outputStr, "\n") {
-		if strings.Contains(line, "GOODSIG") {
-			logger.Verify("GOODSIG: %s", strings.TrimSpace(line))
-		}
-	}
-
-	logger.Verify("OK LIT: signature valid")
-	return nil
-}
-
 // ── Checksum verification ────────────────────────────────
 
 func verifyBitcoin() error {
@@ -318,25 +241,6 @@ func verifyLND() error {
 		return fmt.Errorf("checksum failed: %w: %s", err, output)
 	}
 	logger.Verify("OK LND checksum: %s", strings.TrimSpace(string(output)))
-	return nil
-}
-
-func verifyLIT() error {
-	logger.Verify("--- LIT checksum verification ---")
-	if _, err := os.Stat("/tmp/lit-manifest.txt"); err != nil {
-		logger.Verify("FAIL: LIT manifest not found")
-		return fmt.Errorf("LIT manifest not found")
-	}
-	// exec.Command used directly because sha256sum --check needs
-	// working directory set to /tmp where the tarball was downloaded.
-	cmd := exec.Command("sha256sum", "--ignore-missing", "--check", "lit-manifest.txt")
-	cmd.Dir = "/tmp"
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Verify("FAIL: LIT checksum: %s", string(output))
-		return fmt.Errorf("checksum failed: %w: %s", err, output)
-	}
-	logger.Verify("OK LIT checksum: %s", strings.TrimSpace(string(output)))
 	return nil
 }
 

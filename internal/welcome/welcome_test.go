@@ -27,7 +27,6 @@ func testModelWithLND() Model {
 func testModelFullStack() Model {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
-	cfg.LITInstalled = true
 	cfg.SyncthingInstalled = true
 	cfg.LndHubInstalled = true
 	return NewModel(cfg, "0.0.0-test")
@@ -345,21 +344,20 @@ func TestServiceCountWithLND(t *testing.T) {
 
 func TestServiceCountFullStack(t *testing.T) {
 	m := testModelFullStack()
-	if m.svcCount() != 6 {
-		t.Errorf("full stack service count: got %d, want 6", m.svcCount())
+	if m.svcCount() != 5 {
+		t.Errorf("full stack service count: got %d, want 5", m.svcCount())
 	}
 }
 
 func TestServiceCountFullStackHybrid(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
-	cfg.LITInstalled = true
 	cfg.SyncthingInstalled = true
 	cfg.LndHubInstalled = true
 	cfg.P2PMode = "hybrid"
 	m := NewModel(cfg, "0.0.0-test")
-	if m.svcCount() != 7 {
-		t.Errorf("full stack hybrid service count: got %d, want 7", m.svcCount())
+	if m.svcCount() != 6 {
+		t.Errorf("full stack hybrid service count: got %d, want 6", m.svcCount())
 	}
 }
 
@@ -367,7 +365,7 @@ func TestServiceCountFullStackHybrid(t *testing.T) {
 
 func TestServiceNames(t *testing.T) {
 	m := testModelFullStack()
-	expected := []string{"tor", "bitcoind", "lnd", "litd", "syncthing", "lndhub"}
+	expected := []string{"tor", "bitcoind", "lnd", "syncthing", "lndhub"}
 	for i, want := range expected {
 		got := m.svcName(i)
 		if got != want {
@@ -397,20 +395,6 @@ func TestAddonsSyncthingRequiresLND(t *testing.T) {
 	m = newM.(Model)
 	if m.shellAction == svSyncthingInstall {
 		t.Error("syncthing install should not trigger without LND")
-	}
-}
-
-func TestAddonsLITRequiresLND(t *testing.T) {
-	m := testModel()
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabAddons
-	m.addonFocus = 2
-
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newM.(Model)
-	if m.shellAction == svLITInstall {
-		t.Error("LIT install should not trigger without LND")
 	}
 }
 
@@ -503,7 +487,7 @@ func TestAddonsLndHubManageWhenInstalled(t *testing.T) {
 	}
 }
 
-func TestAddonNavThreeCards(t *testing.T) {
+func TestAddonNavTwoCards(t *testing.T) {
 	m := testModelFullStack()
 	m.width = 80
 	m.height = 24
@@ -518,20 +502,8 @@ func TestAddonNavThreeCards(t *testing.T) {
 
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 	m = newM.(Model)
-	if m.addonFocus != 2 {
-		t.Errorf("right from 1: got %d, want 2", m.addonFocus)
-	}
-
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
-	m = newM.(Model)
-	if m.addonFocus != 2 {
-		t.Errorf("right from 2: got %d, want 2 (clamped)", m.addonFocus)
-	}
-
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
-	m = newM.(Model)
 	if m.addonFocus != 1 {
-		t.Errorf("left from 2: got %d, want 1", m.addonFocus)
+		t.Errorf("right from 1: got %d, want 1 (clamped)", m.addonFocus)
 	}
 
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
@@ -739,11 +711,10 @@ func TestServiceNamesWithLND(t *testing.T) {
 func TestServiceNamesFullStack(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
-	cfg.LITInstalled = true
 	cfg.SyncthingInstalled = true
 	cfg.LndHubInstalled = true
 	names := serviceNames(cfg)
-	expected := []string{"tor", "bitcoind", "lnd", "litd", "syncthing", "lndhub"}
+	expected := []string{"tor", "bitcoind", "lnd", "syncthing", "lndhub"}
 	if len(names) != len(expected) {
 		t.Fatalf("full stack: got %d, want %d", len(names), len(expected))
 	}

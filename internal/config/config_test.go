@@ -30,9 +30,6 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.LNDInstalled {
 		t.Error("LNDInstalled: expected false")
 	}
-	if cfg.LITInstalled {
-		t.Error("LITInstalled: expected false")
-	}
 	if cfg.SyncthingInstalled {
 		t.Error("SyncthingInstalled: expected false")
 	}
@@ -105,8 +102,6 @@ func TestJSONRoundTrip(t *testing.T) {
 		AutoUnlock:         true,
 		LNDInstalled:       true,
 		WalletCreated:      true,
-		LITInstalled:       true,
-		LITPassword:        "abc123",
 		SyncthingInstalled: true,
 		SyncthingPassword:  "def456",
 		LndHubInstalled:    true,
@@ -131,10 +126,6 @@ func TestJSONRoundTrip(t *testing.T) {
 	if loaded.PruneSize != original.PruneSize {
 		t.Errorf("PruneSize: got %d, want %d",
 			loaded.PruneSize, original.PruneSize)
-	}
-	if loaded.LITPassword != original.LITPassword {
-		t.Errorf("LITPassword: got %q, want %q",
-			loaded.LITPassword, original.LITPassword)
 	}
 	if loaded.SyncthingPassword != original.SyncthingPassword {
 		t.Errorf("SyncthingPassword: got %q, want %q",
@@ -166,9 +157,6 @@ func TestOmitEmptyPasswords(t *testing.T) {
 	raw := make(map[string]interface{})
 	json.Unmarshal(data, &raw)
 
-	if _, exists := raw["lit_password"]; exists {
-		t.Error("empty LITPassword should be omitted from JSON")
-	}
 	if _, exists := raw["syncthing_password"]; exists {
 		t.Error("empty SyncthingPassword should be omitted from JSON")
 	}

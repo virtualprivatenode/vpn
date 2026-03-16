@@ -141,11 +141,6 @@ func TestSignerFingerprints(t *testing.T) {
 	if lndSigner.keyURL == "" {
 		t.Error("LND signer has empty keyURL")
 	}
-
-	if len(litSigner.fingerprint) != 40 {
-		t.Errorf("LIT signer fingerprint length %d, want 40",
-			len(litSigner.fingerprint))
-	}
 }
 
 func TestReleaseKeyFingerprintFormat(t *testing.T) {

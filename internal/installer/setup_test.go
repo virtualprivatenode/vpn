@@ -18,9 +18,6 @@ func TestVersionConstants(t *testing.T) {
 	if lndVersion == "" {
 		t.Error("lndVersion is empty")
 	}
-	if litVersion == "" {
-		t.Error("litVersion is empty")
-	}
 	if systemUser == "" {
 		t.Error("systemUser is empty")
 	}
@@ -39,16 +36,6 @@ func TestSetAndGetVersion(t *testing.T) {
 	SetVersion("1.2.3")
 	if GetVersion() != "1.2.3" {
 		t.Errorf("GetVersion: got %q, want %q", GetVersion(), "1.2.3")
-	}
-}
-
-func TestLitVersionStr(t *testing.T) {
-	v := LitVersionStr()
-	if v == "" {
-		t.Error("LitVersionStr returned empty")
-	}
-	if v != litVersion {
-		t.Errorf("got %q, want %q", v, litVersion)
 	}
 }
 
