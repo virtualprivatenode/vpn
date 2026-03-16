@@ -14,15 +14,14 @@ import (
 )
 
 func (m Model) viewAddons(bw int) string {
-	thirdW := (bw - 4) / 3
+	halfW := (bw - 2) / 2
 	cardH := theme.BoxHeight
 
-	syncCard := m.addonSyncthingCard(thirdW, cardH)
-	hubCard := m.addonLndHubCard(thirdW, cardH)
-	litCard := m.addonLITCard(thirdW, cardH)
+	syncCard := m.addonSyncthingCard(halfW, cardH)
+	hubCard := m.addonLndHubCard(halfW, cardH)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		syncCard, "  ", hubCard, "  ", litCard)
+		syncCard, "  ", hubCard)
 }
 
 func (m Model) addonSyncthingCard(w, h int) string {
@@ -60,47 +59,6 @@ func (m Model) addonSyncthingCard(w, h int) string {
 	if m.addonFocus == 0 {
 		if (m.cfg.HasLND() && m.cfg.WalletExists()) ||
 			m.cfg.SyncthingInstalled {
-			border = theme.SelectedBorder
-		} else {
-			border = theme.GrayedBorder
-		}
-	}
-	return border.Width(w).Padding(1, 2).
-		Render(padLines(lines, h))
-}
-
-func (m Model) addonLITCard(w, h int) string {
-	var lines []string
-	lines = append(lines, theme.Lightning.Render("⚡️ LIT UI"))
-	lines = append(lines, "")
-	lines = append(lines, theme.Dim.Render("Lightning Terminal —"))
-	lines = append(lines, theme.Dim.Render("browser channel"))
-	lines = append(lines, theme.Dim.Render("management."))
-	lines = append(lines, "")
-
-	if m.cfg.LITInstalled {
-		lines = append(lines, theme.GreenDot.Render("●")+" "+
-			theme.Good.Render("Installed"))
-		lines = append(lines, "")
-		lines = append(lines, theme.Label.Render("Version:"))
-		lines = append(lines,
-			theme.Value.Render("v"+installer.LitVersionStr()))
-		lines = append(lines, "")
-		lines = append(lines, theme.Action.Render("Select for details ▸"))
-	} else if !m.cfg.HasLND() || !m.cfg.WalletExists() {
-		lines = append(lines, theme.Grayed.Render("Requires: "))
-		lines = append(lines, theme.Grayed.Render("LND + Wallet"))
-	} else {
-		lines = append(lines, theme.RedDot.Render("●")+" "+
-			theme.Dim.Render("Not installed"))
-		lines = append(lines, "")
-		lines = append(lines, theme.Action.Render("Select to install ▸"))
-	}
-
-	border := theme.NormalBorder
-	if m.addonFocus == 2 {
-		if (m.cfg.HasLND() && m.cfg.WalletExists()) ||
-			m.cfg.LITInstalled {
 			border = theme.SelectedBorder
 		} else {
 			border = theme.GrayedBorder
@@ -406,65 +364,6 @@ func (m Model) viewSyncthingWebUI() string {
 
 func (m Model) syncthingPairedCount() int {
 	return len(m.cfg.SyncthingDevices)
-}
-
-func (m Model) viewLITDetail() string {
-	bw := min(m.width-4, theme.ContentWidth)
-	var lines []string
-	lines = append(lines, theme.Lightning.Render(
-		"⚡️ Lightning Terminal — Web UI over Tor"))
-	lines = append(lines, "")
-
-	litOnion := readOnion(paths.TorLNDLITHostname)
-	if litOnion == "" {
-		lines = append(lines,
-			theme.Warn.Render("Tor address not available yet."))
-	} else {
-		lines = append(lines, "  "+theme.Label.Render("URL:"))
-		if m.showSecrets {
-			fullURL := "https://" + litOnion + ":8443"
-			lines = append(lines, "  "+theme.Mono.Render(fullURL))
-		}
-		lines = append(lines, "  "+
-			theme.Action.Render("[u] full URL for copy/paste"))
-		lines = append(lines, "")
-		if m.cfg.LITPassword != "" {
-			if m.showSecrets {
-				lines = append(lines, "  "+theme.Label.Render("Password: ")+
-					theme.Mono.Render(m.cfg.LITPassword))
-				lines = append(lines, "  "+
-					theme.Action.Render("[s] hide password"))
-			} else {
-				lines = append(lines, "  "+theme.Label.Render("Password: ")+
-					theme.Dim.Render("••••••••"))
-				lines = append(lines, "  "+
-					theme.Action.Render("[s] show password"))
-			}
-		}
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, theme.Dim.Render("  1. Open Tor Browser"))
-	lines = append(lines, theme.Dim.Render("  2. Press [u] above to get the URL"))
-	lines = append(lines, theme.Dim.Render(
-		"  3. Ignore security warning"))
-	lines = append(lines, theme.Dim.Render(
-		"     Advanced → Accept Risk & Continue"))
-	lines = append(lines, theme.Dim.Render(
-		"     Connection is encrypted (Tor + TLS)."))
-	lines = append(lines, theme.Dim.Render(
-		"  4. Login with password above"))
-
-	box := theme.Box.Width(bw).Padding(1, 2).
-		Render(strings.Join(lines, "\n"))
-	title := theme.Title.Width(bw).Align(lipgloss.Center).
-		Render(" ⚡️ Lightning Terminal Details ")
-	footer := theme.Footer.Render(
-		"  u full URL • s toggle password • backspace back • q quit  ")
-	full := lipgloss.JoinVertical(lipgloss.Center,
-		"", title, "", box, "", footer)
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, full)
 }
 
 // ── LndHub management screens ────────────────────────────

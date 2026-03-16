@@ -33,7 +33,6 @@ const (
 	svSyncthingPairInput
 	svSyncthingDeviceDetail
 	svSyncthingWebUI
-	svLITDetail
 	svLndHubManage
 	svLndHubCreateName
 	svLndHubCreateAccount
@@ -44,7 +43,6 @@ const (
 	svFullURL
 	svWalletCreate
 	svLNDInstall
-	svLITInstall
 	svSyncthingInstall
 	svLndHubInstall
 	svSelfUpdate
@@ -161,9 +159,6 @@ func serviceNames(cfg *config.AppConfig) []string {
 	if cfg.HasLND() {
 		names = append(names, "lnd")
 	}
-	if cfg.LITInstalled {
-		names = append(names, "litd")
-	}
 	if cfg.SyncthingInstalled {
 		names = append(names, "syncthing")
 	}
@@ -211,12 +206,6 @@ func Show(cfg *config.AppConfig, version string) {
 				logger.TUI(
 					"Warning: failed to add lncli wrapper: %v",
 					err)
-			}
-			continue
-		case svLITInstall:
-			installer.RunLITInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
 			}
 			continue
 		case svSyncthingInstall:

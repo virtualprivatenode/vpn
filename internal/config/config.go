@@ -18,7 +18,7 @@ const (
 
 // AppConfig holds the application state persisted to disk.
 //
-// Security note: passwords and tokens (LITPassword, SyncthingPassword,
+// Security note: passwords and tokens (SyncthingPassword,
 // LndHubAdminToken, LndHubDBPassword) are stored in plaintext. This is a
 // deliberate tradeoff for a single-user dedicated node. The config file
 // has 0600 permissions, and the machine runs a single non-root user.
@@ -35,8 +35,6 @@ type AppConfig struct {
 	AutoUnlock         bool              `json:"auto_unlock"`
 	LNDInstalled       bool              `json:"lnd_installed"`
 	WalletCreated      bool              `json:"wallet_created"`
-	LITInstalled       bool              `json:"lit_installed"`
-	LITPassword        string            `json:"lit_password,omitempty"`
 	SyncthingInstalled bool              `json:"syncthing_installed"`
 	SyncthingPassword  string            `json:"syncthing_password,omitempty"`
 	SyncthingDevices   []SyncthingDevice `json:"syncthing_devices,omitempty"`

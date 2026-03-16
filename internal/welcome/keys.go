@@ -246,8 +246,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.syncPairError = ""
 				m.syncPairSuccess = false
 				m.subview = svSyncthingDetail
-			case svLITDetail:
-				m.subview = svNone
 			case svLndHubManage:
 				m.subview = svNone
 			case svLndHubCreateName:
@@ -266,8 +264,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "s":
-			if m.subview == svSyncthingWebUI ||
-				m.subview == svLITDetail {
+			if m.subview == svSyncthingWebUI {
 				m.showSecrets = !m.showSecrets
 				return m, nil
 			}
@@ -359,15 +356,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if syncOnion != "" {
 					m.urlTarget = "http://" + syncOnion + ":8384"
 					m.urlReturnTo = svSyncthingWebUI
-					m.subview = svFullURL
-				}
-				return m, nil
-			}
-			if m.subview == svLITDetail {
-				litOnion := readOnion(paths.TorLNDLITHostname)
-				if litOnion != "" {
-					m.urlTarget = "https://" + litOnion + ":8443"
-					m.urlReturnTo = svLITDetail
 					m.subview = svFullURL
 				}
 				return m, nil
@@ -675,7 +663,7 @@ func (m Model) navRight() Model {
 	case tabPairing:
 		// Single card
 	case tabAddons:
-		if m.addonFocus < 2 {
+		if m.addonFocus < 1 {
 			m.addonFocus++
 		}
 	case tabSettings:
@@ -746,19 +734,6 @@ func (m Model) handleAddonEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.shellAction = svLndHubInstall
-		return m, tea.Quit
-	case 2: // LIT
-		if m.cfg.LITInstalled {
-			m.subview = svLITDetail
-			return m, nil
-		}
-		if !m.cfg.HasLND() || !m.cfg.WalletExists() {
-			return m, nil
-		}
-		if !system.IsServiceActive("lnd") {
-			return m, nil
-		}
-		m.shellAction = svLITInstall
 		return m, tea.Quit
 	}
 	return m, nil

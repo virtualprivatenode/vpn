@@ -30,7 +30,6 @@ func TestTorConfigBitcoinOnly(t *testing.T) {
 		"bitcoin-rpc",
 		"lnd-rest",
 		"lnd-grpc",
-		"lnd-lit",
 		"syncthing",
 	}
 	for _, f := range forbidden {
@@ -60,20 +59,6 @@ func TestTorConfigWithLND(t *testing.T) {
 		if !strings.Contains(content, req) {
 			t.Errorf("missing %q in LND torrc", req)
 		}
-	}
-}
-
-func TestTorConfigWithLIT(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	cfg.LITInstalled = true
-	content := BuildTorConfig(cfg)
-
-	if !strings.Contains(content, "lnd-lit") {
-		t.Error("missing lnd-lit hidden service")
-	}
-	if !strings.Contains(content, "HiddenServicePort 8443") {
-		t.Error("missing LIT port 8443")
 	}
 }
 
@@ -108,21 +93,10 @@ func TestTorConfigNoSyncthingWithoutInstall(t *testing.T) {
 	}
 }
 
-func TestTorConfigNoLITWithoutInstall(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	content := BuildTorConfig(cfg)
-
-	if strings.Contains(content, "lnd-lit") {
-		t.Error("should not have lnd-lit without LIT install")
-	}
-}
-
 func TestTorConfigFullStack(t *testing.T) {
 	cfg := &config.AppConfig{
 		Network:            "mainnet",
 		LNDInstalled:       true,
-		LITInstalled:       true,
 		SyncthingInstalled: true,
 	}
 	content := BuildTorConfig(cfg)
@@ -133,7 +107,6 @@ func TestTorConfigFullStack(t *testing.T) {
 		"bitcoin-p2p",
 		"lnd-grpc",
 		"lnd-rest",
-		"lnd-lit",
 		"syncthing",
 		"HiddenServicePort 8384",
 	}
@@ -220,7 +193,6 @@ func TestTorConfigFullStackWithLndHub(t *testing.T) {
 	cfg := &config.AppConfig{
 		Network:            "mainnet",
 		LNDInstalled:       true,
-		LITInstalled:       true,
 		SyncthingInstalled: true,
 		LndHubInstalled:    true,
 	}
@@ -232,7 +204,6 @@ func TestTorConfigFullStackWithLndHub(t *testing.T) {
 		"bitcoin-p2p",
 		"lnd-grpc",
 		"lnd-rest",
-		"lnd-lit",
 		"syncthing",
 		"HiddenServicePort 8384",
 		"lndhub",
