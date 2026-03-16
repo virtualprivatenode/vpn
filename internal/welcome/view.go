@@ -28,6 +28,8 @@ func (m Model) View() string {
 		return m.viewSyncthingDeviceDetail()
 	case svSyncthingWebUI:
 		return m.viewSyncthingWebUI()
+	case svSyncthingDeviceQR:
+		return m.viewSyncthingDeviceQR()
 	case svLITDetail:
 		return m.viewLITDetail()
 	case svLndHubManage:
