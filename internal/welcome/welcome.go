@@ -39,6 +39,7 @@ const (
 	svLndHubCreateAccount
 	svLndHubAccountDetail
 	svLndHubDeactivateConfirm
+	svSyncthingDeviceQR
 	svQR
 	svFullURL
 	svWalletCreate

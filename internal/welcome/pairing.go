@@ -3,13 +3,14 @@
 package welcome
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	qrcode "github.com/skip2/go-qrcode"
+	qrterminal "github.com/mdp/qrterminal/v3"
 
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/theme"
@@ -165,43 +166,30 @@ func (m Model) viewQR() string {
 	qr := renderQRCode(uri)
 	var lines []string
 	lines = append(lines, theme.Header.Render(label))
-	lines = append(lines, theme.Dim.Render("Zoom out: Cmd+Minus / Ctrl+Minus"))
+	lines = append(lines, "")
 	if qr != "" {
 		lines = append(lines, qr)
 	}
+	lines = append(lines, "")
 	lines = append(lines, theme.Footer.Render("backspace back • q quit"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 		lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func renderQRCode(data string) string {
-	qr, err := qrcode.New(data, qrcode.Low)
-	if err != nil {
-		return ""
+	var buf bytes.Buffer
+	config := qrterminal.Config{
+		Level:      qrterminal.L,
+		Writer:     &buf,
+		HalfBlocks: true,
+		BlackChar:  qrterminal.BLACK_BLACK,
+		WhiteChar:  qrterminal.WHITE_WHITE,
+		QuietZone:  2,
 	}
-	bm := qr.Bitmap()
-	rows, cols := len(bm), len(bm[0])
-	var b strings.Builder
-	for y := 0; y < rows; y += 2 {
-		for x := 0; x < cols; x++ {
-			top := bm[y][x]
-			bot := y+1 < rows && bm[y+1][x]
-			switch {
-			case top && bot:
-				b.WriteString("█")
-			case top:
-				b.WriteString("▀")
-			case bot:
-				b.WriteString("▄")
-			default:
-				b.WriteString(" ")
-			}
-		}
-		if y+2 < rows {
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
+	qrterminal.GenerateWithConfig(data, config)
+	result := buf.String()
+	// Trim trailing newlines from qrterminal output
+	return strings.TrimRight(result, "\n")
 }
 
 func hexToBase64URL(hexStr string) string {

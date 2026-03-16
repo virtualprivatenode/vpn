@@ -239,6 +239,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.subview = svSyncthingDetail
 			case svSyncthingWebUI:
 				m.subview = svSyncthingDetail
+			case svSyncthingDeviceQR:
+				m.subview = svSyncthingDetail
 			case svSyncthingPairInput:
 				m.syncDeviceInput = ""
 				m.syncPairError = ""
@@ -275,6 +277,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.syncPairError = ""
 				m.syncPairSuccess = false
 				m.subview = svSyncthingPairInput
+				return m, nil
+			}
+		case "d":
+			if m.subview == svSyncthingDetail {
+				m.subview = svSyncthingDeviceQR
 				return m, nil
 			}
 		case "m":

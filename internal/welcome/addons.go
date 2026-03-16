@@ -219,6 +219,19 @@ func (m Model) viewSyncthingDetail() string {
 	lines = append(lines, "  "+theme.Dim.Render(
 		"5. Press [a] below to pair"))
 
+	// Show VPS Device ID with QR for easy pairing
+	vpsDeviceID := installer.GetSyncthingDeviceID()
+	if vpsDeviceID != "" {
+		lines = append(lines, "")
+		lines = append(lines, theme.Header.Render("  This Node's Device ID:"))
+		lines = append(lines, "  "+theme.Mono.Render(vpsDeviceID))
+		lines = append(lines, "")
+		lines = append(lines, "  "+theme.Dim.Render(
+			"Scan QR with phone → paste into local Syncthing"))
+		lines = append(lines, "  "+
+			theme.Action.Render("[d] show Device ID QR"))
+	}
+
 	lines = append(lines, "")
 	lines = append(lines, "  "+
 		theme.Action.Render("[a] pair device"))
@@ -230,7 +243,7 @@ func (m Model) viewSyncthingDetail() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" 🔄 Syncthing Details ")
 	footer := theme.Footer.Render(
-		"  ↑↓ select • a pair • enter details • u web UI • backspace back • q quit  ")
+		"  ↑↓ select • a pair • d QR • enter details • u web UI • backspace back • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -704,4 +717,35 @@ func (m Model) viewLndHubDeactivateConfirm() string {
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, full)
+}
+
+func (m Model) viewSyncthingDeviceQR() string {
+	vpsDeviceID := installer.GetSyncthingDeviceID()
+
+	var lines []string
+	lines = append(lines, theme.Header.Render(
+		"🔄 Node Device ID — Scan to Pair"))
+	lines = append(lines, "")
+
+	if vpsDeviceID == "" {
+		lines = append(lines, theme.Warn.Render(
+			"Device ID not available."))
+	} else {
+		qr := renderQRCode(vpsDeviceID)
+		if qr != "" {
+			lines = append(lines, qr)
+		}
+		lines = append(lines, "")
+		lines = append(lines, theme.Dim.Render(
+			"Scan → copy Device ID → paste into local Syncthing"))
+		lines = append(lines, theme.Dim.Render(
+			"Add Remote Device → Device ID field"))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, theme.Footer.Render(
+		"backspace back • q quit"))
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
