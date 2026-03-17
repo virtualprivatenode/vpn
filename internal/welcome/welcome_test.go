@@ -5,6 +5,7 @@ package welcome
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -73,7 +74,7 @@ func TestTabForward(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	expected := []wTab{tabPairing, tabAddons, tabSettings, tabDashboard}
+	expected := []wTab{tabChannels, tabPairing, tabAddons, tabSettings, tabDashboard}
 	for _, want := range expected {
 		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		m = newM.(Model)
@@ -105,9 +106,10 @@ func TestNumberKeySwitchesTab(t *testing.T) {
 		want wTab
 	}{
 		{"1", tabDashboard},
-		{"2", tabPairing},
-		{"3", tabAddons},
-		{"4", tabSettings},
+		{"2", tabChannels},
+		{"3", tabPairing},
+		{"4", tabAddons},
+		{"5", tabSettings},
 	}
 	for _, tt := range tests {
 		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)})
@@ -745,5 +747,170 @@ func TestServiceNamesNoProxyTorMode(t *testing.T) {
 		if n == "lndhub-proxy" {
 			t.Error("tor mode should not include lndhub-proxy")
 		}
+	}
+}
+
+// ── Channels Tab ─────────────────────────────────────────
+
+func TestChannelsTabRequiresLND(t *testing.T) {
+	m := testModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabChannels
+
+	view := m.View()
+	if !strings.Contains(view, "Install LND") {
+		t.Error("channels tab without LND should show install message")
+	}
+}
+
+func TestChannelsTabWithLNDNoWallet(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabChannels
+
+	view := m.View()
+	if !strings.Contains(view, "Create LND wallet") {
+		t.Error("channels tab without wallet should show create message")
+	}
+}
+
+func TestChannelsTabNoChannels(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabChannels
+	m.status = &statusMsg{
+		lndResponding: true,
+		channels:      []channelInfo{},
+		services:      map[string]bool{},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "No channels yet") {
+		t.Error("channels tab with no channels should show empty message")
+	}
+}
+
+func TestChannelsTabWithChannels(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabChannels
+	m.status = &statusMsg{
+		lndResponding: true,
+		channels: []channelInfo{
+			{
+				ChanID:        123,
+				PeerAlias:     "ACINQ",
+				RemotePubkey:  "03abc123",
+				Capacity:      250000,
+				LocalBalance:  150000,
+				RemoteBalance: 100000,
+				Active:        true,
+			},
+		},
+		services: map[string]bool{},
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "ACINQ") {
+		t.Error("channels tab should show peer alias")
+	}
+	if !strings.Contains(view, "1 active") {
+		t.Error("channels tab should show active count")
+	}
+}
+
+func TestChannelDetailSubview(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabChannels
+	m.chanCursor = 0
+	m.status = &statusMsg{
+		lndResponding: true,
+		channels: []channelInfo{
+			{
+				ChanID:        123,
+				PeerAlias:     "ACINQ",
+				RemotePubkey:  "03abc123def456",
+				Capacity:      250000,
+				LocalBalance:  150000,
+				RemoteBalance: 100000,
+				Active:        true,
+				Initiator:     true,
+			},
+		},
+		services: map[string]bool{},
+	}
+
+	// Enter opens detail
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svChannelDetail {
+		t.Errorf("enter should open channel detail, got subview %d", m.subview)
+	}
+
+	// Backspace returns
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("backspace should return to channels, got subview %d", m.subview)
+	}
+}
+
+func TestFormatSats(t *testing.T) {
+	tests := []struct {
+		input int64
+		want  string
+	}{
+		{0, "0"},
+		{100, "100"},
+		{1000, "1,000"},
+		{1000000, "1,000,000"},
+		{250000, "250,000"},
+		{21000000000000, "21,000,000,000,000"},
+	}
+	for _, tt := range tests {
+		got := formatSats(tt.input)
+		if got != tt.want {
+			t.Errorf("formatSats(%d): got %q, want %q",
+				tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestRenderBalanceBar(t *testing.T) {
+	// 50/50 split
+	bar := renderBalanceBar(500000, 500000, 1000000, 20)
+	if len(bar) == 0 {
+		t.Error("balance bar should not be empty")
+	}
+
+	// Zero capacity
+	bar = renderBalanceBar(0, 0, 0, 20)
+	if len(bar) == 0 {
+		t.Error("zero capacity bar should not be empty")
+	}
+}
+
+func TestChannelVisibleCount(t *testing.T) {
+	m := testModel()
+	count := m.channelVisibleCount()
+	if count < 3 {
+		t.Errorf("visible count too small: %d", count)
 	}
 }

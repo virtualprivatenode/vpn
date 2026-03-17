@@ -19,6 +19,7 @@ type wTab int
 
 const (
 	tabDashboard wTab = iota
+	tabChannels
 	tabPairing
 	tabAddons
 	tabSettings
@@ -40,6 +41,7 @@ const (
 	svLndHubAccountDetail
 	svLndHubDeactivateConfirm
 	svSyncthingDeviceQR
+	svChannelDetail
 	svQR
 	svFullURL
 	svWalletCreate
@@ -96,6 +98,22 @@ type statusMsg struct {
 	lndSyncedGraph               bool
 	lndResponding                bool
 	publicIP                     string
+	channels                     []channelInfo
+	pendingOpen                  int
+	pendingClose                 int
+	pendingForceClose            int
+}
+
+type channelInfo struct {
+	ChanID        uint64
+	PeerAlias     string
+	RemotePubkey  string
+	Capacity      int64
+	LocalBalance  int64
+	RemoteBalance int64
+	Active        bool
+	Private       bool
+	Initiator     bool
 }
 
 // ── Model ────────────────────────────────────────────────
@@ -135,6 +153,8 @@ type Model struct {
 	syncPairSuccess      bool
 	syncCursor           int
 	showSecrets          bool
+	chanCursor           int
+	chanScrollOffset     int
 }
 
 func NewModel(cfg *config.AppConfig, version string) Model {

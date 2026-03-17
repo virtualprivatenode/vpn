@@ -33,9 +33,7 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 		}
 
 		// Bitcoin info (slow RPC, own goroutine)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			info := bitcoin.GetBlockchainInfo()
 			mu.Lock()
 			s.btcResponding = info.Responding
@@ -44,12 +42,10 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			s.btcProgress = info.Progress
 			s.btcSynced = info.Synced
 			mu.Unlock()
-		}()
+		})
 
 		// System info (disk, memory — moderate speed)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			disk := system.Disk("/")
 			mem := system.Memory()
 			btcSize := system.DirSize(paths.BitcoinDataDir)
@@ -67,13 +63,11 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			s.btcSize = btcSize
 			s.lndSize = lndSize
 			mu.Unlock()
-		}()
+		})
 
 		// LND info via gRPC (fast if connected)
 		if cfg.HasLND() && lndClient != nil && lndClient.IsConnected() {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				lndInfo, err := lndClient.GetInfo()
 				mu.Lock()
 				if err == nil {
@@ -88,7 +82,7 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 					}
 				}
 				mu.Unlock()
-			}()
+			})
 
 			// Wallet balance via gRPC
 			if cfg.WalletExists() {
@@ -103,6 +97,42 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 					mu.Unlock()
 				}()
 			}
+
+			// Channel list via gRPC
+			wg.Go(func() {
+				channels, err := lndClient.ListChannels()
+				mu.Lock()
+				if err == nil {
+					infos := make([]channelInfo, len(channels))
+					for i, ch := range channels {
+						infos[i] = channelInfo{
+							ChanID:        ch.ChanID,
+							PeerAlias:     ch.PeerAlias,
+							RemotePubkey:  ch.RemotePubkey,
+							Capacity:      ch.Capacity,
+							LocalBalance:  ch.LocalBalance,
+							RemoteBalance: ch.RemoteBalance,
+							Active:        ch.Active,
+							Private:       ch.Private,
+							Initiator:     ch.Initiator,
+						}
+					}
+					s.channels = infos
+				}
+				mu.Unlock()
+			})
+
+			// Pending channels via gRPC
+			wg.Go(func() {
+				pending, err := lndClient.GetPendingChannels()
+				mu.Lock()
+				if err == nil {
+					s.pendingOpen = pending.PendingOpen
+					s.pendingClose = pending.PendingClose
+					s.pendingForceClose = pending.ForceClose
+				}
+				mu.Unlock()
+			})
 		}
 
 		wg.Wait()
