@@ -30,6 +30,8 @@ func (m Model) View() string {
 		return m.viewSyncthingWebUI()
 	case svSyncthingDeviceQR:
 		return m.viewSyncthingDeviceQR()
+	case svChannelDetail:
+		return m.viewChannelDetail()
 	case svLndHubManage:
 		return m.viewLndHubManage()
 	case svLndHubCreateName:
@@ -51,6 +53,8 @@ func (m Model) View() string {
 	switch m.activeTab {
 	case tabDashboard:
 		content = m.viewDashboard(bw)
+	case tabChannels:
+		content = m.viewChannels(bw)
 	case tabPairing:
 		content = m.viewPairing(bw)
 	case tabAddons:
@@ -78,6 +82,7 @@ func (m Model) viewTabs(tw int) string {
 		t wTab
 	}{
 		{"Dashboard", tabDashboard},
+		{"Channels", tabChannels},
 		{"Pairing", tabPairing},
 		{"Add-ons", tabAddons},
 		{"Settings", tabSettings},
@@ -117,6 +122,9 @@ func (m Model) viewFooter() string {
 	case tabDashboard:
 		return theme.Footer.Render(
 			"  ↑↓←→ navigate • enter select • tab switch • q quit  ")
+	case tabChannels:
+		return theme.Footer.Render(
+			"  ↑↓ select • enter details • tab switch • q quit  ")
 	case tabPairing:
 		return theme.Footer.Render(
 			"  ←→ select • enter open • tab switch • q quit  ")

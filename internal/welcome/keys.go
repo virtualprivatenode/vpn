@@ -241,6 +241,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.subview = svSyncthingDetail
 			case svSyncthingDeviceQR:
 				m.subview = svSyncthingDetail
+			case svChannelDetail:
+				m.subview = svNone
 			case svSyncthingPairInput:
 				m.syncDeviceInput = ""
 				m.syncPairError = ""
@@ -444,13 +446,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
-			m.activeTab = (m.activeTab + 1) % 4
+			m.activeTab = (m.activeTab + 1) % 5
 			m.updateConfirm = false
 			return m, nil
 		case "shift+tab":
-			m.activeTab = (m.activeTab + 3) % 4
+			m.activeTab = (m.activeTab + 4) % 5
 			m.updateConfirm = false
 			return m, nil
+		case "1":
+			m.activeTab = tabDashboard
+			m.updateConfirm = false
+		case "2":
+			m.activeTab = tabChannels
+			m.updateConfirm = false
+		case "3":
+			m.activeTab = tabPairing
+			m.updateConfirm = false
+		case "4":
+			m.activeTab = tabAddons
+			m.updateConfirm = false
+		case "5":
+			// Already on settings
 		default:
 			m = handleSettingsKey(m, key)
 			if m.shellAction != svNone {
@@ -465,22 +481,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "tab":
-		m.activeTab = (m.activeTab + 1) % 4
+		m.activeTab = (m.activeTab + 1) % 5
 		m.cardActive = false
 		m.svcConfirm = ""
 		return m, nil
 	case "shift+tab":
-		m.activeTab = (m.activeTab + 3) % 4
+		m.activeTab = (m.activeTab + 4) % 5
 		m.cardActive = false
 		m.svcConfirm = ""
 		return m, nil
 	case "1":
 		m.activeTab = tabDashboard
 	case "2":
-		m.activeTab = tabPairing
+		m.activeTab = tabChannels
 	case "3":
-		m.activeTab = tabAddons
+		m.activeTab = tabPairing
 	case "4":
+		m.activeTab = tabAddons
+	case "5":
 		m.activeTab = tabSettings
 	case "up", "k":
 		m = m.navUp()
@@ -506,13 +524,13 @@ func (m Model) handleCardKey(key string) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "tab":
-		m.activeTab = (m.activeTab + 1) % 4
+		m.activeTab = (m.activeTab + 1) % 5
 		m.cardActive = false
 		m.svcConfirm = ""
 		m.sysConfirm = ""
 		return m, nil
 	case "shift+tab":
-		m.activeTab = (m.activeTab + 3) % 4
+		m.activeTab = (m.activeTab + 4) % 5
 		m.cardActive = false
 		m.svcConfirm = ""
 		m.sysConfirm = ""
@@ -613,6 +631,13 @@ func (m Model) navUp() Model {
 		case cardLightning:
 			m.dashCard = cardSystem
 		}
+	case tabChannels:
+		if m.chanCursor > 0 {
+			m.chanCursor--
+			if m.chanCursor < m.chanScrollOffset {
+				m.chanScrollOffset = m.chanCursor
+			}
+		}
 	}
 	return m
 }
@@ -625,6 +650,14 @@ func (m Model) navDown() Model {
 			m.dashCard = cardBitcoin
 		case cardSystem:
 			m.dashCard = cardLightning
+		}
+	case tabChannels:
+		if m.status != nil && m.chanCursor < len(m.status.channels)-1 {
+			m.chanCursor++
+			visibleCount := m.channelVisibleCount()
+			if m.chanCursor >= m.chanScrollOffset+visibleCount {
+				m.chanScrollOffset = m.chanCursor - visibleCount + 1
+			}
 		}
 	}
 	return m
@@ -693,6 +726,12 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.subview = svLightning
+		}
+	case tabChannels:
+		if m.status != nil && len(m.status.channels) > 0 &&
+			m.chanCursor < len(m.status.channels) {
+			m.subview = svChannelDetail
+			return m, nil
 		}
 	case tabPairing:
 		if m.cfg.HasLND() && m.cfg.WalletExists() {
