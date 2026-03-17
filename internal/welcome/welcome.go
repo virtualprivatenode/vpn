@@ -9,6 +9,7 @@ import (
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/installer"
+	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/logger"
 )
 
@@ -102,6 +103,7 @@ type statusMsg struct {
 type Model struct {
 	cfg                  *config.AppConfig
 	cfgStore             *config.Store
+	lndClient            *lndrpc.Client
 	version              string
 	activeTab            wTab
 	subview              wSubview
@@ -136,8 +138,12 @@ type Model struct {
 }
 
 func NewModel(cfg *config.AppConfig, version string) Model {
+	var client *lndrpc.Client
+	if cfg.HasLND() && cfg.WalletExists() {
+		client = lndrpc.New(cfg.Network)
+	}
 	return Model{
-		cfg: cfg, version: version,
+		cfg: cfg, lndClient: client, version: version,
 		activeTab: tabDashboard, subview: svNone,
 		dashCard:      cardServices,
 		fetchInFlight: true,
@@ -147,7 +153,12 @@ func NewModel(cfg *config.AppConfig, version string) Model {
 func NewTestModel(
 	cfg *config.AppConfig, version string, store *config.Store,
 ) Model {
-	m := NewModel(cfg, version)
+	m := Model{
+		cfg: cfg, version: version,
+		activeTab: tabDashboard, subview: svNone,
+		dashCard:      cardServices,
+		fetchInFlight: true,
+	}
 	m.cfgStore = store
 	return m
 }
@@ -231,9 +242,9 @@ func Show(cfg *config.AppConfig, version string) {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		fetchStatus(m.cfg),
+		fetchStatus(m.cfg, m.lndClient),
 		fetchLatestVersion(),
-		tickEvery(5*time.Second),
+		tickEvery(30*time.Second),
 	)
 }
 

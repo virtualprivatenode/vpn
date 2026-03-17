@@ -25,7 +25,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case svcActionDoneMsg:
-		return m, fetchStatus(m.cfg)
+		return m, fetchStatus(m.cfg, m.lndClient)
 	case statusMsg:
 		m.fetchInFlight = false
 		m.status = &msg
@@ -98,12 +98,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		if m.fetchInFlight {
-			return m, tickEvery(5 * time.Second)
+			return m, tickEvery(30 * time.Second)
 		}
 		m.fetchInFlight = true
 		return m, tea.Batch(
-			fetchStatus(m.cfg),
-			tickEvery(5*time.Second),
+			fetchStatus(m.cfg, m.lndClient),
+			tickEvery(30*time.Second),
 		)
 	}
 	return m, nil

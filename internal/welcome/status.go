@@ -7,14 +7,14 @@ import (
 
 	"github.com/ripsline/virtual-private-node/internal/bitcoin"
 	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/lnd"
+	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/system"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func fetchStatus(cfg *config.AppConfig) tea.Cmd {
+func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 	return func() tea.Msg {
 		s := statusMsg{services: make(map[string]bool)}
 		var wg sync.WaitGroup
@@ -69,12 +69,12 @@ func fetchStatus(cfg *config.AppConfig) tea.Cmd {
 			mu.Unlock()
 		}()
 
-		// LND info (slow RPC, own goroutine)
-		if cfg.HasLND() {
+		// LND info via gRPC (fast if connected)
+		if cfg.HasLND() && lndClient != nil && lndClient.IsConnected() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				lndInfo, err := lnd.GetInfo(cfg.Network)
+				lndInfo, err := lndClient.GetInfo()
 				mu.Lock()
 				if err == nil {
 					s.lndResponding = true
@@ -83,8 +83,6 @@ func fetchStatus(cfg *config.AppConfig) tea.Cmd {
 					s.lndSyncedChain = lndInfo.SyncedChain
 					s.lndSyncedGraph = lndInfo.SyncedGraph
 
-					// Signal wallet detection — do NOT mutate cfg here.
-					// The actual config change happens in Update.
 					if !cfg.WalletExists() && lndInfo.Pubkey != "" {
 						s.walletDetected = true
 					}
@@ -92,12 +90,12 @@ func fetchStatus(cfg *config.AppConfig) tea.Cmd {
 				mu.Unlock()
 			}()
 
-			// Wallet balance (separate RPC call)
+			// Wallet balance via gRPC
 			if cfg.WalletExists() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					bal, err := lnd.GetBalance(cfg.Network)
+					bal, err := lndClient.GetWalletBalance()
 					mu.Lock()
 					if err == nil && bal.TotalBalance != "" {
 						s.lndBalance = bal.TotalBalance
