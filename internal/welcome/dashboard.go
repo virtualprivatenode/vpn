@@ -4,7 +4,6 @@ package welcome
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -63,7 +62,8 @@ func (m Model) cardServicesView(w, h int) string {
 			lines = append(lines, theme.Warning.Render(
 				fmt.Sprintf("%s %s? [y/n]", m.svcConfirm, svc)))
 		} else {
-			lines = append(lines, theme.Dim.Render("[r]estart [s]top [a]start [l]ogs"))
+			lines = append(lines,
+				theme.Dim.Render("[r]estart [s]top [a]start [l]ogs"))
 		}
 	}
 
@@ -79,10 +79,12 @@ func (m Model) cardSystemView(w, h int) string {
 	if m.status != nil {
 		lines = append(lines, theme.Label.Render("Disk: ")+
 			theme.Value.Render(fmt.Sprintf("%s / %s (%s)",
-				m.status.diskUsed, m.status.diskTotal, m.status.diskPct)))
+				m.status.diskUsed, m.status.diskTotal,
+				m.status.diskPct)))
 		lines = append(lines, theme.Label.Render("RAM:  ")+
 			theme.Value.Render(fmt.Sprintf("%s / %s (%s)",
-				m.status.ramUsed, m.status.ramTotal, m.status.ramPct)))
+				m.status.ramUsed, m.status.ramTotal,
+				m.status.ramPct)))
 		lines = append(lines, theme.Label.Render("Bitcoin: ")+
 			theme.Value.Render(m.status.btcSize))
 		if m.cfg.HasLND() {
@@ -99,15 +101,19 @@ func (m Model) cardSystemView(w, h int) string {
 			lines = append(lines, theme.Warning.Render(
 				fmt.Sprintf("%s system? [y/n]", m.sysConfirm)))
 		} else {
-			lines = append(lines, theme.Action.Render("[u]pdate packages"))
+			lines = append(lines,
+				theme.Action.Render("[u]pdate packages"))
 			if m.status != nil && m.status.rebootRequired {
-				lines = append(lines, theme.Warning.Render("⚠️ Reboot required"))
-				lines = append(lines, theme.Action.Render("[r]eboot"))
+				lines = append(lines,
+					theme.Warning.Render("⚠️ Reboot required"))
+				lines = append(lines,
+					theme.Action.Render("[r]eboot"))
 			}
 		}
 	} else if m.status != nil && m.status.rebootRequired {
 		lines = append(lines, "")
-		lines = append(lines, theme.Warning.Render("⚠️ Reboot required"))
+		lines = append(lines,
+			theme.Warning.Render("⚠️ Reboot required"))
 	}
 
 	return m.getBorder(cardSystem).Width(w).
@@ -136,7 +142,8 @@ func (m Model) cardBitcoinView(w, h int) string {
 				m.status.btcBlocks, m.status.btcHeaders)))
 		if m.status.btcProgress > 0 {
 			lines = append(lines, theme.Label.Render("Progress: ")+
-				theme.Value.Render(bitcoin.FormatProgress(m.status.btcProgress)))
+				theme.Value.Render(
+					bitcoin.FormatProgress(m.status.btcProgress)))
 		}
 		lines = append(lines, theme.Label.Render("Network: ")+
 			theme.Value.Render(m.cfg.Network))
@@ -172,70 +179,12 @@ func (m Model) cardLightningView(w, h int) string {
 		lines = append(lines, theme.Label.Render("P2P: ")+
 			theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
 		lines = append(lines, "")
-		lines = append(lines, theme.Action.Render("Select for details ▸"))
+		lines = append(lines, theme.Action.Render(
+			"Select for Lightning tab ▸"))
 	}
 
 	return m.getBorder(cardLightning).Width(w).
 		Padding(0, 1).Render(padLines(lines, h))
-}
-
-func (m Model) viewLightning() string {
-	bw := min(m.width-4, theme.ContentWidth)
-	var lines []string
-	lines = append(lines, theme.Lightning.Render("⚡️ Lightning Node"))
-	lines = append(lines, "")
-
-	if m.cfg.WalletExists() {
-		lines = append(lines, "  "+theme.Label.Render("Status: ")+
-			theme.Success.Render("created"))
-		if m.cfg.AutoUnlock {
-			lines = append(lines, "  "+theme.Label.Render("Auto-unlock: ")+
-				theme.Success.Render("enabled"))
-		}
-		lines = append(lines, "  "+theme.Label.Render("P2P Mode: ")+
-			theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
-
-		if m.status != nil && m.status.lndResponding {
-			if m.status.lndBalance != "" {
-				lines = append(lines, "  "+theme.Label.Render("Balance: ")+
-					theme.Value.Render(m.status.lndBalance+" sats"))
-			}
-			if m.status.lndChannels > 0 {
-				lines = append(lines, "  "+theme.Label.Render("Channels: ")+
-					theme.Value.Render(fmt.Sprintf("%d", m.status.lndChannels)))
-			}
-			if m.status.lndPubkey != "" {
-				lines = append(lines, "")
-				lines = append(lines, "  "+theme.Label.Render("Pubkey:"))
-				lines = append(lines, "  "+theme.Mono.Render(m.status.lndPubkey))
-			}
-		} else {
-			lines = append(lines, "")
-			lines = append(lines, "  "+theme.Dim.Render("Waiting for LND..."))
-		}
-
-		if m.cfg.P2PMode == "tor" {
-			lines = append(lines, "")
-			lines = append(lines, "  "+theme.Action.Render("[p] upgrade to clearnet+tor"))
-		}
-	} else {
-		lines = append(lines, "  "+theme.Warning.Render("Wallet not created"))
-	}
-
-	content := strings.Join(lines, "\n")
-	box := theme.Box.Width(bw).Padding(1, 2).Render(content)
-	title := theme.Title.Width(bw).Align(lipgloss.Center).
-		Render(" ⚡️ Lightning Details ")
-	var footer string
-	if m.cfg.P2PMode == "tor" {
-		footer = theme.Footer.Render("  p upgrade P2P • backspace back • q quit  ")
-	} else {
-		footer = theme.Footer.Render("  backspace back • q quit  ")
-	}
-	full := lipgloss.JoinVertical(lipgloss.Center,
-		"", title, "", box, "", footer)
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, full)
 }
 
 func p2pModeLabel(mode string) string {

@@ -18,7 +18,7 @@ type wTab int
 
 const (
 	tabDashboard wTab = iota
-	tabChannels
+	tabLightning
 	tabPairing
 	tabAddons
 	tabSettings
@@ -28,7 +28,7 @@ type wSubview int
 
 const (
 	svNone wSubview = iota
-	svLightning
+	svWalletInfo
 	svZeus
 	svSyncthingDetail
 	svSyncthingPairInput
@@ -148,6 +148,7 @@ type Model struct {
 	subview              wSubview
 	dashCard             cardPos
 	cardActive           bool
+	lightningFocus       int // 0=channels, 1=wallet
 	svcCursor            int
 	svcConfirm           string
 	sysConfirm           string
@@ -239,6 +240,33 @@ func (m Model) saveCfg() {
 	}
 }
 
+func (m Model) svcCount() int {
+	return len(serviceNames(m.cfg))
+}
+
+func (m Model) svcName(i int) string {
+	names := serviceNames(m.cfg)
+	if i < len(names) {
+		return names[i]
+	}
+	return ""
+}
+
+// pollInterval returns the status polling interval based on current state.
+// Faster polling during startup, slower once everything is stable.
+func (m Model) pollInterval() time.Duration {
+	if m.status == nil {
+		return 3 * time.Second
+	}
+	if !m.status.lndResponding && m.cfg.HasLND() && m.cfg.WalletExists() {
+		return 5 * time.Second
+	}
+	if !m.status.btcSynced {
+		return 15 * time.Second
+	}
+	return 60 * time.Second
+}
+
 func Show(cfg *config.AppConfig, version string) {
 	for {
 		m := NewModel(cfg, version)
@@ -297,7 +325,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchStatus(m.cfg, m.lndClient),
 		fetchLatestVersion(),
-		tickEvery(30*time.Second),
+		tickEvery(m.pollInterval()),
 	)
 }
 
@@ -341,20 +369,15 @@ func openChannelCmd(
 		if client == nil {
 			return channelOpenResultMsg{err: fmt.Errorf("LND not connected")}
 		}
-
-		// Connect to peer (Zeus pattern: perm=true)
 		if host != "" {
 			if err := client.ConnectPeer(pubkey, host); err != nil {
 				logger.TUI("Peer connect warning: %v", err)
 			}
 		}
-
-		// Wait for peer to appear in peer list (up to 60s)
 		if err := client.WaitForPeer(pubkey, 60*time.Second); err != nil {
 			return channelOpenResultMsg{
 				err: fmt.Errorf("could not connect to peer: %v", err)}
 		}
-
 		result, err := client.OpenChannel(pubkey, amount, private)
 		if err != nil {
 			return channelOpenResultMsg{err: err}
