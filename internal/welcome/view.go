@@ -60,6 +60,26 @@ func (m Model) View() string {
 		return m.viewQR()
 	case svFullURL:
 		return m.viewFullURL()
+	case svReceive:
+		return m.viewReceive()
+	case svReceiveWaiting:
+		return m.viewReceiveWaiting()
+	case svReceivePaid:
+		return m.viewReceivePaid()
+	case svReceiveExpired:
+		return m.viewReceiveExpired()
+	case svSend:
+		return m.viewSend()
+	case svSendConfirm:
+		return m.viewSendConfirm()
+	case svSendInFlight:
+		return m.viewSendInFlight()
+	case svSendResult:
+		return m.viewSendResult()
+	case svPaymentHistory:
+		return m.viewPaymentHistory()
+	case svPaymentDetail:
+		return m.viewPaymentDetail()
 	}
 
 	bw := min(m.width-4, theme.ContentWidth)
@@ -142,7 +162,7 @@ func (m Model) viewFooter() string {
 				"  ←→ card • enter open channel • tab switch • q quit  ")
 		}
 		return theme.Footer.Render(
-			"  ←→ card • enter details • tab switch • q quit  ")
+			"  ←→ card • s send • r receive • v history • enter details • tab switch • q quit  ")
 	case tabPairing:
 		return theme.Footer.Render(
 			"  enter open • tab switch • q quit  ")
@@ -426,7 +446,12 @@ func (m Model) lightningWalletCard(w, h int) string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, "  "+theme.Action.Render("Select for details ▸"))
+	lines = append(lines, "")
+	lines = append(lines, "  "+theme.Action.Render("[s] Send"))
+	lines = append(lines, "  "+theme.Action.Render("[r] Receive"))
+	lines = append(lines, "  "+theme.Action.Render("[v] History"))
+	lines = append(lines, "")
+	lines = append(lines, "  "+theme.Action.Render("enter details ▸"))
 
 	border := theme.NormalBorder
 	if m.lightningFocus == 1 {
