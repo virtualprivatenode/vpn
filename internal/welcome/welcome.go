@@ -56,6 +56,17 @@ const (
 	svLndHubInstall
 	svSelfUpdate
 	svP2PUpgrade
+	// Wallet — send and receive
+	svReceive
+	svReceiveWaiting
+	svReceivePaid
+	svReceiveExpired
+	svSend
+	svSendConfirm
+	svSendInFlight
+	svSendResult
+	svPaymentHistory
+	svPaymentDetail
 )
 
 type cardPos int
@@ -94,6 +105,41 @@ type newAddressMsg struct {
 	address string
 	err     error
 }
+
+type invoiceCreatedMsg struct {
+	payReq      string
+	paymentHash string
+	amountSats  int64
+	err         error
+}
+
+type invoiceSettledMsg struct {
+	settled bool
+	expired bool
+	err     error
+}
+
+type payReqDecodedMsg struct {
+	decoded *lndrpc.DecodedPayReq
+	err     error
+}
+
+type sendPaymentResultMsg struct {
+	result *lndrpc.SendPaymentResult
+	err    error
+}
+
+type paymentHistoryMsg struct {
+	entries []lndrpc.PaymentEntry
+	err     error
+}
+
+type paymentType int
+
+const (
+	payInvoice paymentType = iota
+	payKeysend
+)
 
 type channelInfo struct {
 	ChanID        uint64
@@ -193,6 +239,34 @@ type Model struct {
 	chanFundAddress      string
 	chanPeerList         []peerOption
 	chanAmountPreset     int
+	// Receive
+	recvAmountStr   string
+	recvMemo        string
+	recvPayReq      string
+	recvPaymentHash string
+	recvAmountSats  int64
+	recvSettled     bool
+	recvExpired     bool
+	recvInputField  int // 0=amount, 1=memo
+	recvError       string
+
+	// Send
+	sendPayReqInput  string
+	sendDecodedValid bool
+	sendDecodedDesc  string
+	sendDecodedAmt   int64
+	sendDecodedDest  string
+	sendDecodedExp   string
+	sendInFlight     bool
+	sendError        string
+	sendPreimage     string
+	sendRouteHops    []lndrpc.RouteHop
+	sendFeeSats      int64
+	sendType         paymentType
+
+	// Payment history
+	payHistory       []lndrpc.PaymentEntry
+	payHistoryCursor int
 }
 
 func NewModel(cfg *config.AppConfig, version string) Model {
@@ -396,5 +470,125 @@ func getNewAddressCmd(client *lndrpc.Client) tea.Cmd {
 			return newAddressMsg{err: err}
 		}
 		return newAddressMsg{address: addr.Address}
+	}
+}
+
+func createInvoiceCmd(client *lndrpc.Client, amount int64, memo string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return invoiceCreatedMsg{err: fmt.Errorf("LND not connected")}
+		}
+		inv, err := client.AddInvoice(amount, memo)
+		if err != nil {
+			return invoiceCreatedMsg{err: err}
+		}
+		return invoiceCreatedMsg{
+			payReq:      inv.PaymentRequest,
+			paymentHash: inv.PaymentHash,
+			amountSats:  inv.AmountSats,
+		}
+	}
+}
+
+func waitForInvoiceCmd(client *lndrpc.Client, paymentHash string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return invoiceSettledMsg{err: fmt.Errorf("LND not connected")}
+		}
+		hashBytes, err := hexDecodeBytes(paymentHash)
+		if err != nil {
+			return invoiceSettledMsg{err: err}
+		}
+		inv, err := client.WaitForInvoiceSettlement(
+			hashBytes, 3600*time.Second)
+		if err != nil {
+			return invoiceSettledMsg{err: err}
+		}
+		return invoiceSettledMsg{
+			settled: inv.Settled,
+			expired: inv.IsExpired,
+		}
+	}
+}
+
+func decodePayReqCmd(client *lndrpc.Client, payReq string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return payReqDecodedMsg{err: fmt.Errorf("LND not connected")}
+		}
+		decoded, err := client.DecodePayReq(payReq)
+		if err != nil {
+			return payReqDecodedMsg{err: err}
+		}
+		return payReqDecodedMsg{decoded: decoded}
+	}
+}
+
+func sendPaymentCmd(client *lndrpc.Client, payReq string) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return sendPaymentResultMsg{err: fmt.Errorf("LND not connected")}
+		}
+		result, err := client.SendPayment(payReq)
+		if err != nil {
+			return sendPaymentResultMsg{err: err}
+		}
+		return sendPaymentResultMsg{result: result}
+	}
+}
+
+func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return paymentHistoryMsg{err: fmt.Errorf("LND not connected")}
+		}
+		// Fetch both incoming and outgoing
+		invoices, _ := client.ListInvoices(50)
+		payments, _ := client.ListPayments(50)
+
+		var all []lndrpc.PaymentEntry
+		all = append(all, invoices...)
+		all = append(all, payments...)
+
+		// Sort by creation date descending
+		for i := 0; i < len(all); i++ {
+			for j := i + 1; j < len(all); j++ {
+				if all[j].CreationDate > all[i].CreationDate {
+					all[i], all[j] = all[j], all[i]
+				}
+			}
+		}
+
+		return paymentHistoryMsg{entries: all}
+	}
+}
+
+// hexDecodeBytes decodes a hex string to bytes.
+func hexDecodeBytes(s string) ([]byte, error) {
+	if len(s)%2 != 0 {
+		return nil, fmt.Errorf("odd length hex")
+	}
+	b := make([]byte, len(s)/2)
+	for i := 0; i < len(b); i++ {
+		high := hexVal(s[i*2])
+		low := hexVal(s[i*2+1])
+		if high < 0 || low < 0 {
+			return nil, fmt.Errorf("invalid hex at %d", i*2)
+		}
+		b[i] = byte(high<<4 | low)
+	}
+	return b, nil
+}
+
+func hexVal(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c - 'a' + 10)
+	case c >= 'A' && c <= 'F':
+		return int(c - 'A' + 10)
+	default:
+		return -1
 	}
 }

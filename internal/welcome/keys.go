@@ -107,6 +107,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chanFundAddress = msg.address
 		}
 		return m, nil
+	case invoiceCreatedMsg:
+		if msg.err != nil {
+			m.recvError = msg.err.Error()
+			return m, nil
+		}
+		m.recvPayReq = msg.payReq
+		m.recvPaymentHash = msg.paymentHash
+		m.recvAmountSats = msg.amountSats
+		m.subview = svReceiveWaiting
+		return m, waitForInvoiceCmd(m.lndClient, msg.paymentHash)
+	case invoiceSettledMsg:
+		if msg.err != nil {
+			logger.TUI("Invoice settlement error: %v", msg.err)
+			return m, nil
+		}
+		if msg.settled {
+			m.recvSettled = true
+			m.subview = svReceivePaid
+		} else if msg.expired {
+			m.recvExpired = true
+			m.subview = svReceiveExpired
+		}
+		return m, nil
+	case payReqDecodedMsg:
+		if msg.err != nil {
+			m.sendError = msg.err.Error()
+			return m, nil
+		}
+		if msg.decoded.IsExpired {
+			m.sendError = "This invoice has expired"
+			return m, nil
+		}
+		m.sendDecodedValid = true
+		m.sendDecodedAmt = msg.decoded.AmountSats
+		m.sendDecodedDesc = msg.decoded.Description
+		m.sendDecodedDest = msg.decoded.Destination
+		m.subview = svSendConfirm
+		return m, nil
+	case sendPaymentResultMsg:
+		m.sendInFlight = false
+		if msg.err != nil {
+			m.sendError = msg.err.Error()
+			m.subview = svSendResult
+			return m, nil
+		}
+		if msg.result.Status == "SUCCEEDED" {
+			m.sendPreimage = msg.result.Preimage
+			m.sendFeeSats = msg.result.FeeSats
+			m.sendRouteHops = msg.result.Hops
+			m.sendError = ""
+		} else {
+			m.sendError = msg.result.Error
+		}
+		m.subview = svSendResult
+		return m, nil
+	case paymentHistoryMsg:
+		if msg.err == nil {
+			m.payHistory = msg.entries
+		}
+		return m, nil
 	case tickMsg:
 		if m.fetchInFlight {
 			return m, tickEvery(m.pollInterval())
@@ -134,6 +194,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ── Channel open subviews ────────────────────────────
 	if isChannelSubview(m.subview) {
 		return m.handleChannelsKey(key)
+	}
+
+	// ── Wallet subviews ──────────────────────────────────
+	if isWalletSubview(m.subview) {
+		return m.handleWalletKey(key, msg)
 	}
 
 	// ── Pairing subviews ─────────────────────────────────
@@ -215,6 +280,27 @@ func (m Model) handleMainNavKey(key string) (tea.Model, tea.Cmd) {
 	case "o":
 		if m.activeTab == tabLightning && m.lightningFocus == 0 {
 			return m.startChannelOpen()
+		}
+	case "s":
+		if m.activeTab == tabLightning && m.lightningFocus == 1 &&
+			m.cfg.HasLND() && m.cfg.WalletExists() {
+			m.resetSendState()
+			m.subview = svSend
+			return m, nil
+		}
+	case "r":
+		if m.activeTab == tabLightning && m.lightningFocus == 1 &&
+			m.cfg.HasLND() && m.cfg.WalletExists() {
+			m.resetReceiveState()
+			m.subview = svReceive
+			return m, nil
+		}
+	case "v":
+		if m.activeTab == tabLightning && m.lightningFocus == 1 &&
+			m.cfg.HasLND() && m.cfg.WalletExists() {
+			m.payHistoryCursor = 0
+			m.subview = svPaymentHistory
+			return m, fetchPaymentHistoryCmd(m.lndClient)
 		}
 	case "up", "k":
 		m = m.navUp()
