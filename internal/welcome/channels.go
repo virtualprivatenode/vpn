@@ -47,7 +47,6 @@ func (m Model) channelsNoWallet(w, h int) string {
 func (m Model) channelsList(w, h int) string {
 	var lines []string
 
-	// Header with counts
 	activeCount := 0
 	inactiveCount := 0
 	if m.status != nil {
@@ -64,7 +63,7 @@ func (m Model) channelsList(w, h int) string {
 	if m.status != nil && len(m.status.channels) > 0 {
 		headerText = fmt.Sprintf("⚡ Channels (%d active", activeCount)
 		if inactiveCount > 0 {
-			headerText += fmt.Sprintf(", %d inactive", inactiveCount)
+			headerText += fmt.Sprintf(", %d offline", inactiveCount)
 		}
 		if m.status.pendingOpen > 0 {
 			headerText += fmt.Sprintf(", %d pending", m.status.pendingOpen)
@@ -84,13 +83,11 @@ func (m Model) channelsList(w, h int) string {
 		lines = append(lines, "  "+theme.Dim.Render(
 			"No channels yet. Open a channel to start using Lightning."))
 		lines = append(lines, "")
-		lines = append(lines, "  "+theme.Grayed.Render(
-			"[Open Channel — coming soon]"))
+		lines = append(lines, "  "+theme.Action.Render("▸ [Open Channel]"))
 		return theme.NormalBorder.Width(w).Padding(1, 2).
 			Render(padLines(lines, h))
 	}
 
-	// Channel list with scrolling
 	visibleCount := m.channelVisibleCount()
 
 	if m.chanScrollOffset > 0 {
@@ -105,7 +102,6 @@ func (m Model) channelsList(w, h int) string {
 	for i := m.chanScrollOffset; i < viewEnd; i++ {
 		ch := m.status.channels[i]
 
-		// Selection indicator
 		prefix := "  "
 		nameStyle := theme.Value
 		if m.chanCursor == i {
@@ -113,13 +109,11 @@ func (m Model) channelsList(w, h int) string {
 			nameStyle = theme.Action
 		}
 
-		// Status dot
 		dot := theme.RedDot.Render("○")
 		if ch.Active {
 			dot = theme.GreenDot.Render("●")
 		}
 
-		// Peer name (alias or truncated pubkey)
 		name := ch.PeerAlias
 		if name == "" {
 			if len(ch.RemotePubkey) > 16 {
@@ -133,11 +127,9 @@ func (m Model) channelsList(w, h int) string {
 		}
 		name = fmt.Sprintf("%-20s", name)
 
-		// Balance bar
 		bar := renderBalanceBar(ch.LocalBalance, ch.RemoteBalance,
 			ch.Capacity, channelBarWidth)
 
-		// Balance numbers
 		localPct := 0
 		if ch.Capacity > 0 {
 			localPct = int(ch.LocalBalance * 100 / ch.Capacity)
@@ -148,14 +140,14 @@ func (m Model) channelsList(w, h int) string {
 			localPct)
 
 		lines = append(lines, fmt.Sprintf("%s%s %s  %s  %s",
-			prefix, dot, nameStyle.Render(name), bar, theme.Dim.Render(balText)))
+			prefix, dot, nameStyle.Render(name), bar,
+			theme.Dim.Render(balText)))
 	}
 
 	if viewEnd < len(m.status.channels) {
 		lines = append(lines, "  "+theme.Dim.Render("  ↓ more"))
 	}
 
-	// Summary
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Dim.Render(
 		"─────────────────────────────────────────────"))
@@ -174,16 +166,11 @@ func (m Model) channelsList(w, h int) string {
 	lines = append(lines, "  "+theme.Label.Render("Can receive:    ")+
 		theme.Value.Render(formatSats(totalRemote)+" sats"))
 
-	if m.status.pendingOpen > 0 || m.status.pendingClose > 0 ||
-		m.status.pendingForceClose > 0 {
+	if m.status.pendingOpen > 0 || m.status.pendingForceClose > 0 {
 		lines = append(lines, "")
 		if m.status.pendingOpen > 0 {
 			lines = append(lines, "  "+theme.Dim.Render(
 				fmt.Sprintf("  %d channel(s) opening", m.status.pendingOpen)))
-		}
-		if m.status.pendingClose > 0 {
-			lines = append(lines, "  "+theme.Dim.Render(
-				fmt.Sprintf("  %d channel(s) closing", m.status.pendingClose)))
 		}
 		if m.status.pendingForceClose > 0 {
 			lines = append(lines, "  "+theme.Warning.Render(
@@ -191,6 +178,9 @@ func (m Model) channelsList(w, h int) string {
 					m.status.pendingForceClose)))
 		}
 	}
+
+	lines = append(lines, "")
+	lines = append(lines, "  "+theme.Action.Render("[o] Open new channel"))
 
 	return theme.SelectedBorder.Width(w).Padding(1, 2).
 		Render(padLines(lines, h))
@@ -220,13 +210,10 @@ func (m Model) viewChannelDetail() string {
 	lines = append(lines, theme.Lightning.Render("⚡ "+name))
 	lines = append(lines, "")
 
-	// Balance visualization
-	bar := renderBalanceBar(ch.LocalBalance, ch.RemoteBalance,
-		ch.Capacity, 40)
+	bar := renderBalanceBar(ch.LocalBalance, ch.RemoteBalance, ch.Capacity, 40)
 	lines = append(lines, "  "+bar)
 	lines = append(lines, "")
 
-	// Details
 	localPct := 0
 	if ch.Capacity > 0 {
 		localPct = int(ch.LocalBalance * 100 / ch.Capacity)
@@ -273,21 +260,17 @@ func (m Model) viewChannelDetail() string {
 		Render(strings.Join(lines, "\n"))
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Channel Details ")
-	footer := theme.Footer.Render(
-		"  backspace back • q quit  ")
+	footer := theme.Footer.Render("  backspace back • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, full)
 }
 
-// ── Rendering helpers ────────────────────────────────────
-
 func renderBalanceBar(local, remote, capacity int64, width int) string {
 	if capacity <= 0 {
 		return strings.Repeat("░", width)
 	}
-
 	localWidth := int(float64(local) / float64(capacity) * float64(width))
 	if localWidth < 0 {
 		localWidth = 0
@@ -296,10 +279,8 @@ func renderBalanceBar(local, remote, capacity int64, width int) string {
 		localWidth = width
 	}
 	remoteWidth := width - localWidth
-
 	localBar := theme.Good.Render(strings.Repeat("━", localWidth))
 	remoteBar := theme.Dim.Render(strings.Repeat("░", remoteWidth))
-
 	return localBar + remoteBar
 }
 
@@ -307,13 +288,10 @@ func formatSats(sats int64) string {
 	if sats < 0 {
 		return fmt.Sprintf("%d", sats)
 	}
-
 	s := fmt.Sprintf("%d", sats)
 	if len(s) <= 3 {
 		return s
 	}
-
-	// Insert commas
 	var result []byte
 	for i, c := range s {
 		if i > 0 && (len(s)-i)%3 == 0 {

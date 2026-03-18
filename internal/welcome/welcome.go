@@ -3,6 +3,7 @@
 package welcome
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,8 +13,6 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/logger"
 )
-
-// ── Enums ────────────────────────────────────────────────
 
 type wTab int
 
@@ -35,13 +34,20 @@ const (
 	svSyncthingPairInput
 	svSyncthingDeviceDetail
 	svSyncthingWebUI
+	svSyncthingDeviceQR
+	svChannelDetail
+	svChannelOpen
+	svChannelAmountSelect
+	svChannelCustomPeer
+	svChannelOpenConfirm
+	svChannelOpening
+	svChannelOpenResult
+	svChannelFundWallet
 	svLndHubManage
 	svLndHubCreateName
 	svLndHubCreateAccount
 	svLndHubAccountDetail
 	svLndHubDeactivateConfirm
-	svSyncthingDeviceQR
-	svChannelDetail
 	svQR
 	svFullURL
 	svWalletCreate
@@ -61,8 +67,6 @@ const (
 	cardLightning
 )
 
-// ── Messages ─────────────────────────────────────────────
-
 type svcActionDoneMsg struct{}
 type tickMsg time.Time
 type latestVersionMsg string
@@ -79,6 +83,38 @@ type lndhubDeactivatedMsg struct {
 
 type syncthingPairedMsg struct {
 	err error
+}
+
+type channelOpenResultMsg struct {
+	txid string
+	err  error
+}
+
+type newAddressMsg struct {
+	address string
+	err     error
+}
+
+type channelInfo struct {
+	ChanID        uint64
+	PeerAlias     string
+	RemotePubkey  string
+	Capacity      int64
+	LocalBalance  int64
+	RemoteBalance int64
+	Active        bool
+	Private       bool
+	Initiator     bool
+}
+
+type peerOption struct {
+	Pubkey      string
+	Host        string
+	Alias       string
+	TorOnly     bool
+	Curated     bool
+	MinChanSize int64
+	Note        string
 }
 
 type statusMsg struct {
@@ -100,23 +136,8 @@ type statusMsg struct {
 	publicIP                     string
 	channels                     []channelInfo
 	pendingOpen                  int
-	pendingClose                 int
 	pendingForceClose            int
 }
-
-type channelInfo struct {
-	ChanID        uint64
-	PeerAlias     string
-	RemotePubkey  string
-	Capacity      int64
-	LocalBalance  int64
-	RemoteBalance int64
-	Active        bool
-	Private       bool
-	Initiator     bool
-}
-
-// ── Model ────────────────────────────────────────────────
 
 type Model struct {
 	cfg                  *config.AppConfig
@@ -155,6 +176,22 @@ type Model struct {
 	showSecrets          bool
 	chanCursor           int
 	chanScrollOffset     int
+	chanOpenPeerIdx      int
+	chanOpenAmount       int64
+	chanOpenPrivate      bool
+	chanOpenPubkey       string
+	chanOpenHost         string
+	chanOpenAlias        string
+	chanOpenInFlight     bool
+	chanOpenTxid         string
+	chanOpenError        string
+	chanCustomPubkey     string
+	chanCustomHost       string
+	chanCustomInputField int
+	chanCustomAmountStr  string
+	chanFundAddress      string
+	chanPeerList         []peerOption
+	chanAmountPreset     int
 }
 
 func NewModel(cfg *config.AppConfig, version string) Model {
@@ -165,26 +202,20 @@ func NewModel(cfg *config.AppConfig, version string) Model {
 	return Model{
 		cfg: cfg, lndClient: client, version: version,
 		activeTab: tabDashboard, subview: svNone,
-		dashCard:      cardServices,
-		fetchInFlight: true,
+		dashCard: cardServices, fetchInFlight: true,
 	}
 }
 
-func NewTestModel(
-	cfg *config.AppConfig, version string, store *config.Store,
-) Model {
+func NewTestModel(cfg *config.AppConfig, version string, store *config.Store) Model {
 	m := Model{
 		cfg: cfg, version: version,
 		activeTab: tabDashboard, subview: svNone,
-		dashCard:      cardServices,
-		fetchInFlight: true,
+		dashCard: cardServices, fetchInFlight: true,
 	}
 	m.cfgStore = store
 	return m
 }
 
-// serviceNames returns the list of managed service names based on config state.
-// Used by dashboard, status polling, and service management.
 func serviceNames(cfg *config.AppConfig) []string {
 	names := []string{"tor", "bitcoind"}
 	if cfg.HasLND() {
@@ -215,6 +246,10 @@ func Show(cfg *config.AppConfig, version string) {
 		result, _ := p.Run()
 		final := result.(Model)
 
+		if final.lndClient != nil {
+			final.lndClient.Close()
+		}
+
 		switch final.shellAction {
 		case svLndHubInstall:
 			installer.RunLndHubInstall(cfg)
@@ -234,9 +269,7 @@ func Show(cfg *config.AppConfig, version string) {
 				cfg = u
 			}
 			if err := installer.AppendLNCLIToShell(cfg); err != nil {
-				logger.TUI(
-					"Warning: failed to add lncli wrapper: %v",
-					err)
+				logger.TUI("Warning: failed to add lncli wrapper: %v", err)
 			}
 			continue
 		case svSyncthingInstall:
@@ -269,23 +302,19 @@ func (m Model) Init() tea.Cmd {
 }
 
 func tickEvery(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
 func fetchLatestVersion() tea.Cmd {
 	return func() tea.Msg {
-		v := installer.CheckLatestVersion()
-		return latestVersionMsg(v)
+		return latestVersionMsg(installer.CheckLatestVersion())
 	}
 }
 
 func createLndHubAccountCmd(adminToken string) tea.Cmd {
 	return func() tea.Msg {
 		account, err := installer.CreateLndHubAccount(adminToken)
-		return lndhubAccountCreatedMsg{
-			account: account, err: err}
+		return lndhubAccountCreatedMsg{account: account, err: err}
 	}
 }
 
@@ -293,8 +322,7 @@ func deactivateLndHubAccountCmd(login string) tea.Cmd {
 	return func() tea.Msg {
 		balance, _ := installer.GetUserBalance(login)
 		err := installer.DeactivateUser(login)
-		return lndhubDeactivatedMsg{
-			balance: balance, err: err}
+		return lndhubDeactivatedMsg{balance: balance, err: err}
 	}
 }
 
@@ -302,5 +330,48 @@ func pairSyncthingDeviceCmd(deviceID string) tea.Cmd {
 	return func() tea.Msg {
 		err := installer.PairSyncthingDevice(deviceID)
 		return syncthingPairedMsg{err: err}
+	}
+}
+
+func openChannelCmd(
+	client *lndrpc.Client, pubkey, host string,
+	amount int64, private bool,
+) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return channelOpenResultMsg{err: fmt.Errorf("LND not connected")}
+		}
+
+		// Connect to peer (Zeus pattern: perm=true)
+		if host != "" {
+			if err := client.ConnectPeer(pubkey, host); err != nil {
+				logger.TUI("Peer connect warning: %v", err)
+			}
+		}
+
+		// Wait for peer to appear in peer list (up to 60s)
+		if err := client.WaitForPeer(pubkey, 60*time.Second); err != nil {
+			return channelOpenResultMsg{
+				err: fmt.Errorf("could not connect to peer: %v", err)}
+		}
+
+		result, err := client.OpenChannel(pubkey, amount, private)
+		if err != nil {
+			return channelOpenResultMsg{err: err}
+		}
+		return channelOpenResultMsg{txid: result.FundingTxID}
+	}
+}
+
+func getNewAddressCmd(client *lndrpc.Client) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return newAddressMsg{err: fmt.Errorf("LND not connected")}
+		}
+		addr, err := client.GetNewAddress()
+		if err != nil {
+			return newAddressMsg{err: err}
+		}
+		return newAddressMsg{address: addr.Address}
 	}
 }

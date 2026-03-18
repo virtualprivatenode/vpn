@@ -12,9 +12,8 @@ import (
 
 const defaultTimeout = 30 * time.Second
 
-// ── Data types returned to the TUI ───────────────────────
+// ── Data types ───────────────────────────────────────────
 
-// NodeInfo contains basic node information.
 type NodeInfo struct {
 	Pubkey      string
 	Alias       string
@@ -26,14 +25,12 @@ type NodeInfo struct {
 	Version     string
 }
 
-// WalletBalance contains on-chain wallet balances.
 type WalletBalance struct {
 	TotalBalance       string
 	ConfirmedBalance   string
 	UnconfirmedBalance string
 }
 
-// Channel contains information about a single channel.
 type Channel struct {
 	ChanID        uint64
 	RemotePubkey  string
@@ -46,23 +43,35 @@ type Channel struct {
 	PeerAlias     string
 }
 
-// PendingChannelInfo contains summary of pending channels.
 type PendingChannelInfo struct {
 	PendingOpen  int
-	PendingClose int
 	ForceClose   int
 	WaitingClose int
 }
 
-// ── Query methods ────────────────────────────────────────
+type OnChainAddress struct {
+	Address string
+}
 
-// GetInfo returns basic node information.
+type ChannelOpenResult struct {
+	FundingTxID string
+}
+
+type PeerInfo struct {
+	PubKey  string
+	Address string
+	Inbound bool
+	SatSent int64
+	SatRecv int64
+}
+
+// ── Read queries ─────────────────────────────────────────
+
 func (c *Client) GetInfo() (*NodeInfo, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-
 	ctx, cancel := c.callCtx(defaultTimeout)
 	defer cancel()
 
@@ -71,7 +80,6 @@ func (c *Client) GetInfo() (*NodeInfo, error) {
 		c.handleError(err)
 		return nil, err
 	}
-
 	return &NodeInfo{
 		Pubkey:      resp.GetIdentityPubkey(),
 		Alias:       resp.GetAlias(),
@@ -84,13 +92,11 @@ func (c *Client) GetInfo() (*NodeInfo, error) {
 	}, nil
 }
 
-// GetWalletBalance returns on-chain wallet balances.
 func (c *Client) GetWalletBalance() (*WalletBalance, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-
 	ctx, cancel := c.callCtx(defaultTimeout)
 	defer cancel()
 
@@ -99,7 +105,6 @@ func (c *Client) GetWalletBalance() (*WalletBalance, error) {
 		c.handleError(err)
 		return nil, err
 	}
-
 	return &WalletBalance{
 		TotalBalance:       satStr(resp.GetTotalBalance()),
 		ConfirmedBalance:   satStr(resp.GetConfirmedBalance()),
@@ -107,13 +112,11 @@ func (c *Client) GetWalletBalance() (*WalletBalance, error) {
 	}, nil
 }
 
-// ListChannels returns all active and inactive channels.
 func (c *Client) ListChannels() ([]Channel, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-
 	ctx, cancel := c.callCtx(defaultTimeout)
 	defer cancel()
 
@@ -123,7 +126,7 @@ func (c *Client) ListChannels() ([]Channel, error) {
 		return nil, err
 	}
 
-	channels := make([]Channel, 0, len(resp.Channels))
+	channels := make([]Channel, 0, len(resp.GetChannels()))
 	for _, ch := range resp.GetChannels() {
 		channels = append(channels, Channel{
 			ChanID:        ch.GetChanId(),
@@ -136,23 +139,17 @@ func (c *Client) ListChannels() ([]Channel, error) {
 			Initiator:     ch.GetInitiator(),
 		})
 	}
-
-	// Resolve peer aliases
 	for i := range channels {
-		alias := c.getPeerAlias(channels[i].RemotePubkey)
-		channels[i].PeerAlias = alias
+		channels[i].PeerAlias = c.getPeerAlias(channels[i].RemotePubkey)
 	}
-
 	return channels, nil
 }
 
-// GetPendingChannels returns a summary of pending channel states.
 func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-
 	ctx, cancel := c.callCtx(defaultTimeout)
 	defer cancel()
 
@@ -161,25 +158,153 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 		c.handleError(err)
 		return nil, err
 	}
-
 	return &PendingChannelInfo{
 		PendingOpen:  len(resp.GetPendingOpenChannels()),
-		PendingClose: len(resp.GetPendingClosingChannels()),
 		ForceClose:   len(resp.GetPendingForceClosingChannels()),
 		WaitingClose: len(resp.GetWaitingCloseChannels()),
 	}, nil
 }
 
+func (c *Client) GetNewAddress() (*OnChainAddress, error) {
+	rpc := c.rpc()
+	if rpc == nil {
+		return nil, errNotConnected
+	}
+	ctx, cancel := c.callCtx(defaultTimeout)
+	defer cancel()
+
+	resp, err := rpc.NewAddress(ctx, &lnrpc.NewAddressRequest{
+		Type: lnrpc.AddressType_TAPROOT_PUBKEY,
+	})
+	if err != nil {
+		c.handleError(err)
+		return nil, err
+	}
+	return &OnChainAddress{Address: resp.GetAddress()}, nil
+}
+
+// ListPeers returns currently connected peers.
+func (c *Client) ListPeers() ([]PeerInfo, error) {
+	rpc := c.rpc()
+	if rpc == nil {
+		return nil, errNotConnected
+	}
+	ctx, cancel := c.callCtx(defaultTimeout)
+	defer cancel()
+
+	resp, err := rpc.ListPeers(ctx, &lnrpc.ListPeersRequest{})
+	if err != nil {
+		c.handleError(err)
+		return nil, err
+	}
+	var peers []PeerInfo
+	for _, p := range resp.GetPeers() {
+		peers = append(peers, PeerInfo{
+			PubKey:  p.GetPubKey(),
+			Address: p.GetAddress(),
+			Inbound: p.GetInbound(),
+			SatSent: p.GetSatSent(),
+			SatRecv: p.GetSatRecv(),
+		})
+	}
+	return peers, nil
+}
+
+// ── Channel operations (fund-moving) ─────────────────────
+
+// ConnectPeer connects to a Lightning peer. Uses perm=true for
+// persistent connection. Does not fail if already connected.
+func (c *Client) ConnectPeer(pubkey, host string) error {
+	rpc := c.rpc()
+	if rpc == nil {
+		return errNotConnected
+	}
+	ctx, cancel := c.callCtx(60 * time.Second)
+	defer cancel()
+
+	_, err := rpc.ConnectPeer(ctx, &lnrpc.ConnectPeerRequest{
+		Addr: &lnrpc.LightningAddress{
+			Pubkey: pubkey,
+			Host:   host,
+		},
+		Perm: true,
+	})
+	if err != nil {
+		errStr := err.Error()
+		if contains(errStr, "already connected") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// WaitForPeer polls ListPeers until the given pubkey appears or
+// timeout is reached. Returns nil if peer connected, error if timeout.
+func (c *Client) WaitForPeer(pubkey string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		peers, err := c.ListPeers()
+		if err == nil {
+			for _, p := range peers {
+				if p.PubKey == pubkey {
+					return nil
+				}
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("peer did not connect within %s", timeout)
+}
+
+// OpenChannel opens a channel to a peer. This is a fund-moving operation.
+// The caller MUST verify the peer is connected and show a confirmation
+// dialog before calling this.
+func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool) (*ChannelOpenResult, error) {
+	rpc := c.rpc()
+	if rpc == nil {
+		return nil, errNotConnected
+	}
+
+	pubkeyBytes, err := hexDecodeString(pubkey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pubkey: %w", err)
+	}
+
+	ctx, cancel := c.callCtx(120 * time.Second)
+	defer cancel()
+
+	resp, err := rpc.OpenChannelSync(ctx, &lnrpc.OpenChannelRequest{
+		NodePubkey:         pubkeyBytes,
+		LocalFundingAmount: localAmount,
+		Private:            private,
+		MinConfs:           1,
+		SpendUnconfirmed:   false,
+	})
+	if err != nil {
+		c.handleError(err)
+		return nil, err
+	}
+
+	txidBytes := resp.GetFundingTxidBytes()
+	txid := fmt.Sprintf("%x", txidBytes)
+	if len(txidBytes) == 32 {
+		reversed := make([]byte, 32)
+		for i := 0; i < 32; i++ {
+			reversed[i] = txidBytes[31-i]
+		}
+		txid = fmt.Sprintf("%x", reversed)
+	}
+	return &ChannelOpenResult{FundingTxID: txid}, nil
+}
+
 // ── Internal helpers ─────────────────────────────────────
 
-// getPeerAlias resolves a pubkey to a node alias from the graph.
-// Returns empty string if unavailable (non-critical).
 func (c *Client) getPeerAlias(pubkey string) string {
 	rpc := c.rpc()
 	if rpc == nil {
 		return ""
 	}
-
 	ctx, cancel := c.callCtx(3 * time.Second)
 	defer cancel()
 
@@ -196,19 +321,14 @@ func (c *Client) getPeerAlias(pubkey string) string {
 	return ""
 }
 
-// handleError logs RPC errors and triggers reconnect for connection failures.
 func (c *Client) handleError(err error) {
 	errStr := err.Error()
-	// Timeout during IBD or startup — LND is alive but slow.
-	// Don't reconnect, just let the next poll retry.
 	if contains(errStr, "DeadlineExceeded") || contains(errStr, "context deadline") {
 		return
 	}
-	// "starting up" means LND is alive but not ready — don't reconnect.
 	if contains(errStr, "starting up") || contains(errStr, "not yet ready") {
 		return
 	}
-	// gRPC Unavailable means LND is down or restarting
 	if contains(errStr, "Unavailable") || contains(errStr, "connection refused") {
 		logger.Status("LND connection lost, will reconnect: %v", err)
 		go c.Reconnect()
@@ -228,9 +348,37 @@ func searchString(s, substr string) bool {
 	return false
 }
 
-// satStr formats an int64 satoshi amount as a string.
 func satStr(sats int64) string {
 	return fmt.Sprintf("%d", sats)
+}
+
+func hexDecodeString(s string) ([]byte, error) {
+	if len(s)%2 != 0 {
+		return nil, fmt.Errorf("odd length hex string")
+	}
+	b := make([]byte, len(s)/2)
+	for i := 0; i < len(b); i++ {
+		high := hexVal(s[i*2])
+		low := hexVal(s[i*2+1])
+		if high < 0 || low < 0 {
+			return nil, fmt.Errorf("invalid hex char at %d", i*2)
+		}
+		b[i] = byte(high<<4 | low)
+	}
+	return b, nil
+}
+
+func hexVal(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c - 'a' + 10)
+	case c >= 'A' && c <= 'F':
+		return int(c - 'A' + 10)
+	default:
+		return -1
+	}
 }
 
 var errNotConnected = fmt.Errorf("LND gRPC not connected")

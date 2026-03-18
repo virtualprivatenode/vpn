@@ -20,7 +20,6 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 
-		// Service checks (fast, run in parallel)
 		for _, name := range serviceNames(cfg) {
 			wg.Add(1)
 			go func(n string) {
@@ -32,8 +31,9 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			}(name)
 		}
 
-		// Bitcoin info (slow RPC, own goroutine)
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			info := bitcoin.GetBlockchainInfo()
 			mu.Lock()
 			s.btcResponding = info.Responding
@@ -42,10 +42,11 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			s.btcProgress = info.Progress
 			s.btcSynced = info.Synced
 			mu.Unlock()
-		})
+		}()
 
-		// System info (disk, memory — moderate speed)
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			disk := system.Disk("/")
 			mem := system.Memory()
 			btcSize := system.DirSize(paths.BitcoinDataDir)
@@ -63,11 +64,12 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			s.btcSize = btcSize
 			s.lndSize = lndSize
 			mu.Unlock()
-		})
+		}()
 
-		// LND info via gRPC (fast if connected)
 		if cfg.HasLND() && lndClient != nil && lndClient.IsConnected() {
-			wg.Go(func() {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				lndInfo, err := lndClient.GetInfo()
 				mu.Lock()
 				if err == nil {
@@ -76,15 +78,13 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 					s.lndChannels = lndInfo.Channels
 					s.lndSyncedChain = lndInfo.SyncedChain
 					s.lndSyncedGraph = lndInfo.SyncedGraph
-
 					if !cfg.WalletExists() && lndInfo.Pubkey != "" {
 						s.walletDetected = true
 					}
 				}
 				mu.Unlock()
-			})
+			}()
 
-			// Wallet balance via gRPC
 			if cfg.WalletExists() {
 				wg.Add(1)
 				go func() {
@@ -98,8 +98,9 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 				}()
 			}
 
-			// Channel list via gRPC
-			wg.Go(func() {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				channels, err := lndClient.ListChannels()
 				mu.Lock()
 				if err == nil {
@@ -120,30 +121,27 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 					s.channels = infos
 				}
 				mu.Unlock()
-			})
+			}()
 
-			// Pending channels via gRPC
-			wg.Go(func() {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				pending, err := lndClient.GetPendingChannels()
 				mu.Lock()
 				if err == nil {
 					s.pendingOpen = pending.PendingOpen
-					s.pendingClose = pending.PendingClose
 					s.pendingForceClose = pending.ForceClose
 				}
 				mu.Unlock()
-			})
+			}()
 		}
 
 		wg.Wait()
 
-		// Cached public IP (no network call — uses ip route)
 		if cfg.P2PMode == "hybrid" {
 			s.publicIP = system.PublicIPv4()
 		}
-
 		s.rebootRequired = system.RebootRequired()
-
 		return s
 	}
 }

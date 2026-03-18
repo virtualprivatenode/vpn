@@ -32,6 +32,20 @@ func (m Model) View() string {
 		return m.viewSyncthingDeviceQR()
 	case svChannelDetail:
 		return m.viewChannelDetail()
+	case svChannelOpen:
+		return m.viewChannelOpen()
+	case svChannelAmountSelect:
+		return m.viewChannelAmountSelect()
+	case svChannelCustomPeer:
+		return m.viewChannelCustomPeer()
+	case svChannelOpenConfirm:
+		return m.viewChannelOpenConfirm()
+	case svChannelOpening:
+		return m.viewChannelOpening()
+	case svChannelOpenResult:
+		return m.viewChannelOpenResult()
+	case svChannelFundWallet:
+		return m.viewChannelFundWallet()
 	case svLndHubManage:
 		return m.viewLndHubManage()
 	case svLndHubCreateName:
@@ -64,16 +78,12 @@ func (m Model) View() string {
 	}
 
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
-		Render(fmt.Sprintf(" Virtual Private Node v%s ",
-			m.version))
+		Render(fmt.Sprintf(" Virtual Private Node v%s ", m.version))
 	tabs := m.viewTabs(bw)
 	footer := m.viewFooter()
-	body := lipgloss.JoinVertical(lipgloss.Center,
-		"", title, "", tabs, "", content)
-	full := lipgloss.JoinVertical(lipgloss.Center,
-		body, "", footer)
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, full)
+	body := lipgloss.JoinVertical(lipgloss.Center, "", title, "", tabs, "", content)
+	full := lipgloss.JoinVertical(lipgloss.Center, body, "", footer)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, full)
 }
 
 func (m Model) viewTabs(tw int) string {
@@ -91,13 +101,9 @@ func (m Model) viewTabs(tw int) string {
 	var out []string
 	for _, t := range tabs {
 		if t.t == m.activeTab {
-			out = append(out,
-				theme.ActiveTab.Width(w).
-					Align(lipgloss.Center).Render(t.n))
+			out = append(out, theme.ActiveTab.Width(w).Align(lipgloss.Center).Render(t.n))
 		} else {
-			out = append(out,
-				theme.InactiveTab.Width(w).
-					Align(lipgloss.Center).Render(t.n))
+			out = append(out, theme.InactiveTab.Width(w).Align(lipgloss.Center).Render(t.n))
 		}
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, out...)
@@ -111,46 +117,38 @@ func (m Model) viewFooter() string {
 		}
 		if m.dashCard == cardSystem {
 			if m.status != nil && m.status.rebootRequired {
-				return theme.Footer.Render(
-					"  [u]pdate • [r]eboot • backspace back • q quit  ")
+				return theme.Footer.Render("  [u]pdate • [r]eboot • backspace back • q quit  ")
 			}
-			return theme.Footer.Render(
-				"  [u]pdate system • backspace back • q quit  ")
+			return theme.Footer.Render("  [u]pdate system • backspace back • q quit  ")
 		}
 	}
 	switch m.activeTab {
 	case tabDashboard:
-		return theme.Footer.Render(
-			"  ↑↓←→ navigate • enter select • tab switch • q quit  ")
+		return theme.Footer.Render("  ↑↓←→ navigate • enter select • tab switch • q quit  ")
 	case tabChannels:
-		return theme.Footer.Render(
-			"  ↑↓ select • enter details • tab switch • q quit  ")
+		if m.status != nil && len(m.status.channels) > 0 {
+			return theme.Footer.Render(
+				"  ↑↓ select • enter details • o open channel • tab switch • q quit  ")
+		}
+		return theme.Footer.Render("  enter open channel • tab switch • q quit  ")
 	case tabPairing:
-		return theme.Footer.Render(
-			"  ←→ select • enter open • tab switch • q quit  ")
+		return theme.Footer.Render("  ←→ select • enter open • tab switch • q quit  ")
 	case tabAddons:
-		return theme.Footer.Render(
-			"  ←→ select • enter install/view • tab switch • q quit  ")
+		return theme.Footer.Render("  ←→ select • enter install/view • tab switch • q quit  ")
 	case tabSettings:
 		if m.updateConfirm {
-			return theme.Footer.Render(
-				"  y confirm • any key cancel  ")
+			return theme.Footer.Render("  y confirm • any key cancel  ")
 		}
-		return theme.Footer.Render(
-			"  enter update • tab switch • q quit  ")
+		return theme.Footer.Render("  enter update • tab switch • q quit  ")
 	}
 	return ""
 }
 
 func (m Model) viewFullURL() string {
-	title := theme.Header.Render(
-		"Full URL — Copy and paste into Tor Browser")
-	hint := theme.Dim.Render(
-		"Select and copy. Press backspace to go back.")
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		"", title, "", hint, "", m.urlTarget, "")
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, content)
+	title := theme.Header.Render("Full URL — Copy and paste into Tor Browser")
+	hint := theme.Dim.Render("Select and copy. Press backspace to go back.")
+	content := lipgloss.JoinVertical(lipgloss.Left, "", title, "", hint, "", m.urlTarget, "")
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func padLines(lines []string, target int) string {

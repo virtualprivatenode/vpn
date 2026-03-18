@@ -29,7 +29,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.fetchInFlight = false
 		m.status = &msg
-		// Handle wallet auto-detection (moved from fetchStatus to avoid data race)
 		if msg.walletDetected && !m.cfg.WalletCreated {
 			m.cfg.WalletCreated = true
 			m.saveCfg()
@@ -40,21 +39,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case lndhubAccountCreatedMsg:
 		if msg.err != nil {
-			logger.TUI(
-				"Warning: failed to create LndHub account: %v",
-				msg.err)
+			logger.TUI("Warning: failed to create LndHub account: %v", msg.err)
 			m.subview = svLndHubManage
 			return m, nil
 		}
 		if msg.account != nil {
 			m.lastAccount = msg.account
-			m.cfg.LndHubAccounts = append(
-				m.cfg.LndHubAccounts, config.LndHubAccount{
-					Label:     m.hubNameInput,
-					Login:     msg.account.Login,
-					CreatedAt: time.Now().Format("2006-01-02"),
-					Active:    true,
-				})
+			m.cfg.LndHubAccounts = append(m.cfg.LndHubAccounts, config.LndHubAccount{
+				Label:     m.hubNameInput,
+				Login:     msg.account.Login,
+				CreatedAt: time.Now().Format("2006-01-02"),
+				Active:    true,
+			})
 			m.saveCfg()
 			m.subview = svLndHubCreateAccount
 		}
@@ -63,17 +59,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hubCursor < len(m.cfg.LndHubAccounts) {
 			acct := &m.cfg.LndHubAccounts[m.hubCursor]
 			if msg.err != nil {
-				logger.TUI(
-					"Warning: deactivate failed: %v", msg.err)
+				logger.TUI("Warning: deactivate failed: %v", msg.err)
 			} else {
 				acct.Active = false
-				acct.DeactivatedAt = time.Now().
-					Format("2006-01-02")
+				acct.DeactivatedAt = time.Now().Format("2006-01-02")
 				acct.BalanceOnDeactivate = msg.balance
 				m.saveCfg()
-				logger.TUI(
-					"Deactivated account %s (balance: %s sats)",
-					acct.Label, msg.balance)
+				logger.TUI("Deactivated account %s (balance: %s sats)", acct.Label, msg.balance)
 			}
 		}
 		m.subview = svLndHubManage
@@ -86,14 +78,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.syncPairError = ""
 			m.syncPairSuccess = true
-			m.cfg.SyncthingDevices = append(
-				m.cfg.SyncthingDevices, config.SyncthingDevice{
-					Name:     "Device " + fmt.Sprintf("%d", len(m.cfg.SyncthingDevices)+1),
-					DeviceID: m.syncDeviceInput,
-					PairedAt: time.Now().Format("2006-01-02"),
-				})
+			m.cfg.SyncthingDevices = append(m.cfg.SyncthingDevices, config.SyncthingDevice{
+				Name:     "Device " + fmt.Sprintf("%d", len(m.cfg.SyncthingDevices)+1),
+				DeviceID: m.syncDeviceInput,
+				PairedAt: time.Now().Format("2006-01-02"),
+			})
 			m.saveCfg()
 			logger.TUI("Syncthing device paired successfully")
+		}
+		return m, nil
+	case channelOpenResultMsg:
+		m.chanOpenInFlight = false
+		if msg.err != nil {
+			m.chanOpenError = msg.err.Error()
+			m.subview = svChannelOpenResult
+			logger.TUI("Channel open failed: %v", msg.err)
+		} else {
+			m.chanOpenTxid = msg.txid
+			m.chanOpenError = ""
+			m.subview = svChannelOpenResult
+			logger.TUI("Channel opened: tx=%s", msg.txid)
+		}
+		return m, nil
+	case newAddressMsg:
+		if msg.err == nil {
+			m.chanFundAddress = msg.address
 		}
 		return m, nil
 	case tickMsg:
@@ -109,111 +118,319 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// isAllowedHubNameChar returns true for letters, numbers,
-// spaces, and hyphens.
 func isAllowedHubNameChar(key string) bool {
 	if len(key) != 1 {
 		return false
 	}
 	c := key[0]
-	return (c >= 'a' && c <= 'z') ||
-		(c >= 'A' && c <= 'Z') ||
-		(c >= '0' && c <= '9') ||
-		c == ' ' || c == '-'
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == ' ' || c == '-'
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Subviews
-	if m.subview != svNone {
-		// Text input for LndHub name screen
-		if m.subview == svLndHubCreateName {
-			switch key {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			case "backspace":
-				if len(m.hubNameInput) > 0 {
-					m.hubNameInput = m.hubNameInput[:len(m.hubNameInput)-1]
-				} else {
-					m.subview = svLndHubManage
-				}
-				return m, nil
-			case "enter":
-				if m.hubNameInput != "" {
-					return m, createLndHubAccountCmd(
-						m.cfg.LndHubAdminToken)
-				}
-				return m, nil
-			default:
-				if isAllowedHubNameChar(key) &&
-					len(m.hubNameInput) < 30 {
-					m.hubNameInput += key
-				}
+	// ── Text input subviews ──────────────────────────────
+
+	if m.subview == svLndHubCreateName {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			if len(m.hubNameInput) > 0 {
+				m.hubNameInput = m.hubNameInput[:len(m.hubNameInput)-1]
+			} else {
+				m.subview = svLndHubManage
+			}
+			return m, nil
+		case "enter":
+			if m.hubNameInput != "" {
+				return m, createLndHubAccountCmd(m.cfg.LndHubAdminToken)
+			}
+			return m, nil
+		default:
+			if isAllowedHubNameChar(key) && len(m.hubNameInput) < 30 {
+				m.hubNameInput += key
+			}
+			return m, nil
+		}
+	}
+
+	if m.subview == svSyncthingPairInput {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			if len(m.syncDeviceInput) > 0 {
+				m.syncDeviceInput = m.syncDeviceInput[:len(m.syncDeviceInput)-1]
+			} else {
+				m.syncPairError = ""
+				m.syncPairSuccess = false
+				m.subview = svSyncthingDetail
+			}
+			return m, nil
+		case "enter":
+			if m.syncPairSuccess {
+				m.syncDeviceInput = ""
+				m.syncPairSuccess = false
+				m.subview = svSyncthingDetail
 				return m, nil
 			}
-		}
-
-		// Text input for Syncthing device pairing
-		if m.subview == svSyncthingPairInput {
-			switch key {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			case "backspace":
-				if len(m.syncDeviceInput) > 0 {
-					m.syncDeviceInput = m.syncDeviceInput[:len(m.syncDeviceInput)-1]
-				} else {
-					m.syncPairError = ""
-					m.syncPairSuccess = false
-					m.subview = svSyncthingDetail
-				}
-				return m, nil
-			case "enter":
-				if m.syncPairSuccess {
-					m.syncDeviceInput = ""
-					m.syncPairSuccess = false
-					m.subview = svSyncthingDetail
+			if m.syncDeviceInput != "" {
+				parts := strings.Split(m.syncDeviceInput, "-")
+				if len(parts) != 8 {
+					m.syncPairError = "Invalid Device ID format. Expected 8 groups separated by hyphens."
 					return m, nil
 				}
-				if m.syncDeviceInput != "" {
-					// Validate Syncthing Device ID format:
-					// 8 groups of 7 chars separated by hyphens
-					id := m.syncDeviceInput
-					parts := strings.Split(id, "-")
-					if len(parts) != 8 {
-						m.syncPairError = "Invalid Device ID format. Expected 8 groups separated by hyphens (e.g., XXXXXXX-XXXXXXX-...)"
+				for _, p := range parts {
+					if len(p) != 7 {
+						m.syncPairError = "Invalid Device ID format. Each group should be 7 characters."
 						return m, nil
 					}
-					for _, p := range parts {
-						if len(p) != 7 {
-							m.syncPairError = "Invalid Device ID format. Each group should be 7 characters."
-							return m, nil
-						}
-					}
-					m.syncPairError = ""
-					return m, pairSyncthingDeviceCmd(
-						m.syncDeviceInput)
 				}
+				m.syncPairError = ""
+				return m, pairSyncthingDeviceCmd(m.syncDeviceInput)
+			}
+			return m, nil
+		default:
+			for _, ch := range key {
+				if len(m.syncDeviceInput) >= 63 {
+					break
+				}
+				if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+					(ch >= '0' && ch <= '9') || ch == '-' {
+					m.syncDeviceInput += strings.ToUpper(string(ch))
+				}
+			}
+			return m, nil
+		}
+	}
+
+	// ── Channel open subviews ────────────────────────────
+
+	if m.subview == svChannelOpen {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			m.subview = svNone
+			m.chanOpenError = ""
+			return m, nil
+		case "up", "k":
+			if m.chanOpenPeerIdx > 0 {
+				m.chanOpenPeerIdx--
+			}
+			return m, nil
+		case "down", "j":
+			if m.chanOpenPeerIdx < len(m.chanPeerList) {
+				m.chanOpenPeerIdx++
+			}
+			return m, nil
+		case "enter":
+			customIdx := len(m.chanPeerList)
+			if m.chanOpenPeerIdx == customIdx {
+				m.chanCustomPubkey = ""
+				m.chanCustomHost = ""
+				m.chanCustomInputField = 0
+				m.chanOpenError = ""
+				m.subview = svChannelCustomPeer
 				return m, nil
-			default:
-				// Handle paste: terminal may send multiple
-				// characters in a single key message
+			}
+			if m.chanOpenPeerIdx < len(m.chanPeerList) {
+				peer := m.chanPeerList[m.chanOpenPeerIdx]
+				m.chanOpenPubkey = peer.Pubkey
+				m.chanOpenHost = peer.Host
+				m.chanOpenAlias = peer.Alias
+				m.chanAmountPreset = 0
+				m.chanCustomAmountStr = ""
+				m.chanOpenError = ""
+				m.subview = svChannelAmountSelect
+				return m, nil
+			}
+			return m, nil
+		}
+		return m, nil
+	}
+
+	if m.subview == svChannelCustomPeer {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			if m.chanCustomInputField == 0 {
+				if len(m.chanCustomPubkey) > 0 {
+					m.chanCustomPubkey = m.chanCustomPubkey[:len(m.chanCustomPubkey)-1]
+				} else {
+					m.subview = svChannelOpen
+					m.chanOpenError = ""
+				}
+			} else {
+				if len(m.chanCustomHost) > 0 {
+					m.chanCustomHost = m.chanCustomHost[:len(m.chanCustomHost)-1]
+				}
+			}
+			return m, nil
+		case "tab":
+			m.chanCustomInputField = (m.chanCustomInputField + 1) % 2
+			return m, nil
+		case "enter":
+			if m.chanCustomPubkey == "" {
+				m.chanOpenError = "Pubkey is required"
+				return m, nil
+			}
+			if len(m.chanCustomPubkey) != 66 {
+				m.chanOpenError = "Pubkey must be 66 hex characters"
+				return m, nil
+			}
+			if m.chanCustomHost == "" {
+				m.chanOpenError = "Host is required (e.g., 1.2.3.4:9735)"
+				return m, nil
+			}
+			m.chanOpenPubkey = m.chanCustomPubkey
+			m.chanOpenHost = m.chanCustomHost
+			m.chanOpenAlias = m.chanCustomPubkey[:16] + "..."
+			m.chanOpenError = ""
+			m.chanAmountPreset = 0
+			m.chanCustomAmountStr = ""
+			m.subview = svChannelAmountSelect
+			return m, nil
+		default:
+			if m.chanCustomInputField == 0 {
 				for _, ch := range key {
-					if len(m.syncDeviceInput) >= 63 {
-						break
+					if len(m.chanCustomPubkey) < 66 && isHexChar(byte(ch)) {
+						m.chanCustomPubkey += string(ch)
 					}
-					if (ch >= 'A' && ch <= 'Z') ||
-						(ch >= 'a' && ch <= 'z') ||
-						(ch >= '0' && ch <= '9') ||
-						ch == '-' {
-						m.syncDeviceInput += strings.ToUpper(
-							string(ch))
+				}
+			} else {
+				for _, ch := range key {
+					if len(m.chanCustomHost) < 80 {
+						m.chanCustomHost += string(ch)
+					}
+				}
+			}
+			return m, nil
+		}
+	}
+
+	if m.subview == svChannelAmountSelect {
+		// Custom amount is the last preset (value 0)
+		isCustomSelected := m.chanAmountPreset == len(amountPresets)-1
+
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			if isCustomSelected && len(m.chanCustomAmountStr) > 0 {
+				m.chanCustomAmountStr = m.chanCustomAmountStr[:len(m.chanCustomAmountStr)-1]
+				m.chanOpenError = ""
+				return m, nil
+			}
+			m.subview = svChannelOpen
+			m.chanCustomAmountStr = ""
+			m.chanOpenError = ""
+			return m, nil
+		case "up", "k":
+			if m.chanAmountPreset > 0 {
+				m.chanAmountPreset--
+				m.chanOpenError = ""
+			}
+			return m, nil
+		case "down", "j":
+			if m.chanAmountPreset < len(amountPresets)-1 {
+				m.chanAmountPreset++
+				m.chanOpenError = ""
+			}
+			return m, nil
+		case "enter":
+			if isCustomSelected {
+				amt, err := parseCustomAmount(m.chanCustomAmountStr)
+				if err != nil {
+					m.chanOpenError = err.Error()
+					return m, nil
+				}
+				m.chanOpenAmount = amt
+			} else {
+				m.chanOpenAmount = amountPresets[m.chanAmountPreset]
+			}
+			m.chanOpenPrivate = true // Default to unannounced
+			m.chanOpenError = ""
+			m.subview = svChannelOpenConfirm
+			return m, nil
+		default:
+			// Allow typing digits when custom is selected
+			if isCustomSelected {
+				for _, ch := range key {
+					if ch >= '0' && ch <= '9' && len(m.chanCustomAmountStr) < 10 {
+						m.chanCustomAmountStr += string(ch)
 					}
 				}
 				return m, nil
 			}
 		}
+		return m, nil
+	}
 
+	if m.subview == svChannelOpenConfirm {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			m.chanOpenError = ""
+			m.subview = svChannelAmountSelect
+			return m, nil
+		case "p":
+			m.chanOpenPrivate = !m.chanOpenPrivate
+			return m, nil
+		case "y":
+			if m.chanOpenInFlight {
+				return m, nil
+			}
+			m.chanOpenInFlight = true
+			m.chanOpenError = ""
+			m.subview = svChannelOpening
+			return m, openChannelCmd(
+				m.lndClient, m.chanOpenPubkey, m.chanOpenHost,
+				m.chanOpenAmount, m.chanOpenPrivate)
+		}
+		return m, nil
+	}
+
+	if m.subview == svChannelOpening {
+		if key == "q" || key == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	if m.subview == svChannelOpenResult {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "enter", "backspace":
+			m.subview = svNone
+			m.chanOpenError = ""
+			m.chanOpenTxid = ""
+			m.chanOpenInFlight = false
+			return m, fetchStatus(m.cfg, m.lndClient)
+		}
+		return m, nil
+	}
+
+	if m.subview == svChannelFundWallet {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "backspace":
+			m.subview = svNone
+			m.chanFundAddress = ""
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// ── Generic subview handlers ─────────────────────────
+
+	if m.subview != svNone {
 		switch key {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -243,11 +460,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.subview = svSyncthingDetail
 			case svChannelDetail:
 				m.subview = svNone
-			case svSyncthingPairInput:
-				m.syncDeviceInput = ""
-				m.syncPairError = ""
-				m.syncPairSuccess = false
-				m.subview = svSyncthingDetail
 			case svLndHubManage:
 				m.subview = svNone
 			case svLndHubCreateName:
@@ -294,24 +506,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.subview = svQR
 				return m, nil
 			}
-			if m.subview == svLndHubCreateAccount &&
-				m.lastAccount != nil {
+			if m.subview == svLndHubCreateAccount && m.lastAccount != nil {
 				hubOnion := readOnion(paths.TorLndHubHostname)
 				if hubOnion != "" {
-					m.urlTarget = fmt.Sprintf(
-						"lndhub://%s:%s@http://%s:%s",
-						m.lastAccount.Login,
-						m.lastAccount.Password,
-						hubOnion,
-						paths.LndHubExternalPort)
+					m.urlTarget = fmt.Sprintf("lndhub://%s:%s@http://%s:%s",
+						m.lastAccount.Login, m.lastAccount.Password,
+						hubOnion, paths.LndHubExternalPort)
 					m.qrLabel = m.hubNameInput + " — Tor"
 					m.subview = svQR
 				}
 				return m, nil
 			}
 		case "c":
-			if m.subview == svZeus &&
-				m.cfg.P2PMode == "hybrid" {
+			if m.subview == svZeus && m.cfg.P2PMode == "hybrid" {
 				m.qrMode = "clearnet"
 				m.qrLabel = ""
 				m.subview = svQR
@@ -323,27 +530,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.subview == svLndHubCreateAccount &&
-				m.cfg.P2PMode == "hybrid" &&
-				m.lastAccount != nil {
+				m.cfg.P2PMode == "hybrid" && m.lastAccount != nil {
 				ip := ""
 				if m.status != nil {
 					ip = m.status.publicIP
 				}
 				if ip != "" {
-					m.urlTarget = fmt.Sprintf(
-						"lndhub://%s:%s@https://%s:%s",
-						m.lastAccount.Login,
-						m.lastAccount.Password,
-						ip,
-						paths.LndHubExternalPort)
+					m.urlTarget = fmt.Sprintf("lndhub://%s:%s@https://%s:%s",
+						m.lastAccount.Login, m.lastAccount.Password,
+						ip, paths.LndHubExternalPort)
 					m.qrLabel = m.hubNameInput + " — Clearnet"
 					m.subview = svQR
 				}
 				return m, nil
 			}
 		case "p":
-			if m.subview == svLightning &&
-				m.cfg.P2PMode == "tor" && m.cfg.HasLND() {
+			if m.subview == svLightning && m.cfg.P2PMode == "tor" && m.cfg.HasLND() {
 				m.shellAction = svP2PUpgrade
 				return m, tea.Quit
 			}
@@ -353,8 +555,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.subview == svSyncthingWebUI {
-				syncOnion := readOnion(
-					paths.TorSyncthingHostname)
+				syncOnion := readOnion(paths.TorSyncthingHostname)
 				if syncOnion != "" {
 					m.urlTarget = "http://" + syncOnion + ":8384"
 					m.urlReturnTo = svSyncthingWebUI
@@ -365,16 +566,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.subview == svLndHubManage {
 				hubOnion := readOnion(paths.TorLndHubHostname)
 				if hubOnion != "" {
-					m.urlTarget = "http://" + hubOnion +
-						":" + paths.LndHubExternalPort
+					m.urlTarget = "http://" + hubOnion + ":" + paths.LndHubExternalPort
 					m.urlReturnTo = svLndHubManage
 					m.subview = svFullURL
 				}
 				return m, nil
 			}
 		case "x":
-			if m.subview == svLndHubManage &&
-				len(m.cfg.LndHubAccounts) > 0 {
+			if m.subview == svLndHubManage && len(m.cfg.LndHubAccounts) > 0 {
 				if m.hubCursor < len(m.cfg.LndHubAccounts) &&
 					m.cfg.LndHubAccounts[m.hubCursor].Active {
 					m.subview = svLndHubDeactivateConfirm
@@ -395,13 +594,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "enter":
-			if m.subview == svSyncthingDetail &&
-				len(m.cfg.SyncthingDevices) > 0 {
+			if m.subview == svSyncthingDetail && len(m.cfg.SyncthingDevices) > 0 {
 				m.subview = svSyncthingDeviceDetail
 				return m, nil
 			}
-			if m.subview == svLndHubManage &&
-				len(m.cfg.LndHubAccounts) > 0 {
+			if m.subview == svLndHubManage && len(m.cfg.LndHubAccounts) > 0 {
 				m.subview = svLndHubAccountDetail
 				return m, nil
 			}
@@ -414,33 +611,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.subview == svSyncthingDetail && m.syncCursor > 0 {
 				m.syncCursor--
-				return m, nil
 			}
 			if m.subview == svLndHubManage && m.hubCursor > 0 {
 				m.hubCursor--
-				return m, nil
 			}
+			return m, nil
 		case "down", "j":
 			if m.subview == svSyncthingDetail &&
 				m.syncCursor < len(m.cfg.SyncthingDevices)-1 {
 				m.syncCursor++
-				return m, nil
 			}
 			if m.subview == svLndHubManage &&
 				m.hubCursor < len(m.cfg.LndHubAccounts)-1 {
 				m.hubCursor++
-				return m, nil
 			}
+			return m, nil
 		}
 		return m, nil
 	}
 
-	// Inside a card
+	// ── Inside a card ────────────────────────────────────
+
 	if m.cardActive {
 		return m.handleCardKey(key)
 	}
 
-	// Settings tab handles its own keys
+	// ── Settings tab ─────────────────────────────────────
+
 	if m.activeTab == tabSettings {
 		switch key {
 		case "q", "ctrl+c":
@@ -466,7 +663,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.activeTab = tabAddons
 			m.updateConfirm = false
 		case "5":
-			// Already on settings
+			// already on settings
 		default:
 			m = handleSettingsKey(m, key)
 			if m.shellAction != svNone {
@@ -474,9 +671,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		return m, nil
 	}
 
-	// Main navigation
+	// ── Main navigation ──────────────────────────────────
+
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -500,6 +699,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeTab = tabAddons
 	case "5":
 		m.activeTab = tabSettings
+	case "o":
+		if m.activeTab == tabChannels {
+			return m.startChannelOpen()
+		}
 	case "up", "k":
 		m = m.navUp()
 	case "down", "j":
@@ -572,8 +775,7 @@ func (m Model) handleCardKey(key string) (tea.Model, tea.Cmd) {
 			svc := m.svcName(m.svcCursor)
 			c := exec.Command("bash", "-c",
 				"clear && sudo journalctl -u "+svc+" -n 100 --no-pager"+
-					" && echo && echo '  Press Enter to return...'"+
-					" && read")
+					" && echo && echo '  Press Enter to return...' && read")
 			return m, tea.ExecProcess(c, func(err error) tea.Msg {
 				return svcActionDoneMsg{}
 			})
@@ -590,12 +792,10 @@ func (m Model) handleCardKey(key string) (tea.Model, tea.Cmd) {
 					c := exec.Command("bash", "-c",
 						"clear && sudo apt-get update && sudo apt-get upgrade -y"+
 							" && echo && echo '  ✅ Update complete'"+
-							" && echo '  Press Enter to return...'"+
-							" && read")
-					return m, tea.ExecProcess(c,
-						func(err error) tea.Msg {
-							return svcActionDoneMsg{}
-						})
+							" && echo '  Press Enter to return...' && read")
+					return m, tea.ExecProcess(c, func(err error) tea.Msg {
+						return svcActionDoneMsg{}
+					})
 				}
 				if action == "reboot" {
 					return m, func() tea.Msg {
@@ -672,14 +872,10 @@ func (m Model) navLeft() Model {
 		case cardLightning:
 			m.dashCard = cardBitcoin
 		}
-	case tabPairing:
-		// Single card
 	case tabAddons:
 		if m.addonFocus > 0 {
 			m.addonFocus--
 		}
-	case tabSettings:
-		// Single card
 	}
 	return m
 }
@@ -693,14 +889,10 @@ func (m Model) navRight() Model {
 		case cardBitcoin:
 			m.dashCard = cardLightning
 		}
-	case tabPairing:
-		// Single card
 	case tabAddons:
 		if m.addonFocus < 1 {
 			m.addonFocus++
 		}
-	case tabSettings:
-		// Single card
 	}
 	return m
 }
@@ -728,6 +920,9 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.subview = svLightning
 		}
 	case tabChannels:
+		if m.status != nil && len(m.status.channels) == 0 {
+			return m.startChannelOpen()
+		}
 		if m.status != nil && len(m.status.channels) > 0 &&
 			m.chanCursor < len(m.status.channels) {
 			m.subview = svChannelDetail
@@ -739,15 +934,13 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		}
 	case tabAddons:
 		return m.handleAddonEnter()
-	case tabSettings:
-		// Handled by handleSettingsKey
 	}
 	return m, nil
 }
 
 func (m Model) handleAddonEnter() (tea.Model, tea.Cmd) {
 	switch m.addonFocus {
-	case 0: // Syncthing
+	case 0:
 		if m.cfg.SyncthingInstalled {
 			m.subview = svSyncthingDetail
 			return m, nil
@@ -757,7 +950,7 @@ func (m Model) handleAddonEnter() (tea.Model, tea.Cmd) {
 		}
 		m.shellAction = svSyncthingInstall
 		return m, tea.Quit
-	case 1: // LndHub
+	case 1:
 		if m.cfg.LndHubInstalled {
 			m.hubCursor = 0
 			m.subview = svLndHubManage
@@ -790,14 +983,11 @@ func (m Model) svcName(i int) string {
 	return ""
 }
 
-// showMacaroonCmd reads the macaroon hex, writes to a temp file,
-// and displays it via tea.ExecProcess. TUI resumes on same screen.
 func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
 	mac := readMacaroonHex(cfg)
 	if mac == "" {
 		return nil
 	}
-
 	tmpFile, err := os.CreateTemp("", "rlvpn-macaroon-")
 	if err != nil {
 		return nil
@@ -811,9 +1001,7 @@ func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
 			" && echo '    Admin Macaroon (hex)'"+
 			" && echo '  ═══════════════════════════════════════════'"+
 			" && echo && cat "+tmpPath+
-			" && echo && echo"+
-			" && echo '  Press Enter to return...'"+
-			" && read"+
+			" && echo && echo && echo '  Press Enter to return...' && read"+
 			" && rm -f "+tmpPath)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		os.Remove(tmpPath)
