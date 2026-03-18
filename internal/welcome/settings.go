@@ -24,7 +24,8 @@ func (m Model) settingsUpdateCard(w, h int) string {
 	lines = append(lines, "")
 
 	if m.latestVersion == "" {
-		lines = append(lines, theme.Dim.Render("Checking for updates..."))
+		lines = append(lines,
+			theme.Dim.Render("Checking for updates..."))
 	} else if m.latestVersion == installer.GetVersion() {
 		lines = append(lines, theme.GreenDot.Render("●")+" "+
 			theme.Good.Render("Up to date"))
@@ -36,31 +37,12 @@ func (m Model) settingsUpdateCard(w, h int) string {
 			lines = append(lines, theme.Warning.Render(
 				"Update to v"+m.latestVersion+"? [y/n]"))
 		} else {
-			lines = append(lines, theme.Action.Render("Select to update ▸"))
+			lines = append(lines,
+				theme.Action.Render("Select to update ▸"))
 		}
 	}
 
 	border := theme.SelectedBorder
-	return border.Width(w).Padding(1, 2).Render(padLines(lines, h))
-}
-
-func handleSettingsKey(m Model, key string) Model {
-	if m.updateConfirm {
-		switch key {
-		case "y":
-			m.updateConfirm = false
-			m.shellAction = svSelfUpdate
-		default:
-			m.updateConfirm = false
-		}
-		return m
-	}
-
-	switch key {
-	case "enter":
-		if m.latestVersion != "" && m.latestVersion != installer.GetVersion() {
-			m.updateConfirm = true
-		}
-	}
-	return m
+	return border.Width(w).Padding(1, 2).
+		Render(padLines(lines, h))
 }

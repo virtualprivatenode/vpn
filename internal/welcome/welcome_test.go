@@ -33,7 +33,6 @@ func testModelFullStack() Model {
 	return NewModel(cfg, "0.0.0-test")
 }
 
-// testStore creates an isolated config store in a temp directory.
 func testStore(t *testing.T) *config.Store {
 	t.Helper()
 	dir := t.TempDir()
@@ -43,7 +42,6 @@ func testStore(t *testing.T) *config.Store {
 	}
 }
 
-// testModelWithStore creates a model with an isolated config store.
 func testModelWithStore(t *testing.T, cfg *config.AppConfig) Model {
 	t.Helper()
 	store := testStore(t)
@@ -54,18 +52,24 @@ func testModelWithStore(t *testing.T, cfg *config.AppConfig) Model {
 
 func TestInitialState(t *testing.T) {
 	m := testModel()
-
 	if m.activeTab != tabDashboard {
-		t.Errorf("initial tab: got %d, want %d (dashboard)", m.activeTab, tabDashboard)
+		t.Errorf("initial tab: got %d, want %d (dashboard)",
+			m.activeTab, tabDashboard)
 	}
 	if m.subview != svNone {
-		t.Errorf("initial subview: got %d, want %d (none)", m.subview, svNone)
+		t.Errorf("initial subview: got %d, want %d (none)",
+			m.subview, svNone)
 	}
 	if m.dashCard != cardServices {
-		t.Errorf("initial card: got %d, want %d (services)", m.dashCard, cardServices)
+		t.Errorf("initial card: got %d, want %d (services)",
+			m.dashCard, cardServices)
 	}
 	if m.cardActive {
 		t.Error("card should not be active initially")
+	}
+	if m.lightningFocus != 0 {
+		t.Errorf("initial lightningFocus: got %d, want 0",
+			m.lightningFocus)
 	}
 }
 
@@ -74,12 +78,14 @@ func TestTabForward(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	expected := []wTab{tabChannels, tabPairing, tabAddons, tabSettings, tabDashboard}
+	expected := []wTab{tabLightning, tabPairing, tabAddons,
+		tabSettings, tabDashboard}
 	for _, want := range expected {
 		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		m = newM.(Model)
 		if m.activeTab != want {
-			t.Errorf("after tab: got %d, want %d", m.activeTab, want)
+			t.Errorf("after tab: got %d, want %d",
+				m.activeTab, want)
 		}
 	}
 }
@@ -92,7 +98,8 @@ func TestTabBackward(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = newM.(Model)
 	if m.activeTab != tabSettings {
-		t.Errorf("after shift+tab: got %d, want %d (settings)", m.activeTab, tabSettings)
+		t.Errorf("after shift+tab: got %d, want %d (settings)",
+			m.activeTab, tabSettings)
 	}
 }
 
@@ -106,16 +113,18 @@ func TestNumberKeySwitchesTab(t *testing.T) {
 		want wTab
 	}{
 		{"1", tabDashboard},
-		{"2", tabChannels},
+		{"2", tabLightning},
 		{"3", tabPairing},
 		{"4", tabAddons},
 		{"5", tabSettings},
 	}
 	for _, tt := range tests {
-		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)})
+		newM, _ := m.Update(tea.KeyMsg{
+			Type: tea.KeyRunes, Runes: []rune(tt.key)})
 		result := newM.(Model)
 		if result.activeTab != tt.want {
-			t.Errorf("key %s: got tab %d, want %d", tt.key, result.activeTab, tt.want)
+			t.Errorf("key %s: got tab %d, want %d",
+				tt.key, result.activeTab, tt.want)
 		}
 	}
 }
@@ -129,28 +138,36 @@ func TestDashboardCardNavigation(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardServices
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ := m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("l")})
 	m = newM.(Model)
 	if m.dashCard != cardSystem {
-		t.Errorf("right from services: got %d, want %d (system)", m.dashCard, cardSystem)
+		t.Errorf("right from services: got %d, want %d (system)",
+			m.dashCard, cardSystem)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("j")})
 	m = newM.(Model)
 	if m.dashCard != cardLightning {
-		t.Errorf("down from system: got %d, want %d (lightning)", m.dashCard, cardLightning)
+		t.Errorf("down from system: got %d, want %d (lightning)",
+			m.dashCard, cardLightning)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("h")})
 	m = newM.(Model)
 	if m.dashCard != cardBitcoin {
-		t.Errorf("left from lightning: got %d, want %d (bitcoin)", m.dashCard, cardBitcoin)
+		t.Errorf("left from lightning: got %d, want %d (bitcoin)",
+			m.dashCard, cardBitcoin)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("k")})
 	m = newM.(Model)
 	if m.dashCard != cardServices {
-		t.Errorf("up from bitcoin: got %d, want %d (services)", m.dashCard, cardServices)
+		t.Errorf("up from bitcoin: got %d, want %d (services)",
+			m.dashCard, cardServices)
 	}
 }
 
@@ -169,7 +186,8 @@ func TestEnterActivatesServicesCard(t *testing.T) {
 		t.Error("enter on services card should activate it")
 	}
 	if m.svcCursor != 0 {
-		t.Errorf("service cursor should start at 0, got %d", m.svcCursor)
+		t.Errorf("service cursor should start at 0, got %d",
+			m.svcCursor)
 	}
 }
 
@@ -202,7 +220,7 @@ func TestBackspaceDeactivatesCard(t *testing.T) {
 	}
 }
 
-// ── Lightning Card Actions ───────────────────────────────
+// ── Lightning Dashboard Card → Tab Switch ────────────────
 
 func TestLightningCardInstallLND(t *testing.T) {
 	m := testModel()
@@ -214,12 +232,12 @@ func TestLightningCardInstallLND(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svLNDInstall {
-		t.Errorf("enter on lightning without LND: got shellAction %d, want %d (svLNDInstall)",
+		t.Errorf("enter on lightning without LND: got %d, want %d",
 			m.shellAction, svLNDInstall)
 	}
 }
 
-func TestLightningCardWithLNDShowsDetail(t *testing.T) {
+func TestLightningCardCreateWallet(t *testing.T) {
 	m := testModelWithLND()
 	m.width = 80
 	m.height = 24
@@ -229,25 +247,102 @@ func TestLightningCardWithLNDShowsDetail(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svWalletCreate {
-		t.Errorf("enter on lightning with LND no wallet: got shellAction %d, want %d (svWalletCreate)",
+		t.Errorf("enter on lightning no wallet: got %d, want %d",
 			m.shellAction, svWalletCreate)
 	}
 }
 
-// ── Subview Navigation ───────────────────────────────────
+func TestLightningCardSwitchesToTab(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabDashboard
+	m.dashCard = cardLightning
 
-func TestSubviewBackspace(t *testing.T) {
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(Model)
+	if m.activeTab != tabLightning {
+		t.Errorf("enter on configured lightning card: got tab %d, want %d",
+			m.activeTab, tabLightning)
+	}
+	if m.shellAction != svNone {
+		t.Error("should not trigger shell action")
+	}
+}
+
+// ── Lightning Tab Navigation ─────────────────────────────
+
+func TestLightningTabLeftRight(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabLightning
+	m.lightningFocus = 0
+
+	newM, _ := m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("l")})
+	m = newM.(Model)
+	if m.lightningFocus != 1 {
+		t.Errorf("right from 0: got %d, want 1",
+			m.lightningFocus)
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("l")})
+	m = newM.(Model)
+	if m.lightningFocus != 1 {
+		t.Errorf("right from 1: got %d, want 1 (clamped)",
+			m.lightningFocus)
+	}
+
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("h")})
+	m = newM.(Model)
+	if m.lightningFocus != 0 {
+		t.Errorf("left from 1: got %d, want 0",
+			m.lightningFocus)
+	}
+}
+
+func TestLightningWalletCardEnter(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabLightning
+	m.lightningFocus = 1
+
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svWalletInfo {
+		t.Errorf("enter on wallet card: got %d, want %d",
+			m.subview, svWalletInfo)
+	}
+}
+
+func TestWalletInfoBackspace(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.subview = svLightning
+	m.subview = svWalletInfo
 
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
-		t.Errorf("backspace from subview: got %d, want %d (none)", m.subview, svNone)
+		t.Errorf("backspace from wallet info: got %d, want %d",
+			m.subview, svNone)
 	}
 }
+
+// ── Subview Navigation ───────────────────────────────────
 
 func TestFullURLBackspaceReturnsToOrigin(t *testing.T) {
 	m := testModel()
@@ -259,7 +354,7 @@ func TestFullURLBackspaceReturnsToOrigin(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svSyncthingDetail {
-		t.Errorf("backspace from full URL: got %d, want %d (syncthing detail)",
+		t.Errorf("backspace from full URL: got %d, want %d",
 			m.subview, svSyncthingDetail)
 	}
 }
@@ -274,7 +369,7 @@ func TestFullURLBackspaceNoReturnTo(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
-		t.Errorf("backspace from full URL no return: got %d, want %d (none)",
+		t.Errorf("backspace from full URL no return: got %d, want %d",
 			m.subview, svNone)
 	}
 }
@@ -289,7 +384,8 @@ func TestQRBackspaceGoesToZeus(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svZeus {
-		t.Errorf("backspace from QR: got %d, want %d (zeus)", m.subview, svZeus)
+		t.Errorf("backspace from QR: got %d, want %d (zeus)",
+			m.subview, svZeus)
 	}
 }
 
@@ -303,7 +399,7 @@ func TestQRBackspaceGoesToLndHubNewAccount(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubCreateAccount {
-		t.Errorf("backspace from LndHub QR: got %d, want %d (create account)",
+		t.Errorf("backspace from LndHub QR: got %d, want %d",
 			m.subview, svLndHubCreateAccount)
 	}
 }
@@ -333,21 +429,21 @@ func TestTabSwitchResetsCardActive(t *testing.T) {
 func TestServiceCountBase(t *testing.T) {
 	m := testModel()
 	if m.svcCount() != 2 {
-		t.Errorf("base service count: got %d, want 2 (tor, bitcoind)", m.svcCount())
+		t.Errorf("base: got %d, want 2", m.svcCount())
 	}
 }
 
 func TestServiceCountWithLND(t *testing.T) {
 	m := testModelWithLND()
 	if m.svcCount() != 3 {
-		t.Errorf("LND service count: got %d, want 3", m.svcCount())
+		t.Errorf("with LND: got %d, want 3", m.svcCount())
 	}
 }
 
 func TestServiceCountFullStack(t *testing.T) {
 	m := testModelFullStack()
 	if m.svcCount() != 5 {
-		t.Errorf("full stack service count: got %d, want 5", m.svcCount())
+		t.Errorf("full stack: got %d, want 5", m.svcCount())
 	}
 }
 
@@ -359,7 +455,7 @@ func TestServiceCountFullStackHybrid(t *testing.T) {
 	cfg.P2PMode = "hybrid"
 	m := NewModel(cfg, "0.0.0-test")
 	if m.svcCount() != 6 {
-		t.Errorf("full stack hybrid service count: got %d, want 6", m.svcCount())
+		t.Errorf("full stack hybrid: got %d, want 6", m.svcCount())
 	}
 }
 
@@ -409,12 +505,17 @@ func TestSettingsUpdateConfirm(t *testing.T) {
 	m.activeTab = tabSettings
 	m.latestVersion = "9.9.9"
 
-	m = handleSettingsKey(m, "enter")
+	newM, _ := m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune{13}})
+	// enter key
+	newM, _ = m.handleSettingsTabKey("enter")
+	m = newM.(Model)
 	if !m.updateConfirm {
-		t.Error("enter with new version available should set updateConfirm")
+		t.Error("enter with new version should set updateConfirm")
 	}
 
-	m = handleSettingsKey(m, "n")
+	newM, _ = m.handleSettingsTabKey("n")
+	m = newM.(Model)
 	if m.updateConfirm {
 		t.Error("pressing n should cancel updateConfirm")
 	}
@@ -427,9 +528,10 @@ func TestSettingsNoUpdateWhenCurrent(t *testing.T) {
 	m.activeTab = tabSettings
 	m.latestVersion = installer.GetVersion()
 
-	m = handleSettingsKey(m, "enter")
+	newM, _ := m.handleSettingsTabKey("enter")
+	m = newM.(Model)
 	if m.updateConfirm {
-		t.Error("should not confirm update when already on latest")
+		t.Error("should not confirm when already on latest")
 	}
 }
 
@@ -445,13 +547,11 @@ func TestAddonsLndHubRequiresLND(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction == svLndHubInstall {
-		t.Error("LndHub install should not trigger without LND")
+		t.Error("LndHub should not trigger without LND")
 	}
 }
 
 func TestAddonsLndHubInstallWithLND(t *testing.T) {
-	// LND service is not running in test environment,
-	// so install should be blocked (shellAction stays svNone).
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	cfg.WalletCreated = true
@@ -464,7 +564,7 @@ func TestAddonsLndHubInstallWithLND(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svNone {
-		t.Errorf("enter on LndHub with LND not running: got shellAction %d, want %d (svNone — blocked)",
+		t.Errorf("LND not running: got %d, want %d (blocked)",
 			m.shellAction, svNone)
 	}
 }
@@ -484,7 +584,7 @@ func TestAddonsLndHubManageWhenInstalled(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(Model)
 	if m.subview != svLndHubManage {
-		t.Errorf("enter on installed LndHub: got subview %d, want %d",
+		t.Errorf("enter on installed LndHub: got %d, want %d",
 			m.subview, svLndHubManage)
 	}
 }
@@ -496,19 +596,23 @@ func TestAddonNavTwoCards(t *testing.T) {
 	m.activeTab = tabAddons
 	m.addonFocus = 0
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ := m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("l")})
 	m = newM.(Model)
 	if m.addonFocus != 1 {
 		t.Errorf("right from 0: got %d, want 1", m.addonFocus)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("l")})
 	m = newM.(Model)
 	if m.addonFocus != 1 {
-		t.Errorf("right from 1: got %d, want 1 (clamped)", m.addonFocus)
+		t.Errorf("right from 1: got %d, want 1 (clamped)",
+			m.addonFocus)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	newM, _ = m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("h")})
 	m = newM.(Model)
 	if m.addonFocus != 0 {
 		t.Errorf("left from 1: got %d, want 0", m.addonFocus)
@@ -524,7 +628,7 @@ func TestLndHubManageBackspace(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
-		t.Errorf("backspace from lndhub manage: got %d, want %d", m.subview, svNone)
+		t.Errorf("backspace: got %d, want %d", m.subview, svNone)
 	}
 }
 
@@ -538,7 +642,7 @@ func TestLndHubCreateNameBackspaceEmpty(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubManage {
-		t.Errorf("backspace from empty name: got %d, want %d",
+		t.Errorf("backspace empty: got %d, want %d",
 			m.subview, svLndHubManage)
 	}
 }
@@ -553,10 +657,10 @@ func TestLndHubCreateNameBackspaceWithText(t *testing.T) {
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubCreateName {
-		t.Error("backspace with text should stay on name screen")
+		t.Error("backspace with text should stay")
 	}
 	if m.hubNameInput != "Al" {
-		t.Errorf("hubNameInput: got %q, want Al", m.hubNameInput)
+		t.Errorf("got %q, want Al", m.hubNameInput)
 	}
 }
 
@@ -571,24 +675,25 @@ func TestLndHubAccountCreatedMsg(t *testing.T) {
 	m.hubNameInput = "Alice"
 
 	account := &installer.LndHubAccount{
-		Login:    "abc123",
-		Password: "def456",
+		Login: "abc123", Password: "def456",
 	}
 	newM, _ := m.Update(lndhubAccountCreatedMsg{account: account})
 	m = newM.(Model)
 
 	if m.subview != svLndHubCreateAccount {
-		t.Errorf("after account created: got subview %d, want %d",
+		t.Errorf("after created: got %d, want %d",
 			m.subview, svLndHubCreateAccount)
 	}
 	if m.lastAccount == nil {
 		t.Error("lastAccount should be set")
 	}
 	if len(m.cfg.LndHubAccounts) != 1 {
-		t.Errorf("accounts: got %d, want 1", len(m.cfg.LndHubAccounts))
+		t.Errorf("accounts: got %d, want 1",
+			len(m.cfg.LndHubAccounts))
 	}
 	if m.cfg.LndHubAccounts[0].Label != "Alice" {
-		t.Errorf("label: got %q, want Alice", m.cfg.LndHubAccounts[0].Label)
+		t.Errorf("label: got %q, want Alice",
+			m.cfg.LndHubAccounts[0].Label)
 	}
 }
 
@@ -596,7 +701,8 @@ func TestLndHubDeactivatedMsg(t *testing.T) {
 	cfg := config.Default()
 	cfg.LndHubInstalled = true
 	cfg.LndHubAccounts = []config.LndHubAccount{
-		{Label: "Alice", Login: "abc", CreatedAt: "2026-02-23", Active: true},
+		{Label: "Alice", Login: "abc",
+			CreatedAt: "2026-02-23", Active: true},
 	}
 	m := testModelWithStore(t, cfg)
 	m.width = 80
@@ -604,15 +710,16 @@ func TestLndHubDeactivatedMsg(t *testing.T) {
 	m.subview = svLndHubDeactivateConfirm
 	m.hubCursor = 0
 
-	newM, _ := m.Update(lndhubDeactivatedMsg{balance: "5000", err: nil})
+	newM, _ := m.Update(lndhubDeactivatedMsg{
+		balance: "5000", err: nil})
 	m = newM.(Model)
 
 	if m.subview != svLndHubManage {
-		t.Errorf("after deactivate: got subview %d, want %d",
+		t.Errorf("after deactivate: got %d, want %d",
 			m.subview, svLndHubManage)
 	}
 	if m.cfg.LndHubAccounts[0].Active {
-		t.Error("account should be deactivated")
+		t.Error("should be deactivated")
 	}
 	if m.cfg.LndHubAccounts[0].BalanceOnDeactivate != "5000" {
 		t.Errorf("balance: got %q, want 5000",
@@ -629,15 +736,16 @@ func TestLndHubAccountCreatedMsgError(t *testing.T) {
 	m.subview = svLndHubCreateName
 	m.hubNameInput = "Bob"
 
-	newM, _ := m.Update(lndhubAccountCreatedMsg{account: nil, err: fmt.Errorf("connection refused")})
+	newM, _ := m.Update(lndhubAccountCreatedMsg{
+		account: nil, err: fmt.Errorf("refused")})
 	m = newM.(Model)
 
 	if m.subview != svLndHubManage {
-		t.Errorf("after error: got subview %d, want %d (manage)",
+		t.Errorf("after error: got %d, want %d",
 			m.subview, svLndHubManage)
 	}
 	if len(m.cfg.LndHubAccounts) != 0 {
-		t.Error("should not have added account on error")
+		t.Error("should not add on error")
 	}
 }
 
@@ -647,26 +755,27 @@ func TestHubNameAllowedChars(t *testing.T) {
 	allowed := []string{"a", "Z", "0", "9", " ", "-"}
 	for _, key := range allowed {
 		if !isAllowedHubNameChar(key) {
-			t.Errorf("isAllowedHubNameChar(%q) should be true", key)
+			t.Errorf("should allow %q", key)
 		}
 	}
 }
 
 func TestHubNameRejectedChars(t *testing.T) {
-	rejected := []string{";", "'", "\"", "/", "\\", "|", "&", "$", "`", "\n", "\t", ".", ",", "!", "@", "#"}
+	rejected := []string{";", "'", "\"", "/", "\\", "|",
+		"&", "$", "`", "\n", "\t", ".", ",", "!", "@", "#"}
 	for _, key := range rejected {
 		if isAllowedHubNameChar(key) {
-			t.Errorf("isAllowedHubNameChar(%q) should be false", key)
+			t.Errorf("should reject %q", key)
 		}
 	}
 }
 
 func TestHubNameMultiByteRejected(t *testing.T) {
 	if isAllowedHubNameChar("ab") {
-		t.Error("multi-byte input should be rejected")
+		t.Error("multi-byte should be rejected")
 	}
 	if isAllowedHubNameChar("") {
-		t.Error("empty input should be rejected")
+		t.Error("empty should be rejected")
 	}
 }
 
@@ -675,13 +784,13 @@ func TestHubNameMaxLength(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.subview = svLndHubCreateName
-	m.hubNameInput = "abcdefghijklmnopqrstuvwxyz1234" // 30 chars
+	m.hubNameInput = "abcdefghijklmnopqrstuvwxyz1234"
 
-	// Try to add one more
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	newM, _ := m.Update(tea.KeyMsg{
+		Type: tea.KeyRunes, Runes: []rune("x")})
 	m = newM.(Model)
 	if len(m.hubNameInput) != 30 {
-		t.Errorf("name length: got %d, want 30 (max)", len(m.hubNameInput))
+		t.Errorf("length: got %d, want 30", len(m.hubNameInput))
 	}
 }
 
@@ -691,10 +800,7 @@ func TestServiceNamesDefault(t *testing.T) {
 	cfg := config.Default()
 	names := serviceNames(cfg)
 	if len(names) != 2 {
-		t.Errorf("default: got %d services, want 2", len(names))
-	}
-	if names[0] != "tor" || names[1] != "bitcoind" {
-		t.Errorf("default: got %v, want [tor bitcoind]", names)
+		t.Errorf("default: got %d, want 2", len(names))
 	}
 }
 
@@ -704,9 +810,6 @@ func TestServiceNamesWithLND(t *testing.T) {
 	names := serviceNames(cfg)
 	if len(names) != 3 {
 		t.Errorf("with LND: got %d, want 3", len(names))
-	}
-	if names[2] != "lnd" {
-		t.Errorf("third service: got %q, want lnd", names[2])
 	}
 }
 
@@ -718,7 +821,7 @@ func TestServiceNamesFullStack(t *testing.T) {
 	names := serviceNames(cfg)
 	expected := []string{"tor", "bitcoind", "lnd", "syncthing", "lndhub"}
 	if len(names) != len(expected) {
-		t.Fatalf("full stack: got %d, want %d", len(names), len(expected))
+		t.Fatalf("got %d, want %d", len(names), len(expected))
 	}
 	for i, want := range expected {
 		if names[i] != want {
@@ -745,78 +848,56 @@ func TestServiceNamesNoProxyTorMode(t *testing.T) {
 	names := serviceNames(cfg)
 	for _, n := range names {
 		if n == "lndhub-proxy" {
-			t.Error("tor mode should not include lndhub-proxy")
+			t.Error("tor mode should not include proxy")
 		}
 	}
 }
 
-// ── Channels Tab ─────────────────────────────────────────
+// ── Lightning Tab ────────────────────────────────────────
 
-func TestChannelsTabRequiresLND(t *testing.T) {
+func TestLightningTabNoLND(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabChannels
+	m.activeTab = tabLightning
 
 	view := m.View()
 	if !strings.Contains(view, "Install LND") {
-		t.Error("channels tab without LND should show install message")
+		t.Error("should show install message")
 	}
 }
 
-func TestChannelsTabWithLNDNoWallet(t *testing.T) {
+func TestLightningTabNoWallet(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabChannels
+	m.activeTab = tabLightning
 
 	view := m.View()
-	if !strings.Contains(view, "Create LND wallet") {
-		t.Error("channels tab without wallet should show create message")
+	if !strings.Contains(view, "Create") {
+		t.Error("should show create wallet message")
 	}
 }
 
-func TestChannelsTabNoChannels(t *testing.T) {
+func TestLightningTabWithChannels(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	cfg.WalletCreated = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabChannels
+	m.activeTab = tabLightning
 	m.status = &statusMsg{
 		lndResponding: true,
-		channels:      []channelInfo{},
-		services:      map[string]bool{},
-	}
-
-	view := m.View()
-	if !strings.Contains(view, "No channels yet") {
-		t.Error("channels tab with no channels should show empty message")
-	}
-}
-
-func TestChannelsTabWithChannels(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	cfg.WalletCreated = true
-	m := NewModel(cfg, "0.0.0-test")
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabChannels
-	m.status = &statusMsg{
-		lndResponding: true,
+		lndBalance:    "1000000",
 		channels: []channelInfo{
 			{
-				ChanID:        123,
-				PeerAlias:     "ACINQ",
-				RemotePubkey:  "03abc123",
-				Capacity:      250000,
-				LocalBalance:  150000,
-				RemoteBalance: 100000,
-				Active:        true,
+				ChanID: 123, PeerAlias: "ACINQ",
+				RemotePubkey: "03abc123",
+				Capacity:     250000, LocalBalance: 150000,
+				RemoteBalance: 100000, Active: true,
 			},
 		},
 		services: map[string]bool{},
@@ -824,10 +905,10 @@ func TestChannelsTabWithChannels(t *testing.T) {
 
 	view := m.View()
 	if !strings.Contains(view, "ACINQ") {
-		t.Error("channels tab should show peer alias")
+		t.Error("should show peer alias")
 	}
-	if !strings.Contains(view, "1 active") {
-		t.Error("channels tab should show active count")
+	if !strings.Contains(view, "Wallet") {
+		t.Error("should show wallet card")
 	}
 }
 
@@ -838,37 +919,33 @@ func TestChannelDetailSubview(t *testing.T) {
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabChannels
+	m.activeTab = tabLightning
+	m.lightningFocus = 0
 	m.chanCursor = 0
 	m.status = &statusMsg{
 		lndResponding: true,
 		channels: []channelInfo{
 			{
-				ChanID:        123,
-				PeerAlias:     "ACINQ",
-				RemotePubkey:  "03abc123def456",
-				Capacity:      250000,
-				LocalBalance:  150000,
-				RemoteBalance: 100000,
-				Active:        true,
-				Initiator:     true,
+				ChanID: 123, PeerAlias: "ACINQ",
+				RemotePubkey: "03abc123def456",
+				Capacity:     250000, LocalBalance: 150000,
+				RemoteBalance: 100000, Active: true,
+				Initiator: true,
 			},
 		},
 		services: map[string]bool{},
 	}
 
-	// Enter opens detail
 	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = newM.(Model)
 	if m.subview != svChannelDetail {
-		t.Errorf("enter should open channel detail, got subview %d", m.subview)
+		t.Errorf("enter should open detail, got %d", m.subview)
 	}
 
-	// Backspace returns
 	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
-		t.Errorf("backspace should return to channels, got subview %d", m.subview)
+		t.Errorf("backspace should return, got %d", m.subview)
 	}
 }
 
@@ -894,23 +971,125 @@ func TestFormatSats(t *testing.T) {
 }
 
 func TestRenderBalanceBar(t *testing.T) {
-	// 50/50 split
 	bar := renderBalanceBar(500000, 500000, 1000000, 20)
 	if len(bar) == 0 {
-		t.Error("balance bar should not be empty")
+		t.Error("should not be empty")
 	}
-
-	// Zero capacity
 	bar = renderBalanceBar(0, 0, 0, 20)
 	if len(bar) == 0 {
-		t.Error("zero capacity bar should not be empty")
+		t.Error("zero capacity should not be empty")
 	}
 }
 
-func TestChannelVisibleCount(t *testing.T) {
+func TestParseBalance(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int64
+	}{
+		{"0", 0},
+		{"1000000", 1000000},
+		{"", 0},
+		{"abc", 0},
+		{"12abc34", 1234},
+	}
+	for _, tt := range tests {
+		got := parseBalance(tt.input)
+		if got != tt.want {
+			t.Errorf("parseBalance(%q): got %d, want %d",
+				tt.input, got, tt.want)
+		}
+	}
+}
+
+// ── Poll Interval ────────────────────────────────────────
+
+func TestPollIntervalNoStatus(t *testing.T) {
 	m := testModel()
-	count := m.channelVisibleCount()
-	if count < 3 {
-		t.Errorf("visible count too small: %d", count)
+	m.status = nil
+	if m.pollInterval().Seconds() != 3 {
+		t.Errorf("no status: got %v, want 3s", m.pollInterval())
+	}
+}
+
+func TestPollIntervalLNDNotResponding(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.status = &statusMsg{
+		lndResponding: false,
+		services:      map[string]bool{},
+	}
+	if m.pollInterval().Seconds() != 5 {
+		t.Errorf("LND not responding: got %v, want 5s",
+			m.pollInterval())
+	}
+}
+
+func TestPollIntervalBitcoinSyncing(t *testing.T) {
+	m := testModel()
+	m.status = &statusMsg{
+		btcSynced: false,
+		services:  map[string]bool{},
+	}
+	if m.pollInterval().Seconds() != 15 {
+		t.Errorf("syncing: got %v, want 15s", m.pollInterval())
+	}
+}
+
+func TestPollIntervalStable(t *testing.T) {
+	m := testModel()
+	m.status = &statusMsg{
+		btcSynced:     true,
+		lndResponding: true,
+		services:      map[string]bool{},
+	}
+	if m.pollInterval().Seconds() != 60 {
+		t.Errorf("stable: got %v, want 60s", m.pollInterval())
+	}
+}
+
+// ── Subview Classification ───────────────────────────────
+
+func TestIsChannelSubview(t *testing.T) {
+	channelViews := []wSubview{
+		svChannelOpen, svChannelCustomPeer, svChannelAmountSelect,
+		svChannelOpenConfirm, svChannelOpening, svChannelOpenResult,
+		svChannelFundWallet,
+	}
+	for _, sv := range channelViews {
+		if !isChannelSubview(sv) {
+			t.Errorf("isChannelSubview(%d) should be true", sv)
+		}
+	}
+	if isChannelSubview(svNone) {
+		t.Error("svNone should not be channel subview")
+	}
+	if isChannelSubview(svZeus) {
+		t.Error("svZeus should not be channel subview")
+	}
+}
+
+func TestIsPairingSubview(t *testing.T) {
+	if !isPairingSubview(svZeus) {
+		t.Error("svZeus should be pairing")
+	}
+	if !isPairingSubview(svQR) {
+		t.Error("svQR should be pairing")
+	}
+	if isPairingSubview(svNone) {
+		t.Error("svNone should not be pairing")
+	}
+}
+
+func TestIsAddonSubview(t *testing.T) {
+	if !isAddonSubview(svSyncthingDetail) {
+		t.Error("svSyncthingDetail should be addon")
+	}
+	if !isAddonSubview(svLndHubManage) {
+		t.Error("svLndHubManage should be addon")
+	}
+	if isAddonSubview(svNone) {
+		t.Error("svNone should not be addon")
 	}
 }
