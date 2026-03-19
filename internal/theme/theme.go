@@ -1,8 +1,6 @@
-// internal/theme/theme.go
-
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // ── Core colors ──────────────────────────────────────────
 

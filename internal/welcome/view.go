@@ -1,111 +1,117 @@
-// internal/welcome/view.go
-
 package welcome
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
-func (m Model) View() string {
-	if m.width == 0 {
-		return "Loading..."
-	}
-	switch m.subview {
-	case svWalletInfo:
-		return m.viewWalletInfo()
-	case svZeus:
-		return m.viewZeus()
-	case svSyncthingDetail:
-		return m.viewSyncthingDetail()
-	case svSyncthingPairInput:
-		return m.viewSyncthingPairInput()
-	case svSyncthingDeviceDetail:
-		return m.viewSyncthingDeviceDetail()
-	case svSyncthingWebUI:
-		return m.viewSyncthingWebUI()
-	case svSyncthingDeviceQR:
-		return m.viewSyncthingDeviceQR()
-	case svChannelDetail:
-		return m.viewChannelDetail()
-	case svChannelOpen:
-		return m.viewChannelOpen()
-	case svChannelAmountSelect:
-		return m.viewChannelAmountSelect()
-	case svChannelCustomPeer:
-		return m.viewChannelCustomPeer()
-	case svChannelOpenConfirm:
-		return m.viewChannelOpenConfirm()
-	case svChannelOpening:
-		return m.viewChannelOpening()
-	case svChannelOpenResult:
-		return m.viewChannelOpenResult()
-	case svChannelFundWallet:
-		return m.viewChannelFundWallet()
-	case svLndHubManage:
-		return m.viewLndHubManage()
-	case svLndHubCreateName:
-		return m.viewLndHubCreateName()
-	case svLndHubCreateAccount:
-		return m.viewLndHubNewAccount()
-	case svLndHubAccountDetail:
-		return m.viewLndHubAccountDetail()
-	case svLndHubDeactivateConfirm:
-		return m.viewLndHubDeactivateConfirm()
-	case svQR:
-		return m.viewQR()
-	case svFullURL:
-		return m.viewFullURL()
-	case svReceive:
-		return m.viewReceive()
-	case svReceiveWaiting:
-		return m.viewReceiveWaiting()
-	case svReceivePaid:
-		return m.viewReceivePaid()
-	case svReceiveExpired:
-		return m.viewReceiveExpired()
-	case svSend:
-		return m.viewSend()
-	case svSendConfirm:
-		return m.viewSendConfirm()
-	case svSendInFlight:
-		return m.viewSendInFlight()
-	case svSendResult:
-		return m.viewSendResult()
-	case svPaymentHistory:
-		return m.viewPaymentHistory()
-	case svPaymentDetail:
-		return m.viewPaymentDetail()
-	}
-
-	bw := min(m.width-4, theme.ContentWidth)
+func (m Model) View() tea.View {
 	var content string
-	switch m.activeTab {
-	case tabDashboard:
-		content = m.viewDashboard(bw)
-	case tabLightning:
-		content = m.viewLightningTab(bw)
-	case tabPairing:
-		content = m.viewPairing(bw)
-	case tabAddons:
-		content = m.viewAddons(bw)
-	case tabSettings:
-		content = m.viewSettings(bw)
+
+	if m.width == 0 {
+		content = "Loading..."
+	} else {
+		switch m.subview {
+		case svWalletInfo:
+			content = m.viewWalletInfo()
+		case svZeus:
+			content = m.viewZeus()
+		case svSyncthingDetail:
+			content = m.viewSyncthingDetail()
+		case svSyncthingPairInput:
+			content = m.viewSyncthingPairInput()
+		case svSyncthingDeviceDetail:
+			content = m.viewSyncthingDeviceDetail()
+		case svSyncthingWebUI:
+			content = m.viewSyncthingWebUI()
+		case svSyncthingDeviceQR:
+			content = m.viewSyncthingDeviceQR()
+		case svChannelDetail:
+			content = m.viewChannelDetail()
+		case svChannelOpen:
+			content = m.viewChannelOpen()
+		case svChannelAmountSelect:
+			content = m.viewChannelAmountSelect()
+		case svChannelCustomPeer:
+			content = m.viewChannelCustomPeer()
+		case svChannelOpenConfirm:
+			content = m.viewChannelOpenConfirm()
+		case svChannelOpening:
+			content = m.viewChannelOpening()
+		case svChannelOpenResult:
+			content = m.viewChannelOpenResult()
+		case svChannelFundWallet:
+			content = m.viewChannelFundWallet()
+		case svLndHubManage:
+			content = m.viewLndHubManage()
+		case svLndHubCreateName:
+			content = m.viewLndHubCreateName()
+		case svLndHubCreateAccount:
+			content = m.viewLndHubNewAccount()
+		case svLndHubAccountDetail:
+			content = m.viewLndHubAccountDetail()
+		case svLndHubDeactivateConfirm:
+			content = m.viewLndHubDeactivateConfirm()
+		case svQR:
+			content = m.viewQR()
+		case svFullURL:
+			content = m.viewFullURL()
+		case svReceive:
+			content = m.viewReceive()
+		case svReceiveWaiting:
+			content = m.viewReceiveWaiting()
+		case svReceivePaid:
+			content = m.viewReceivePaid()
+		case svReceiveExpired:
+			content = m.viewReceiveExpired()
+		case svSend:
+			content = m.viewSend()
+		case svSendConfirm:
+			content = m.viewSendConfirm()
+		case svSendInFlight:
+			content = m.viewSendInFlight()
+		case svSendResult:
+			content = m.viewSendResult()
+		case svPaymentHistory:
+			content = m.viewPaymentHistory()
+		case svPaymentDetail:
+			content = m.viewPaymentDetail()
+		default:
+			bw := min(m.width-4, theme.ContentWidth)
+			var tabContent string
+			switch m.activeTab {
+			case tabDashboard:
+				tabContent = m.viewDashboard(bw)
+			case tabLightning:
+				tabContent = m.viewLightningTab(bw)
+			case tabPairing:
+				tabContent = m.viewPairing(bw)
+			case tabAddons:
+				tabContent = m.viewAddons(bw)
+			case tabSettings:
+				tabContent = m.viewSettings(bw)
+			}
+
+			title := theme.Title.Width(bw).Align(lipgloss.Center).
+				Render(fmt.Sprintf(" Virtual Private Node v%s ", m.version))
+			tabs := m.viewTabs(bw)
+			footer := m.viewFooter()
+			body := lipgloss.JoinVertical(lipgloss.Center,
+				"", title, "", tabs, "", tabContent)
+			content = lipgloss.JoinVertical(lipgloss.Center, body, "", footer)
+			content = lipgloss.Place(m.width, m.height,
+				lipgloss.Center, lipgloss.Center, content)
+		}
 	}
 
-	title := theme.Title.Width(bw).Align(lipgloss.Center).
-		Render(fmt.Sprintf(" Virtual Private Node v%s ", m.version))
-	tabs := m.viewTabs(bw)
-	footer := m.viewFooter()
-	body := lipgloss.JoinVertical(lipgloss.Center,
-		"", title, "", tabs, "", content)
-	full := lipgloss.JoinVertical(lipgloss.Center, body, "", footer)
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, full)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 func (m Model) viewTabs(tw int) string {
@@ -189,8 +195,6 @@ func (m Model) viewFullURL() string {
 		lipgloss.Center, lipgloss.Center, content)
 }
 
-// viewLightningTab renders the Lightning tab with two cards:
-// Channels (left) and Wallet (right).
 func (m Model) viewLightningTab(bw int) string {
 	halfW := (bw - 2) / 2
 	cardH := theme.BoxHeight
@@ -352,6 +356,7 @@ func (m Model) channelsListCard(w, h int) string {
 		totalLocal += ch.LocalBalance
 		totalRemote += ch.RemoteBalance
 	}
+	_ = totalCap
 	lines = append(lines, "  "+theme.Label.Render("Send: ")+
 		theme.Value.Render(formatSats(totalLocal)))
 	lines = append(lines, "  "+theme.Label.Render("Recv: ")+
@@ -402,7 +407,6 @@ func (m Model) lightningWalletCard(w, h int) string {
 			Render(padLines(lines, h))
 	}
 
-	// Balance
 	balance := "0"
 	if m.status.lndBalance != "" {
 		balance = m.status.lndBalance
@@ -412,7 +416,6 @@ func (m Model) lightningWalletCard(w, h int) string {
 		formatSats(parseBalance(balance))+" sats"))
 	lines = append(lines, "")
 
-	// Node info summary
 	if m.status.lndPubkey != "" {
 		pubkeyShort := m.status.lndPubkey
 		if len(pubkeyShort) > 20 {
@@ -429,7 +432,6 @@ func (m Model) lightningWalletCard(w, h int) string {
 	}
 	lines = append(lines, "")
 
-	// Sync status
 	if m.status.lndSyncedChain {
 		lines = append(lines, "  "+theme.GreenDot.Render("●")+
 			" Chain synced")
@@ -461,7 +463,6 @@ func (m Model) lightningWalletCard(w, h int) string {
 		Render(padLines(lines, h))
 }
 
-// viewWalletInfo shows detailed wallet/node info (was svLightning).
 func (m Model) viewWalletInfo() string {
 	bw := min(m.width-4, theme.ContentWidth)
 	var lines []string
@@ -537,7 +538,6 @@ func padLines(lines []string, target int) string {
 	return strings.Join(lines, "\n")
 }
 
-// parseBalance converts a balance string to int64 for formatting.
 func parseBalance(s string) int64 {
 	var n int64
 	for _, c := range s {

@@ -11,7 +11,7 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/system"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
