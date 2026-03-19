@@ -213,14 +213,13 @@ func (m Model) viewSyncthingPairInput() string {
 	var lines []string
 	lines = append(lines, theme.Header.Render("Pair Device"))
 	lines = append(lines, "")
-	lines = append(lines, "  "+theme.Label.Render("Device ID: "))
-	lines = append(lines, "  "+
-		theme.Value.Render(m.syncDeviceInput+"_"))
+	lines = append(lines, "  "+theme.Label.Render("Device ID:"))
+	lines = append(lines, m.syncDeviceInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Dim.Render(
 		"Paste your local Syncthing Device ID."))
 	lines = append(lines, "  "+theme.Dim.Render(
-		"From local Syncthing: ⚙ Actions → Show ID"))
+		"From local Syncthing: Actions → Show ID"))
 
 	if m.syncPairError != "" {
 		lines = append(lines, "")
@@ -257,7 +256,7 @@ func (m Model) viewSyncthingPairInput() string {
 			lines = append(lines, "  "+theme.Dim.Render(
 				"   Advanced → Folder Type → Receive Only"))
 			lines = append(lines, "  "+theme.Dim.Render(
-				"   ✓ Save"))
+				"   Save"))
 		}
 	}
 
@@ -268,10 +267,10 @@ func (m Model) viewSyncthingPairInput() string {
 	var footer string
 	if m.syncPairSuccess {
 		footer = theme.Footer.Render(
-			"  enter done • backspace back  ")
+			"  enter done • esc back  ")
 	} else {
 		footer = theme.Footer.Render(
-			"  enter pair • backspace cancel  ")
+			"  enter pair • esc cancel  ")
 	}
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
@@ -449,8 +448,8 @@ func (m Model) viewLndHubCreateName() string {
 	var lines []string
 	lines = append(lines, theme.Header.Render("Create Account"))
 	lines = append(lines, "")
-	lines = append(lines, "  "+theme.Label.Render("Name: ")+
-		theme.Value.Render(m.hubNameInput+"_"))
+	lines = append(lines, "  "+theme.Label.Render("Name:"))
+	lines = append(lines, m.hubNameInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Dim.Render(
 		"Letters, numbers, spaces, hyphens"))
@@ -462,7 +461,7 @@ func (m Model) viewLndHubCreateName() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡️ New Account ")
 	footer := theme.Footer.Render(
-		"  enter create • backspace cancel  ")
+		"  enter create • esc cancel  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -473,7 +472,7 @@ func (m Model) viewLndHubNewAccount() string {
 	bw := min(m.width-4, theme.ContentWidth)
 	var lines []string
 	lines = append(lines, theme.Success.Render(
-		"✅ Account created: "+m.hubNameInput))
+		"✅ Account created: "+m.hubNameInput.Value()))
 	lines = append(lines, "")
 
 	if m.lastAccount != nil {
@@ -497,7 +496,7 @@ func (m Model) viewLndHubNewAccount() string {
 			theme.Mono.Render(m.lastAccount.Password))
 		lines = append(lines, "")
 		lines = append(lines, "  "+theme.Warning.Render(
-			"Share these credentials with "+m.hubNameInput+"."))
+			"Share these credentials with "+m.hubNameInput.Value()+"."))
 		lines = append(lines, "  "+theme.Warning.Render(
 			"They will not be shown again."))
 		lines = append(lines, "")

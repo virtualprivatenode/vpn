@@ -1,5 +1,3 @@
-// internal/welcome/channel_open.go
-
 package welcome
 
 import (
@@ -61,7 +59,7 @@ func (m Model) viewChannelOpen() string {
 
 	if m.cfg.P2PMode == "tor" {
 		lines = append(lines, "  "+theme.Dim.Render(
-			"🧅 Tor-only mode — peers marked (Tor) accept Tor connections"))
+			"Tor-only mode — peers marked (Tor) accept Tor connections"))
 		lines = append(lines, "")
 	}
 
@@ -115,7 +113,7 @@ func (m Model) viewChannelOpen() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Open Channel ")
 	footer := theme.Footer.Render(
-		"  ↑↓ select • enter choose • backspace cancel • q quit  ")
+		"  ↑↓ select • enter choose • esc cancel • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -129,23 +127,11 @@ func (m Model) viewChannelCustomPeer() string {
 	lines = append(lines, theme.Header.Render("Custom Peer"))
 	lines = append(lines, "")
 
-	pubkeyStyle := theme.Value
-	hostStyle := theme.Value
-	pubkeyCursor := ""
-	hostCursor := ""
-	if m.chanCustomInputField == 0 {
-		pubkeyStyle = theme.Action
-		pubkeyCursor = "_"
-	} else {
-		hostStyle = theme.Action
-		hostCursor = "_"
-	}
-
 	lines = append(lines, "  "+theme.Label.Render("Node Pubkey:"))
-	lines = append(lines, "  "+pubkeyStyle.Render(m.chanCustomPubkey+pubkeyCursor))
+	lines = append(lines, m.chanPubkeyInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Label.Render("Host (host:port):"))
-	lines = append(lines, "  "+hostStyle.Render(m.chanCustomHost+hostCursor))
+	lines = append(lines, m.chanHostInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Dim.Render("Tab to switch fields • Enter to continue"))
 
@@ -159,7 +145,7 @@ func (m Model) viewChannelCustomPeer() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Custom Peer ")
 	footer := theme.Footer.Render(
-		"  tab switch field • enter continue • backspace cancel  ")
+		"  tab switch field • enter continue • esc cancel  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -170,7 +156,6 @@ func (m Model) viewChannelAmountSelect() string {
 	bw := min(m.width-4, theme.ContentWidth)
 	var lines []string
 
-	// Title shows peer name
 	peerName := m.chanOpenAlias
 	if peerName == "" {
 		if len(m.chanOpenPubkey) > 16 {
@@ -200,8 +185,12 @@ func (m Model) viewChannelAmountSelect() string {
 			style = theme.Action
 		}
 		label := presetLabel(amt)
-		if amt == 0 && m.chanAmountPreset == i && m.chanCustomAmountStr != "" {
-			label = "Custom: " + m.chanCustomAmountStr + "_ sats"
+		if amt == 0 && m.chanAmountPreset == i {
+			// Show the textinput for custom amount
+			lines = append(lines, fmt.Sprintf("  %s%s",
+				prefix, style.Render("Custom: ")))
+			lines = append(lines, "    "+m.chanAmountInput.View())
+			continue
 		}
 		lines = append(lines, fmt.Sprintf("  %s%s", prefix, style.Render(label)))
 	}
@@ -216,7 +205,7 @@ func (m Model) viewChannelAmountSelect() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Channel Size ")
 	footer := theme.Footer.Render(
-		"  ↑↓ select • enter choose • backspace back  ")
+		"  ↑↓ select • enter choose • esc back  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -262,7 +251,7 @@ func (m Model) viewChannelOpenConfirm() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Confirm Channel ")
 	footer := theme.Footer.Render(
-		"  y confirm • p toggle private/public • backspace cancel  ")
+		"  y confirm • p toggle private/public • esc cancel  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -367,7 +356,7 @@ func (m Model) viewChannelFundWallet() string {
 		Render(strings.Join(lines, "\n"))
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Fund Wallet ")
-	footer := theme.Footer.Render("  backspace back • q quit  ")
+	footer := theme.Footer.Render("  esc back • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,

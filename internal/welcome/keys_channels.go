@@ -1,19 +1,17 @@
-// internal/welcome/keys_channels.go
-
 package welcome
 
 import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func (m Model) handleChannelsKey(key string) (tea.Model, tea.Cmd) {
+func (m Model) handleChannelsKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.subview {
 	case svChannelOpen:
 		return m.handleChannelOpenKey(key)
 	case svChannelCustomPeer:
-		return m.handleChannelCustomPeerKey(key)
+		return m.handleChannelCustomPeerKey(key, msg)
 	case svChannelAmountSelect:
-		return m.handleChannelAmountKey(key)
+		return m.handleChannelAmountKey(key, msg)
 	case svChannelOpenConfirm:
 		return m.handleChannelConfirmKey(key)
 	case svChannelOpening:
@@ -30,7 +28,7 @@ func (m Model) handleChannelOpenKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.subview = svNone
 		m.chanOpenError = ""
 		return m, nil
@@ -47,9 +45,8 @@ func (m Model) handleChannelOpenKey(key string) (tea.Model, tea.Cmd) {
 	case "enter":
 		customIdx := len(m.chanPeerList)
 		if m.chanOpenPeerIdx == customIdx {
-			m.chanCustomPubkey = ""
-			m.chanCustomHost = ""
-			m.chanCustomInputField = 0
+			m.chanPubkeyInput = newChanPubkeyInput()
+			m.chanHostInput = newChanHostInput()
 			m.chanOpenError = ""
 			m.subview = svChannelCustomPeer
 			return m, nil
@@ -60,7 +57,7 @@ func (m Model) handleChannelOpenKey(key string) (tea.Model, tea.Cmd) {
 			m.chanOpenHost = peer.Host
 			m.chanOpenAlias = peer.Alias
 			m.chanAmountPreset = 0
-			m.chanCustomAmountStr = ""
+			m.chanAmountInput = newChanAmountInput()
 			m.chanOpenError = ""
 			m.subview = svChannelAmountSelect
 			return m, nil
@@ -70,97 +67,99 @@ func (m Model) handleChannelOpenKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleChannelCustomPeerKey(key string) (tea.Model, tea.Cmd) {
+func (m Model) handleChannelCustomPeerKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if m.chanCustomInputField == 0 {
-			if len(m.chanCustomPubkey) > 0 {
-				m.chanCustomPubkey = m.chanCustomPubkey[:len(m.chanCustomPubkey)-1]
-			} else {
-				m.subview = svChannelOpen
-				m.chanOpenError = ""
-			}
-		} else {
-			if len(m.chanCustomHost) > 0 {
-				m.chanCustomHost = m.chanCustomHost[:len(m.chanCustomHost)-1]
-			}
-		}
+	case "esc":
+		m.subview = svChannelOpen
+		m.chanOpenError = ""
 		return m, nil
 	case "tab":
-		m.chanCustomInputField = (m.chanCustomInputField + 1) % 2
+		if m.chanPubkeyInput.Focused() {
+			m.chanPubkeyInput.Blur()
+			m.chanHostInput.Focus()
+		} else {
+			m.chanHostInput.Blur()
+			m.chanPubkeyInput.Focus()
+		}
 		return m, nil
 	case "enter":
-		if m.chanCustomPubkey == "" {
+		pubkey := m.chanPubkeyInput.Value()
+		host := m.chanHostInput.Value()
+		if pubkey == "" {
 			m.chanOpenError = "Pubkey is required"
 			return m, nil
 		}
-		if len(m.chanCustomPubkey) != 66 {
+		if len(pubkey) != 66 {
 			m.chanOpenError = "Pubkey must be 66 hex characters"
 			return m, nil
 		}
-		if m.chanCustomHost == "" {
+		if host == "" {
 			m.chanOpenError = "Host is required (e.g., 1.2.3.4:9735)"
 			return m, nil
 		}
-		m.chanOpenPubkey = m.chanCustomPubkey
-		m.chanOpenHost = m.chanCustomHost
-		m.chanOpenAlias = m.chanCustomPubkey[:16] + "..."
+		m.chanOpenPubkey = pubkey
+		m.chanOpenHost = host
+		m.chanOpenAlias = pubkey[:16] + "..."
 		m.chanOpenError = ""
 		m.chanAmountPreset = 0
-		m.chanCustomAmountStr = ""
+		m.chanAmountInput = newChanAmountInput()
 		m.subview = svChannelAmountSelect
 		return m, nil
 	default:
-		if m.chanCustomInputField == 0 {
-			for _, ch := range key {
-				if len(m.chanCustomPubkey) < 66 && isHexChar(byte(ch)) {
-					m.chanCustomPubkey += string(ch)
-				}
-			}
+		var cmd tea.Cmd
+		if m.chanPubkeyInput.Focused() {
+			m.chanPubkeyInput, cmd = m.chanPubkeyInput.Update(tea.Msg(msg))
 		} else {
-			for _, ch := range key {
-				if len(m.chanCustomHost) < 80 {
-					m.chanCustomHost += string(ch)
-				}
-			}
+			m.chanHostInput, cmd = m.chanHostInput.Update(tea.Msg(msg))
 		}
-		return m, nil
+		return m, cmd
 	}
 }
 
-func (m Model) handleChannelAmountKey(key string) (tea.Model, tea.Cmd) {
+func (m Model) handleChannelAmountKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	isCustomSelected := m.chanAmountPreset == len(amountPresets)-1
 
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if isCustomSelected && len(m.chanCustomAmountStr) > 0 {
-			m.chanCustomAmountStr = m.chanCustomAmountStr[:len(m.chanCustomAmountStr)-1]
-			m.chanOpenError = ""
-			return m, nil
-		}
+	case "esc":
 		m.subview = svChannelOpen
-		m.chanCustomAmountStr = ""
 		m.chanOpenError = ""
 		return m, nil
 	case "up", "k":
-		if m.chanAmountPreset > 0 {
-			m.chanAmountPreset--
-			m.chanOpenError = ""
+		if !isCustomSelected {
+			if m.chanAmountPreset > 0 {
+				m.chanAmountPreset--
+				m.chanOpenError = ""
+			}
+			return m, nil
 		}
-		return m, nil
 	case "down", "j":
-		if m.chanAmountPreset < len(amountPresets)-1 {
-			m.chanAmountPreset++
-			m.chanOpenError = ""
+		if !isCustomSelected {
+			if m.chanAmountPreset < len(amountPresets)-1 {
+				m.chanAmountPreset++
+				m.chanOpenError = ""
+			}
+			return m, nil
 		}
-		return m, nil
+	case "backspace":
+		if isCustomSelected && m.chanAmountInput.Value() != "" {
+			// Fall through to textinput update below
+		} else if !isCustomSelected {
+			m.subview = svChannelOpen
+			m.chanOpenError = ""
+			return m, nil
+		} else {
+			// Custom selected but empty — go back
+			m.subview = svChannelOpen
+			m.chanOpenError = ""
+			return m, nil
+		}
 	case "enter":
 		if isCustomSelected {
-			amt, err := parseCustomAmount(m.chanCustomAmountStr)
+			amt, err := parseCustomAmount(m.chanAmountInput.Value())
 			if err != nil {
 				m.chanOpenError = err.Error()
 				return m, nil
@@ -173,15 +172,11 @@ func (m Model) handleChannelAmountKey(key string) (tea.Model, tea.Cmd) {
 		m.chanOpenError = ""
 		m.subview = svChannelOpenConfirm
 		return m, nil
-	default:
-		if isCustomSelected {
-			for _, ch := range key {
-				if ch >= '0' && ch <= '9' && len(m.chanCustomAmountStr) < 10 {
-					m.chanCustomAmountStr += string(ch)
-				}
-			}
-			return m, nil
-		}
+	}
+	if isCustomSelected {
+		var cmd tea.Cmd
+		m.chanAmountInput, cmd = m.chanAmountInput.Update(tea.Msg(msg))
+		return m, cmd
 	}
 	return m, nil
 }
@@ -190,7 +185,7 @@ func (m Model) handleChannelConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.chanOpenError = ""
 		m.subview = svChannelAmountSelect
 		return m, nil
@@ -222,7 +217,7 @@ func (m Model) handleChannelResultKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "enter", "backspace":
+	case "enter", "esc", "backspace":
 		m.subview = svNone
 		m.chanOpenError = ""
 		m.chanOpenTxid = ""
@@ -236,7 +231,7 @@ func (m Model) handleChannelFundKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.subview = svNone
 		m.chanFundAddress = ""
 		return m, nil

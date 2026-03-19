@@ -659,12 +659,12 @@ func TestLndHubCreateNameBackspaceEmpty(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.subview = svLndHubCreateName
-	m.hubNameInput = ""
+	m.hubNameInput = newHubNameInput()
 
-	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = newM.(Model)
 	if m.subview != svLndHubManage {
-		t.Errorf("backspace empty: got %d, want %d",
+		t.Errorf("escape from create name: got %d, want %d",
 			m.subview, svLndHubManage)
 	}
 }
@@ -674,15 +674,17 @@ func TestLndHubCreateNameBackspaceWithText(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.subview = svLndHubCreateName
-	m.hubNameInput = "Ali"
+	m.hubNameInput = newHubNameInput()
+	m.hubNameInput.SetValue("Ali")
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubCreateName {
 		t.Error("backspace with text should stay")
 	}
-	if m.hubNameInput != "Al" {
-		t.Errorf("got %q, want Al", m.hubNameInput)
+	// Correct method to retrieve the value from textinput.Model
+	if m.hubNameInput.Value() != "Al" {
+		t.Errorf("got %q, want Al", m.hubNameInput.Value())
 	}
 }
 
@@ -694,7 +696,8 @@ func TestLndHubAccountCreatedMsg(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.subview = svLndHubCreateName
-	m.hubNameInput = "Alice"
+	m.hubNameInput = newHubNameInput()
+	m.hubNameInput.SetValue("Alice")
 
 	account := &installer.LndHubAccount{
 		Login: "abc123", Password: "def456",
@@ -756,7 +759,8 @@ func TestLndHubAccountCreatedMsgError(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.subview = svLndHubCreateName
-	m.hubNameInput = "Bob"
+	m.hubNameInput = newHubNameInput()
+	m.hubNameInput.SetValue("Bob")
 
 	newM, _ := m.Update(lndhubAccountCreatedMsg{
 		account: nil, err: fmt.Errorf("refused")})
@@ -806,12 +810,13 @@ func TestHubNameMaxLength(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.subview = svLndHubCreateName
-	m.hubNameInput = "abcdefghijklmnopqrstuvwxyz1234"
+	m.hubNameInput = newHubNameInput()
+	m.hubNameInput.SetValue("abcdefghijklmnopqrstuvwxyz1234")
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = newM.(Model)
-	if len(m.hubNameInput) != 30 {
-		t.Errorf("length: got %d, want 30", len(m.hubNameInput))
+	if len(m.hubNameInput.Value()) != 30 {
+		t.Errorf("length: got %d, want 30", len(m.hubNameInput.Value()))
 	}
 }
 
