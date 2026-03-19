@@ -5,7 +5,7 @@ package welcome
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/bitcoin"
 	"github.com/ripsline/virtual-private-node/internal/theme"

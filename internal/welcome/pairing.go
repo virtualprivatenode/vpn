@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	qrterminal "github.com/mdp/qrterminal/v3"
 
 	"github.com/ripsline/virtual-private-node/internal/paths"

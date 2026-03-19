@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/theme"

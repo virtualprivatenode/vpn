@@ -1,5 +1,3 @@
-// internal/welcome/welcome_test.go
-
 package welcome
 
 import (
@@ -8,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/installer"
@@ -81,7 +79,7 @@ func TestTabForward(t *testing.T) {
 	expected := []wTab{tabLightning, tabPairing, tabAddons,
 		tabSettings, tabDashboard}
 	for _, want := range expected {
-		newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = newM.(Model)
 		if m.activeTab != want {
 			t.Errorf("after tab: got %d, want %d",
@@ -95,7 +93,7 @@ func TestTabBackward(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = newM.(Model)
 	if m.activeTab != tabSettings {
 		t.Errorf("after shift+tab: got %d, want %d (settings)",
@@ -119,8 +117,8 @@ func TestNumberKeySwitchesTab(t *testing.T) {
 		{"5", tabSettings},
 	}
 	for _, tt := range tests {
-		newM, _ := m.Update(tea.KeyMsg{
-			Type: tea.KeyRunes, Runes: []rune(tt.key)})
+		r := []rune(tt.key)
+		newM, _ := m.Update(tea.KeyPressMsg{Code: r[0], Text: tt.key})
 		result := newM.(Model)
 		if result.activeTab != tt.want {
 			t.Errorf("key %s: got tab %d, want %d",
@@ -138,32 +136,28 @@ func TestDashboardCardNavigation(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardServices
 
-	newM, _ := m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
 	if m.dashCard != cardSystem {
 		t.Errorf("right from services: got %d, want %d (system)",
 			m.dashCard, cardSystem)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("j")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = newM.(Model)
 	if m.dashCard != cardLightning {
 		t.Errorf("down from system: got %d, want %d (lightning)",
 			m.dashCard, cardLightning)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("h")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	m = newM.(Model)
 	if m.dashCard != cardBitcoin {
 		t.Errorf("left from lightning: got %d, want %d (bitcoin)",
 			m.dashCard, cardBitcoin)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("k")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	m = newM.(Model)
 	if m.dashCard != cardServices {
 		t.Errorf("up from bitcoin: got %d, want %d (services)",
@@ -180,7 +174,7 @@ func TestEnterActivatesServicesCard(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardServices
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if !m.cardActive {
 		t.Error("enter on services card should activate it")
@@ -198,7 +192,7 @@ func TestEnterActivatesSystemCard(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardSystem
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if !m.cardActive {
 		t.Error("enter on system card should activate it")
@@ -213,7 +207,7 @@ func TestBackspaceDeactivatesCard(t *testing.T) {
 	m.dashCard = cardServices
 	m.cardActive = true
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.cardActive {
 		t.Error("backspace should deactivate card")
@@ -229,7 +223,7 @@ func TestLightningCardInstallLND(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardLightning
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svLNDInstall {
 		t.Errorf("enter on lightning without LND: got %d, want %d",
@@ -244,7 +238,7 @@ func TestLightningCardCreateWallet(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardLightning
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svWalletCreate {
 		t.Errorf("enter on lightning no wallet: got %d, want %d",
@@ -262,7 +256,7 @@ func TestLightningCardSwitchesToTab(t *testing.T) {
 	m.activeTab = tabDashboard
 	m.dashCard = cardLightning
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.activeTab != tabLightning {
 		t.Errorf("enter on configured lightning card: got tab %d, want %d",
@@ -285,24 +279,21 @@ func TestLightningTabLeftRight(t *testing.T) {
 	m.activeTab = tabLightning
 	m.lightningFocus = 0
 
-	newM, _ := m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
 	if m.lightningFocus != 1 {
 		t.Errorf("right from 0: got %d, want 1",
 			m.lightningFocus)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
 	if m.lightningFocus != 1 {
 		t.Errorf("right from 1: got %d, want 1 (clamped)",
 			m.lightningFocus)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("h")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	m = newM.(Model)
 	if m.lightningFocus != 0 {
 		t.Errorf("left from 1: got %d, want 0",
@@ -320,7 +311,7 @@ func TestLightningWalletCardEnter(t *testing.T) {
 	m.activeTab = tabLightning
 	m.lightningFocus = 1
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.subview != svWalletInfo {
 		t.Errorf("enter on wallet card: got %d, want %d",
@@ -334,7 +325,7 @@ func TestWalletInfoBackspace(t *testing.T) {
 	m.height = 24
 	m.subview = svWalletInfo
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
 		t.Errorf("backspace from wallet info: got %d, want %d",
@@ -351,7 +342,7 @@ func TestFullURLBackspaceReturnsToOrigin(t *testing.T) {
 	m.subview = svFullURL
 	m.urlReturnTo = svSyncthingDetail
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svSyncthingDetail {
 		t.Errorf("backspace from full URL: got %d, want %d",
@@ -366,7 +357,7 @@ func TestFullURLBackspaceNoReturnTo(t *testing.T) {
 	m.subview = svFullURL
 	m.urlReturnTo = svNone
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
 		t.Errorf("backspace from full URL no return: got %d, want %d",
@@ -381,7 +372,7 @@ func TestQRBackspaceGoesToZeus(t *testing.T) {
 	m.subview = svQR
 	m.qrLabel = ""
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svZeus {
 		t.Errorf("backspace from QR: got %d, want %d (zeus)",
@@ -396,7 +387,7 @@ func TestQRBackspaceGoesToLndHubNewAccount(t *testing.T) {
 	m.subview = svQR
 	m.qrLabel = "Alice — Tor"
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubCreateAccount {
 		t.Errorf("backspace from LndHub QR: got %d, want %d",
@@ -414,7 +405,7 @@ func TestTabSwitchResetsCardActive(t *testing.T) {
 	m.cardActive = true
 	m.svcConfirm = "restart"
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = newM.(Model)
 	if m.cardActive {
 		t.Error("tab switch should deactivate card")
@@ -489,7 +480,7 @@ func TestAddonsSyncthingRequiresLND(t *testing.T) {
 	m.activeTab = tabAddons
 	m.addonFocus = 0
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction == svSyncthingInstall {
 		t.Error("syncthing install should not trigger without LND")
@@ -505,9 +496,8 @@ func TestSettingsUpdateConfirm(t *testing.T) {
 	m.activeTab = tabSettings
 	m.latestVersion = "9.9.9"
 
-	newM, _ := m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune{13}})
-	// enter key
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_ = newM
 	newM, _ = m.handleSettingsTabKey("enter")
 	m = newM.(Model)
 	if !m.updateConfirm {
@@ -544,7 +534,7 @@ func TestAddonsLndHubRequiresLND(t *testing.T) {
 	m.activeTab = tabAddons
 	m.addonFocus = 2
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction == svLndHubInstall {
 		t.Error("LndHub should not trigger without LND")
@@ -561,7 +551,7 @@ func TestAddonsLndHubInstallWithLND(t *testing.T) {
 	m.activeTab = tabAddons
 	m.addonFocus = 1
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svNone {
 		t.Errorf("LND not running: got %d, want %d (blocked)",
@@ -581,7 +571,7 @@ func TestAddonsLndHubManageWhenInstalled(t *testing.T) {
 	m.activeTab = tabAddons
 	m.addonFocus = 1
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.subview != svLndHubManage {
 		t.Errorf("enter on installed LndHub: got %d, want %d",
@@ -596,23 +586,20 @@ func TestAddonNavTwoCards(t *testing.T) {
 	m.activeTab = tabAddons
 	m.addonFocus = 0
 
-	newM, _ := m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
 	if m.addonFocus != 1 {
 		t.Errorf("right from 0: got %d, want 1", m.addonFocus)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("l")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
 	if m.addonFocus != 1 {
 		t.Errorf("right from 1: got %d, want 1 (clamped)",
 			m.addonFocus)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("h")})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	m = newM.(Model)
 	if m.addonFocus != 0 {
 		t.Errorf("left from 1: got %d, want 0", m.addonFocus)
@@ -625,7 +612,7 @@ func TestLndHubManageBackspace(t *testing.T) {
 	m.height = 24
 	m.subview = svLndHubManage
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
 		t.Errorf("backspace: got %d, want %d", m.subview, svNone)
@@ -639,7 +626,7 @@ func TestLndHubCreateNameBackspaceEmpty(t *testing.T) {
 	m.subview = svLndHubCreateName
 	m.hubNameInput = ""
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubManage {
 		t.Errorf("backspace empty: got %d, want %d",
@@ -654,7 +641,7 @@ func TestLndHubCreateNameBackspaceWithText(t *testing.T) {
 	m.subview = svLndHubCreateName
 	m.hubNameInput = "Ali"
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svLndHubCreateName {
 		t.Error("backspace with text should stay")
@@ -786,8 +773,7 @@ func TestHubNameMaxLength(t *testing.T) {
 	m.subview = svLndHubCreateName
 	m.hubNameInput = "abcdefghijklmnopqrstuvwxyz1234"
 
-	newM, _ := m.Update(tea.KeyMsg{
-		Type: tea.KeyRunes, Runes: []rune("x")})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	m = newM.(Model)
 	if len(m.hubNameInput) != 30 {
 		t.Errorf("length: got %d, want 30", len(m.hubNameInput))
@@ -862,7 +848,7 @@ func TestLightningTabNoLND(t *testing.T) {
 	m.activeTab = tabLightning
 
 	view := m.View()
-	if !strings.Contains(view, "Install LND") {
+	if !strings.Contains(view.Content, "Install LND") {
 		t.Error("should show install message")
 	}
 }
@@ -876,7 +862,7 @@ func TestLightningTabNoWallet(t *testing.T) {
 	m.activeTab = tabLightning
 
 	view := m.View()
-	if !strings.Contains(view, "Create") {
+	if !strings.Contains(view.Content, "Create") {
 		t.Error("should show create wallet message")
 	}
 }
@@ -904,10 +890,10 @@ func TestLightningTabWithChannels(t *testing.T) {
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "ACINQ") {
+	if !strings.Contains(view.Content, "ACINQ") {
 		t.Error("should show peer alias")
 	}
-	if !strings.Contains(view, "Wallet") {
+	if !strings.Contains(view.Content, "Wallet") {
 		t.Error("should show wallet card")
 	}
 }
@@ -936,13 +922,13 @@ func TestChannelDetailSubview(t *testing.T) {
 		services: map[string]bool{},
 	}
 
-	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.subview != svChannelDetail {
 		t.Errorf("enter should open detail, got %d", m.subview)
 	}
 
-	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	newM, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = newM.(Model)
 	if m.subview != svNone {
 		t.Errorf("backspace should return, got %d", m.subview)

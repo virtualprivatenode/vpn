@@ -1,5 +1,3 @@
-// internal/installer/setup.go
-
 package installer
 
 import (
@@ -11,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
@@ -91,7 +89,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "enter" && m.done {
 			return m, tea.Quit
 		}
@@ -120,9 +118,11 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m installModel) View() string {
+func (m installModel) View() tea.View {
 	if m.width == 0 {
-		return "Loading..."
+		v := tea.NewView("Loading...")
+		v.AltScreen = true
+		return v
 	}
 	bw := min(m.width-4, theme.ContentWidth)
 	title := theme.ProgTitle.Width(bw).Align(lipgloss.Center).
@@ -133,13 +133,13 @@ func (m installModel) View() string {
 		var ind string
 		switch s.status {
 		case stepDone:
-			sty, ind = theme.ProgDone, "✅"
+			sty, ind = theme.ProgDone, "[done]"
 		case stepRunning:
-			sty, ind = theme.ProgRunning, "🔄"
+			sty, ind = theme.ProgRunning, "[....]"
 		case stepFailed:
-			sty, ind = theme.ProgFail, "❌"
+			sty, ind = theme.ProgFail, "[FAIL]"
 		default:
-			sty, ind = theme.ProgPending, "⏳"
+			sty, ind = theme.ProgPending, "[wait]"
 		}
 		lines = append(lines, sty.Render(fmt.Sprintf("  %s [%d/%d] %s",
 			ind, i+1, len(m.steps), s.name)))
@@ -152,7 +152,7 @@ func (m installModel) View() string {
 	var footer string
 	if m.done && !m.failed {
 		footer = theme.Success.Render(
-			"  ✅ Complete — press Enter to continue  ")
+			"  Complete -- press Enter to continue  ")
 	} else if m.failed {
 		footer = theme.ProgFail.Render(
 			"  Failed. Press ctrl+c to exit.  ")
@@ -161,8 +161,11 @@ func (m installModel) View() string {
 	}
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
-	return lipgloss.Place(m.width, m.height,
+	content := lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, full)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 func RunInstallTUI(steps []installStep, version string) error {
@@ -171,7 +174,7 @@ func RunInstallTUI(steps []installStep, version string) error {
 	}
 	steps[0].status = stepRunning
 	m := installModel{steps: steps, version: version}
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	result, err := p.Run()
 	if err != nil {
 		return err
@@ -200,25 +203,29 @@ func (m infoBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "enter" || msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
 	}
 	return m, nil
 }
-func (m infoBoxModel) View() string {
+func (m infoBoxModel) View() tea.View {
 	if m.width == 0 {
-		return "Loading..."
+		v := tea.NewView("Loading...")
+		v.AltScreen = true
+		return v
 	}
 	box := theme.Box.Padding(1, 3).
 		Width(min(m.width-8, 70)).Render(m.content)
-	return lipgloss.Place(m.width, m.height,
+	content := lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, box)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 func ShowInfoBox(content string) {
-	p := tea.NewProgram(infoBoxModel{content: content},
-		tea.WithAltScreen())
+	p := tea.NewProgram(infoBoxModel{content: content})
 	p.Run()
 }
 
@@ -234,7 +241,7 @@ func (m confirmBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter":
 			m.confirmed = true
@@ -246,18 +253,23 @@ func (m confirmBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-func (m confirmBoxModel) View() string {
+func (m confirmBoxModel) View() tea.View {
 	if m.width == 0 {
-		return "Loading..."
+		v := tea.NewView("Loading...")
+		v.AltScreen = true
+		return v
 	}
 	box := theme.Box.Padding(1, 3).
 		Width(min(m.width-8, 70)).Render(m.content)
-	return lipgloss.Place(m.width, m.height,
+	content := lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, box)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 func ShowConfirmBox(content string) bool {
 	m := confirmBoxModel{content: content}
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	result, _ := p.Run()
 	return result.(confirmBoxModel).confirmed
 }
@@ -343,8 +355,8 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 		theme.Value.Render("  in the terminal. It is shown ONCE and") + "\n" +
 		theme.Value.Render("  cannot be displayed again.") + "\n\n" +
 		theme.Value.Render("  Before proceeding:") + "\n" +
-		theme.Value.Render("  • Make sure you are in a private area") + "\n" +
-		theme.Value.Render("  • Have pen and paper ready") + "\n" +
+		theme.Value.Render("  * Make sure you are in a private area") + "\n" +
+		theme.Value.Render("  * Have pen and paper ready") + "\n" +
 		theme.Value.Render("  LND will ask you to:") + "\n" +
 		theme.Value.Render("  1. Enter a wallet password (min 8 characters)") + "\n" +
 		theme.Value.Render("  2. Confirm the password") + "\n" +
@@ -354,20 +366,20 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 		theme.Value.Render("  5. WRITE DOWN your 24-word seed phrase") + "\n\n" +
 		theme.Warning.Render("Your seed is the ONLY way to recover funds.") + "\n" +
 		theme.Warning.Render("No one can help you if you lose it.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
+		theme.Dim.Render("Enter to proceed -- backspace to cancel")
 	if !ShowConfirmBox(info) {
 		return nil
 	}
 
 	fmt.Print("\033[2J\033[H")
-	fmt.Println("\n  ═══════════════════════════════════════════")
+	fmt.Println("\n  ===================================================")
 	fmt.Println("    LND Wallet Creation")
-	fmt.Println("  ═══════════════════════════════════════════")
+	fmt.Println("  ===================================================")
 	fmt.Println("  Waiting for LND...")
 	if err := waitForLND(); err != nil {
 		return err
 	}
-	fmt.Println("  ✅ LND is ready")
+	fmt.Println("  LND is ready")
 	fmt.Println()
 
 	cmd := exec.Command("sudo", "-u", systemUser, "lncli",
@@ -380,18 +392,16 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 		return fmt.Errorf("lncli create: %w", err)
 	}
 
-	// Seed confirmation — blocks until user confirms they saved it.
-	// The seed is visible in the terminal above this prompt.
 	fmt.Println()
-	fmt.Println("  ═══════════════════════════════════════════")
-	fmt.Println("  ⚠️  Your 24-word seed is displayed above.")
-	fmt.Println("  ⚠️  Write it down NOW. It will not be shown again.")
+	fmt.Println("  ===================================================")
+	fmt.Println("  Your 24-word seed is displayed above.")
+	fmt.Println("  Write it down NOW. It will not be shown again.")
 	fmt.Println()
 	fmt.Println("  Store it safely:")
-	fmt.Println("  • Write on paper and store securely")
-	fmt.Println("  • Never share it with anyone")
+	fmt.Println("  * Write on paper and store securely")
+	fmt.Println("  * Never share it with anyone")
 	fmt.Println()
-	fmt.Println("  ═══════════════════════════════════════════")
+	fmt.Println("  ===================================================")
 	fmt.Println()
 	fmt.Print("  Type 'I SAVED MY SEED' to continue: ")
 
@@ -406,10 +416,9 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 	}
 
 	fmt.Println()
-	fmt.Println("  ✅ Seed confirmed.")
+	fmt.Println("  Seed confirmed.")
 	fmt.Println()
 
-	// Auto-unlock — show TUI info popup first
 	unlockMsg := theme.Header.Render("Auto-Unlock Configuration") + "\n\n" +
 		theme.Value.Render("Enter your WALLET PASSWORD in the next screen.") + "\n" +
 		theme.Value.Render("This is the password you entered at the") + "\n" +
@@ -422,15 +431,15 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 	ShowInfoBox(unlockMsg)
 
 	fmt.Print("\033[2J\033[H")
-	fmt.Println("\n  ═══════════════════════════════════════════")
-	fmt.Println("    Auto-Unlock — Enter Wallet Password")
-	fmt.Println("  ═══════════════════════════════════════════")
+	fmt.Println("\n  ===================================================")
+	fmt.Println("    Auto-Unlock -- Enter Wallet Password")
+	fmt.Println("  ===================================================")
 	fmt.Println()
 	fmt.Println("  Enter the SAME password you used at the")
 	fmt.Println("  start of wallet creation (step 1).")
 	fmt.Println()
-	fmt.Println("  ⚠️  NOT your seed phrase")
-	fmt.Println("  ⚠️  NOT a cipher seed Passphrase")
+	fmt.Println("  NOT your seed phrase")
+	fmt.Println("  NOT a cipher seed Passphrase")
 	fmt.Println()
 
 	var matched bool
@@ -452,7 +461,7 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 		fmt.Println()
 
 		if pw1 != pw2 {
-			fmt.Println("  ⚠️ Passwords do not match.")
+			fmt.Println("  Passwords do not match.")
 			if attempt < 2 {
 				fmt.Println("  Try again.")
 			}
@@ -462,7 +471,7 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 		if err := setupAutoUnlock(pw1); err != nil {
 			fmt.Printf("  Warning: %v\n", err)
 		} else {
-			fmt.Println("  ✓ Auto-unlock configured")
+			fmt.Println("  Auto-unlock configured")
 		}
 		cfg.AutoUnlock = true
 		matched = true
@@ -470,7 +479,7 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 	}
 
 	if !matched {
-		fmt.Println("  ⚠️ Skipping auto-unlock. " +
+		fmt.Println("  Skipping auto-unlock. " +
 			"You will need to unlock LND manually after reboot.")
 		fmt.Println("    Run: lncli unlock")
 	}
@@ -485,20 +494,20 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 func RunLNDInstall(cfg *config.AppConfig) error {
 	confirmMsg := theme.Header.Render("Install LND "+lndVersion) + "\n\n" +
 		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  • Download and verify LND v"+lndVersion) + "\n" +
-		theme.Value.Render("  • Configure LND for "+cfg.Network) + "\n" +
-		theme.Value.Render("  • Create Tor hidden services for LND") + "\n" +
-		theme.Value.Render("  • Restart Tor") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
+		theme.Value.Render("  * Download and verify LND v"+lndVersion) + "\n" +
+		theme.Value.Render("  * Configure LND for "+cfg.Network) + "\n" +
+		theme.Value.Render("  * Create Tor hidden services for LND") + "\n" +
+		theme.Value.Render("  * Restart Tor") + "\n\n" +
+		theme.Dim.Render("Enter to proceed -- backspace to cancel")
 	if !ShowConfirmBox(confirmMsg) {
 		return nil
 	}
 
 	p2pMode := "tor"
 	p2pMsg := theme.Header.Render("LND P2P Mode") + "\n\n" +
-		theme.Value.Render("  [1] Tor only — Maximum privacy") + "\n" +
-		theme.Value.Render("  [2] Hybrid  — Tor + clearnet, better routing") + "\n\n" +
-		theme.Dim.Render("Press 1 or 2 • backspace to cancel")
+		theme.Value.Render("  [1] Tor only -- Maximum privacy") + "\n" +
+		theme.Value.Render("  [2] Hybrid  -- Tor + clearnet, better routing") + "\n\n" +
+		theme.Dim.Render("Press 1 or 2 -- backspace to cancel")
 	p2pChoice := showChoiceBox(p2pMsg, []string{"1", "2"})
 	if p2pChoice == "" {
 		return nil
@@ -570,20 +579,20 @@ func RunP2PModeUpgrade(cfg *config.AppConfig) error {
 
 	confirmMsg := theme.Header.Render("Upgrade to Hybrid P2P Mode") + "\n\n" +
 		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  • Expose your server IP to the Lightning Network") + "\n" +
-		theme.Value.Render("  • Open ports 9735 and 8080 in the firewall") + "\n" +
-		theme.Value.Render("  • Allow Zeus to connect over clearnet") + "\n" +
-		theme.Value.Render("  • Regenerate LND TLS certificate") + "\n" +
-		theme.Value.Render("  • Restart LND") + "\n\n"
+		theme.Value.Render("  * Expose your server IP to the Lightning Network") + "\n" +
+		theme.Value.Render("  * Open ports 9735 and 8080 in the firewall") + "\n" +
+		theme.Value.Render("  * Allow Zeus to connect over clearnet") + "\n" +
+		theme.Value.Render("  * Regenerate LND TLS certificate") + "\n" +
+		theme.Value.Render("  * Restart LND") + "\n\n"
 
 	if cfg.LndHubInstalled {
-		confirmMsg += theme.Value.Render("  • Install TLS proxy for LndHub clearnet") + "\n" +
-			theme.Value.Render("  • Open port 3000 for encrypted LndHub access") + "\n\n"
+		confirmMsg += theme.Value.Render("  * Install TLS proxy for LndHub clearnet") + "\n" +
+			theme.Value.Render("  * Open port 3000 for encrypted LndHub access") + "\n\n"
 	}
 
 	confirmMsg += theme.Warning.Render("Your IP: "+publicIPv4) + "\n" +
-		theme.Warning.Render("This cannot be undone — your IP will be public.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
+		theme.Warning.Render("This cannot be undone -- your IP will be public.") + "\n\n" +
+		theme.Dim.Render("Enter to proceed -- backspace to cancel")
 	if !ShowConfirmBox(confirmMsg) {
 		return nil
 	}
@@ -635,14 +644,14 @@ func RunP2PModeUpgrade(cfg *config.AppConfig) error {
 func RunSyncthingInstall(cfg *config.AppConfig) error {
 	confirmMsg := theme.Header.Render("Install Syncthing") + "\n\n" +
 		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  • Install Syncthing from official repository") + "\n" +
-		theme.Value.Render("  • Open port 22000 for sync connections") + "\n" +
-		theme.Value.Render("  • Create Tor hidden service for web UI") + "\n" +
-		theme.Value.Render("  • Auto-configure LND channel backup sync") + "\n" +
-		theme.Value.Render("  • Restart Tor") + "\n\n" +
+		theme.Value.Render("  * Install Syncthing from official repository") + "\n" +
+		theme.Value.Render("  * Open port 22000 for sync connections") + "\n" +
+		theme.Value.Render("  * Create Tor hidden service for web UI") + "\n" +
+		theme.Value.Render("  * Auto-configure LND channel backup sync") + "\n" +
+		theme.Value.Render("  * Restart Tor") + "\n\n" +
 		theme.Value.Render("After install, pair your local Syncthing") + "\n" +
 		theme.Value.Render("from the Syncthing details screen.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
+		theme.Dim.Render("Enter to proceed -- backspace to cancel")
 	if !ShowConfirmBox(confirmMsg) {
 		return nil
 	}
@@ -696,13 +705,13 @@ func RunSyncthingInstall(cfg *config.AppConfig) error {
 func RunLndHubInstall(cfg *config.AppConfig) error {
 	confirmMsg := theme.Header.Render("Install LndHub.go") + "\n\n" +
 		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  • Install Go toolchain (for building from source)") + "\n" +
-		theme.Value.Render("  • Install PostgreSQL database") + "\n" +
-		theme.Value.Render("  • Clone and build LndHub.go v"+lndhubVersion) + "\n" +
-		theme.Value.Render("  • Bake restricted LND macaroon") + "\n" +
-		theme.Value.Render("  • Create Tor hidden service") + "\n" +
-		theme.Value.Render("  • Create accounts for family/friends from TUI") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
+		theme.Value.Render("  * Install Go toolchain (for building from source)") + "\n" +
+		theme.Value.Render("  * Install PostgreSQL database") + "\n" +
+		theme.Value.Render("  * Clone and build LndHub.go v"+lndhubVersion) + "\n" +
+		theme.Value.Render("  * Bake restricted LND macaroon") + "\n" +
+		theme.Value.Render("  * Create Tor hidden service") + "\n" +
+		theme.Value.Render("  * Create accounts for family/friends from TUI") + "\n\n" +
+		theme.Dim.Render("Enter to proceed -- backspace to cancel")
 	if !ShowConfirmBox(confirmMsg) {
 		return nil
 	}
@@ -807,7 +816,7 @@ func (m choiceBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "backspace", "ctrl+c":
 			return m, tea.Quit
@@ -822,18 +831,23 @@ func (m choiceBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-func (m choiceBoxModel) View() string {
+func (m choiceBoxModel) View() tea.View {
 	if m.width == 0 {
-		return "Loading..."
+		v := tea.NewView("Loading...")
+		v.AltScreen = true
+		return v
 	}
 	box := theme.Box.Padding(1, 3).
 		Width(min(m.width-8, 70)).Render(m.content)
-	return lipgloss.Place(m.width, m.height,
+	content := lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, box)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 func showChoiceBox(content string, choices []string) string {
 	m := choiceBoxModel{content: content, choices: choices}
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	result, _ := p.Run()
 	return result.(choiceBoxModel).result
 }
@@ -850,7 +864,7 @@ func RunSelfUpdate(cfg *config.AppConfig, newVersion string) error {
 		theme.Value.Render("Latest:  v"+newVersion) + "\n\n" +
 		theme.Value.Render("This will download and verify the new binary.") + "\n" +
 		theme.Value.Render("The update takes effect on next SSH login.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed • backspace to cancel")
+		theme.Dim.Render("Enter to proceed -- backspace to cancel")
 	if !ShowConfirmBox(confirmMsg) {
 		return nil
 	}
@@ -877,8 +891,6 @@ func RunSelfUpdate(cfg *config.AppConfig, newVersion string) error {
 				"/tmp/rlvpn-SHA256SUMS.asc")
 		}},
 		{name: "Importing release key", fn: func() error {
-			// Download key through torsocks — no dirmngr needed.
-			// Key from independent keyserver, binary from GitHub.
 			keyFile := "/tmp/rlvpn-release-key.asc"
 			keyURL := fmt.Sprintf(
 				"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
@@ -913,8 +925,6 @@ func RunSelfUpdate(cfg *config.AppConfig, newVersion string) error {
 			return nil
 		}},
 		{name: "Verifying checksum", fn: func() error {
-			// exec.Command used directly because sha256sum --check needs
-			// working directory set to /tmp where the tarball was downloaded.
 			cmd := exec.Command("sha256sum", "--ignore-missing",
 				"--check", "rlvpn-SHA256SUMS")
 			cmd.Dir = "/tmp"
@@ -952,7 +962,6 @@ func CheckLatestVersion() string {
 		return cached
 	}
 
-	// Version check must go through Tor — no clearnet fallback.
 	if _, err := exec.LookPath("torsocks"); err != nil {
 		return ""
 	}
@@ -1051,7 +1060,7 @@ func setupShellEnvironment(cfg *config.AppConfig) error {
 	}
 
 	content := fmt.Sprintf(`
-# ── Virtual Private Node ──────────────────────
+# -- Virtual Private Node --
 bitcoin-cli() {
     sudo -u bitcoin /usr/local/bin/bitcoin-cli \
         -datadir=/var/lib/bitcoin \

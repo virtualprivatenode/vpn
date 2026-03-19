@@ -1,12 +1,10 @@
-// internal/welcome/welcome.go
-
 package welcome
 
 import (
 	"fmt"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/installer"
@@ -327,7 +325,6 @@ func (m Model) svcName(i int) string {
 }
 
 // pollInterval returns the status polling interval based on current state.
-// Faster polling during startup, slower once everything is stable.
 func (m Model) pollInterval() time.Duration {
 	if m.status == nil {
 		return 3 * time.Second
@@ -344,7 +341,7 @@ func (m Model) pollInterval() time.Duration {
 func Show(cfg *config.AppConfig, version string) {
 	for {
 		m := NewModel(cfg, version)
-		p := tea.NewProgram(m, tea.WithAltScreen())
+		p := tea.NewProgram(m)
 		result, _ := p.Run()
 		final := result.(Model)
 
@@ -542,7 +539,6 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 		if client == nil {
 			return paymentHistoryMsg{err: fmt.Errorf("LND not connected")}
 		}
-		// Fetch both incoming and outgoing
 		invoices, _ := client.ListInvoices(50)
 		payments, _ := client.ListPayments(50)
 
@@ -550,7 +546,6 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 		all = append(all, invoices...)
 		all = append(all, payments...)
 
-		// Sort by creation date descending
 		for i := 0; i < len(all); i++ {
 			for j := i + 1; j < len(all); j++ {
 				if all[j].CreationDate > all[i].CreationDate {
@@ -563,7 +558,6 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 	}
 }
 
-// hexDecodeBytes decodes a hex string to bytes.
 func hexDecodeBytes(s string) ([]byte, error) {
 	if len(s)%2 != 0 {
 		return nil, fmt.Errorf("odd length hex")

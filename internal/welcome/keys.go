@@ -1,5 +1,3 @@
-// internal/welcome/keys.go
-
 package welcome
 
 import (
@@ -8,7 +6,7 @@ import (
 	"os/exec"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/logger"
@@ -21,7 +19,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case svcActionDoneMsg:
 		return m, fetchStatus(m.cfg, m.lndClient)
@@ -180,7 +178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	// ── Text input subviews (must be handled first) ──────
@@ -230,8 +228,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.handleMainNavKey(key)
 }
 
-// handleGenericSubviewKey handles keys for subviews that don't
-// belong to a specific domain (lightning detail, wallet info).
 func (m Model) handleGenericSubviewKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
@@ -439,7 +435,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 
 func (m Model) handleLightningEnter() (tea.Model, tea.Cmd) {
 	switch m.lightningFocus {
-	case 0: // Channels card
+	case 0:
 		if !m.cfg.HasLND() || !m.cfg.WalletExists() {
 			return m, nil
 		}
@@ -451,7 +447,7 @@ func (m Model) handleLightningEnter() (tea.Model, tea.Cmd) {
 			m.subview = svChannelDetail
 			return m, nil
 		}
-	case 1: // Wallet card
+	case 1:
 		if !m.cfg.HasLND() || !m.cfg.WalletExists() {
 			return m, nil
 		}
@@ -493,8 +489,6 @@ func (m Model) handleAddonEnter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ── Subview classification ───────────────────────────────
-
 func isChannelSubview(sv wSubview) bool {
 	switch sv {
 	case svChannelOpen, svChannelCustomPeer, svChannelAmountSelect,
@@ -522,8 +516,6 @@ func isAddonSubview(sv wSubview) bool {
 	}
 	return false
 }
-
-// ── Shared helpers ───────────────────────────────────────
 
 func isAllowedHubNameChar(key string) bool {
 	if len(key) != 1 {

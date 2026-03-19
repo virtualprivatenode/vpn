@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func isWalletSubview(sv wSubview) bool {
@@ -17,7 +17,7 @@ func isWalletSubview(sv wSubview) bool {
 	return false
 }
 
-func (m Model) handleWalletKey(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleWalletKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.subview {
 	case svReceive:
 		return m.handleReceiveKey(key, msg)
@@ -45,7 +45,7 @@ func (m Model) handleWalletKey(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 // ── Receive ──────────────────────────────────────────────
 
-func (m Model) handleReceiveKey(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleReceiveKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -84,20 +84,20 @@ func (m Model) handleReceiveKey(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		// Ignore arrow keys in text input
 		return m, nil
 	default:
-		// Use msg.Runes for proper paste handling
-		runes := msg.Runes
-		if len(runes) == 0 {
+		//
+		text := msg.Text
+		if len(text) == 0 {
 			return m, nil
 		}
 		if m.recvInputField == 0 {
-			for _, ch := range runes {
+			for _, ch := range text {
 				if ch >= '0' && ch <= '9' &&
 					len(m.recvAmountStr) < 10 {
 					m.recvAmountStr += string(ch)
 				}
 			}
 		} else {
-			for _, ch := range runes {
+			for _, ch := range text {
 				if len(m.recvMemo) < 100 && ch >= 32 && ch < 127 {
 					m.recvMemo += string(ch)
 				}
@@ -152,7 +152,7 @@ func (m Model) handleReceiveExpiredKey(key string) (tea.Model, tea.Cmd) {
 
 // ── Send ─────────────────────────────────────────────────
 
-func (m Model) handleSendKey(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleSendKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -191,15 +191,12 @@ func (m Model) handleSendKey(key string, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Ignore arrow keys in text input
 		return m, nil
 	default:
-		// Use msg.Runes for proper paste handling.
-		// Bubble Tea delivers pasted text as a single KeyMsg
-		// with all runes. This handles both single keystrokes
-		// and multi-character pastes correctly.
-		runes := msg.Runes
-		if len(runes) == 0 {
+		//
+		text := msg.Text
+		if len(text) == 0 {
 			return m, nil
 		}
-		for _, ch := range runes {
+		for _, ch := range text {
 			// Accept only valid bolt11 characters
 			if isBolt11Char(ch) && len(m.sendPayReqInput) < 1500 {
 				m.sendPayReqInput += string(ch)

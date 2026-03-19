@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/installer"
 	"github.com/ripsline/virtual-private-node/internal/paths"

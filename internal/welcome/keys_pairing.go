@@ -3,7 +3,7 @@ package welcome
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/paths"
 )
