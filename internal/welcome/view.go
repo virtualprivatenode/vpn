@@ -115,28 +115,14 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewTabs(tw int) string {
-	tabs := []struct {
-		n string
-		t wTab
-	}{
-		{"Dashboard", tabDashboard},
-		{"Wallet", tabWallet},
-		{"Pairing", tabPairing},
-		{"Add-ons", tabAddons},
-		{"System", tabSystem},
-	}
-	w := tw / len(tabs)
-	var out []string
-	for _, t := range tabs {
-		if t.t == m.activeTab {
-			out = append(out, theme.ActiveTab.Width(w).
-				Align(lipgloss.Center).Render(t.n))
-		} else {
-			out = append(out, theme.InactiveTab.Width(w).
-				Align(lipgloss.Center).Render(t.n))
-		}
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, out...)
+	w := tw / len(m.tabBar.Labels)
+
+	// Create a copy so we don't mutate the model during render
+	bg := m.tabBar
+	bg.ActiveIndex = int(m.activeTab)
+	bg.SetWidth(w)
+
+	return bg.View()
 }
 
 func (m Model) viewFooter() string {
@@ -157,32 +143,42 @@ func (m Model) viewFooter() string {
 	}
 	switch m.activeTab {
 	case tabDashboard:
-		return theme.Footer.Render(
-			"  tab switch • q quit  ")
-	case tabWallet:
-		if m.walletFocus == 0 {
-			if m.status != nil && len(m.status.channels) > 0 {
-				return theme.Footer.Render(
-					"  ←→ card • ↑↓ select • enter details • o open channel • tab switch • q quit  ")
-			}
+		if m.status != nil && len(m.status.channels) > 0 {
 			return theme.Footer.Render(
-				"  ←→ card • enter open channel • tab switch • q quit  ")
+				"  ↑↓ select  enter details  o open channel  tab switch  q quit  ")
 		}
 		return theme.Footer.Render(
-			"  ←→ card • s send • r receive • v history • enter details • tab switch • q quit  ")
+			"  tab switch  q quit  ")
+	case tabWallet:
+		if m.walletPaneFocused {
+			switch m.walletSidebar.ActiveIndex {
+			case walletSectionTransactions:
+				if len(m.payHistory) > 0 {
+					return theme.Footer.Render(
+						"  ↑↓ select  enter details  ←/backspace sidebar  tab switch  q quit  ")
+				}
+				return theme.Footer.Render(
+					"  ←/backspace sidebar  tab switch  q quit  ")
+			default:
+				return theme.Footer.Render(
+					"  ←/backspace sidebar  tab switch  q quit  ")
+			}
+		}
+		return theme.Footer.Render(
+			"  ↑↓ navigate  enter/→ select  tab switch  q quit  ")
 	case tabPairing:
 		return theme.Footer.Render(
-			"  enter open • tab switch • q quit  ")
+			"  enter open  tab switch  q quit  ")
 	case tabAddons:
 		return theme.Footer.Render(
-			"  ←→ select • enter install/view • tab switch • q quit  ")
+			"  ←→ select  enter install/view  tab switch  q quit  ")
 	case tabSystem:
 		if m.updateConfirm {
 			return theme.Footer.Render(
-				"  y confirm • any key cancel  ")
+				"  y confirm  any key cancel  ")
 		}
 		return theme.Footer.Render(
-			"  ↑↓←→ navigate • enter select • tab switch • q quit  ")
+			"  ↑↓←→ navigate  enter select  tab switch  q quit  ")
 	}
 	return ""
 }
@@ -197,269 +193,36 @@ func (m Model) viewFullURL() string {
 }
 
 func (m Model) viewWalletTab(bw int) string {
-	halfW := (bw - 2) / 2
-	cardH := theme.BoxHeight
+	sidebarW := 18
+	gap := 2
+	contentW := bw - sidebarW - gap
 
-	channelsCard := m.walletChannelsCard(halfW, cardH)
-	walletCard := m.walletInfoCard(halfW, cardH)
+	// Render sidebar
+	sidebarContent := m.walletSidebar.View()
+
+	// Render content pane based on active sidebar button
+	var content string
+	switch m.walletSidebar.ActiveIndex {
+	case walletSectionTransactions:
+		content = m.walletTransactionsPane(contentW)
+	case walletSectionSend:
+		content = m.walletSendPane(contentW)
+	case walletSectionReceive:
+		content = m.walletReceivePane(contentW)
+	case walletSectionOnChain:
+		content = m.walletOnChainPane(contentW)
+	default:
+		content = m.walletTransactionsPane(contentW)
+	}
+
+	// Match sidebar height to content pane height
+	contentHeight := lipgloss.Height(content)
+	sidebar := lipgloss.NewStyle().
+		Height(contentHeight).
+		Render(sidebarContent)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		channelsCard, "  ", walletCard)
-}
-
-func (m Model) walletChannelsCard(w, h int) string {
-	if !m.cfg.HasLND() {
-		return m.channelsNotInstalledCard(w, h)
-	}
-	if !m.cfg.WalletExists() {
-		return m.channelsNoWalletCard(w, h)
-	}
-	return m.channelsListCard(w, h)
-}
-
-func (m Model) channelsNotInstalledCard(w, h int) string {
-	var lines []string
-	lines = append(lines, theme.Lightning.Render("⚡ Channels"))
-	lines = append(lines, "")
-	lines = append(lines, theme.Grayed.Render("  Install LND from System tab"))
-	border := theme.NormalBorder
-	if m.walletFocus == 0 {
-		border = theme.GrayedBorder
-	}
-	return border.Width(w).Padding(1, 2).
-		Render(padLines(lines, h))
-}
-
-func (m Model) channelsNoWalletCard(w, h int) string {
-	var lines []string
-	lines = append(lines, theme.Lightning.Render("⚡ Channels"))
-	lines = append(lines, "")
-	lines = append(lines, theme.Grayed.Render("  Create LND wallet first"))
-	border := theme.NormalBorder
-	if m.walletFocus == 0 {
-		border = theme.GrayedBorder
-	}
-	return border.Width(w).Padding(1, 2).
-		Render(padLines(lines, h))
-}
-
-func (m Model) channelsListCard(w, h int) string {
-	var lines []string
-
-	activeCount := 0
-	inactiveCount := 0
-	if m.status != nil {
-		for _, ch := range m.status.channels {
-			if ch.Active {
-				activeCount++
-			} else {
-				inactiveCount++
-			}
-		}
-	}
-
-	headerText := "⚡ Channels"
-	if m.status != nil && len(m.status.channels) > 0 {
-		headerText = fmt.Sprintf("⚡ Channels (%d active", activeCount)
-		if inactiveCount > 0 {
-			headerText += fmt.Sprintf(", %d offline", inactiveCount)
-		}
-		if m.status.pendingOpen > 0 {
-			headerText += fmt.Sprintf(", %d pending", m.status.pendingOpen)
-		}
-		headerText += ")"
-	}
-	lines = append(lines, theme.Lightning.Render(headerText))
-	lines = append(lines, "")
-
-	if m.status == nil || !m.status.lndResponding {
-		lines = append(lines, "  "+theme.Dim.Render("Waiting for LND..."))
-		border := theme.NormalBorder
-		if m.walletFocus == 0 {
-			border = theme.SelectedBorder
-		}
-		return border.Width(w).Padding(1, 2).
-			Render(padLines(lines, h))
-	}
-
-	if len(m.status.channels) == 0 {
-		lines = append(lines, "  "+theme.Dim.Render(
-			"No channels yet."))
-		lines = append(lines, "")
-		lines = append(lines, "  "+theme.Action.Render(
-			"▸ [o] Open Channel"))
-		border := theme.NormalBorder
-		if m.walletFocus == 0 {
-			border = theme.SelectedBorder
-		}
-		return border.Width(w).Padding(1, 2).
-			Render(padLines(lines, h))
-	}
-
-	visibleCount := h - 10
-	if visibleCount < 3 {
-		visibleCount = 3
-	}
-
-	if m.chanScrollOffset > 0 {
-		lines = append(lines, "  "+theme.Dim.Render("  ↑ more"))
-	}
-
-	viewEnd := m.chanScrollOffset + visibleCount
-	if viewEnd > len(m.status.channels) {
-		viewEnd = len(m.status.channels)
-	}
-
-	barWidth := w - 36
-	if barWidth < 10 {
-		barWidth = 10
-	}
-
-	for i := m.chanScrollOffset; i < viewEnd; i++ {
-		ch := m.status.channels[i]
-		prefix := "  "
-		nameStyle := theme.Value
-		if m.walletFocus == 0 && m.chanCursor == i {
-			prefix = "▸ "
-			nameStyle = theme.Action
-		}
-		dot := theme.RedDot.Render("○")
-		if ch.Active {
-			dot = theme.GreenDot.Render("●")
-		}
-		name := ch.PeerAlias
-		if name == "" {
-			if len(ch.RemotePubkey) > 12 {
-				name = ch.RemotePubkey[:12] + "..."
-			} else {
-				name = ch.RemotePubkey
-			}
-		}
-		if len(name) > 14 {
-			name = name[:14]
-		}
-		name = fmt.Sprintf("%-14s", name)
-
-		bar := renderBalanceBar(ch.LocalBalance, ch.RemoteBalance,
-			ch.Capacity, barWidth)
-		lines = append(lines, fmt.Sprintf("%s%s %s %s",
-			prefix, dot, nameStyle.Render(name), bar))
-	}
-
-	if viewEnd < len(m.status.channels) {
-		lines = append(lines, "  "+theme.Dim.Render("  ↓ more"))
-	}
-
-	lines = append(lines, "")
-	var totalLocal, totalRemote int64
-	for _, ch := range m.status.channels {
-		totalLocal += ch.LocalBalance
-		totalRemote += ch.RemoteBalance
-	}
-	lines = append(lines, "  "+theme.Label.Render("Send: ")+
-		theme.Value.Render(formatSats(totalLocal)))
-	lines = append(lines, "  "+theme.Label.Render("Recv: ")+
-		theme.Value.Render(formatSats(totalRemote)))
-	lines = append(lines, "")
-	lines = append(lines, "  "+theme.Action.Render("[o] Open channel"))
-
-	border := theme.NormalBorder
-	if m.walletFocus == 0 {
-		border = theme.SelectedBorder
-	}
-	return border.Width(w).Padding(1, 2).
-		Render(padLines(lines, h))
-}
-
-func (m Model) walletInfoCard(w, h int) string {
-	var lines []string
-	lines = append(lines, theme.Lightning.Render("⚡ Wallet"))
-	lines = append(lines, "")
-
-	if !m.cfg.HasLND() {
-		lines = append(lines, theme.Grayed.Render("  Install LND from System tab"))
-		border := theme.NormalBorder
-		if m.walletFocus == 1 {
-			border = theme.GrayedBorder
-		}
-		return border.Width(w).Padding(1, 2).
-			Render(padLines(lines, h))
-	}
-
-	if !m.cfg.WalletExists() {
-		lines = append(lines, theme.Grayed.Render("  Create wallet from System tab"))
-		border := theme.NormalBorder
-		if m.walletFocus == 1 {
-			border = theme.GrayedBorder
-		}
-		return border.Width(w).Padding(1, 2).
-			Render(padLines(lines, h))
-	}
-
-	if m.status == nil || !m.status.lndResponding {
-		lines = append(lines, "  "+theme.Dim.Render("Waiting for LND..."))
-		border := theme.NormalBorder
-		if m.walletFocus == 1 {
-			border = theme.SelectedBorder
-		}
-		return border.Width(w).Padding(1, 2).
-			Render(padLines(lines, h))
-	}
-
-	balance := "0"
-	if m.status.lndBalance != "" {
-		balance = m.status.lndBalance
-	}
-	lines = append(lines, "  "+theme.Header.Render("Balance"))
-	lines = append(lines, "  "+theme.Value.Render(
-		formatSats(parseBalance(balance))+" sats"))
-	lines = append(lines, "")
-
-	if m.status.lndPubkey != "" {
-		pubkeyShort := m.status.lndPubkey
-		if len(pubkeyShort) > 20 {
-			pubkeyShort = pubkeyShort[:20] + "..."
-		}
-		lines = append(lines, "  "+theme.Label.Render("Pubkey: ")+
-			theme.Dim.Render(pubkeyShort))
-	}
-	lines = append(lines, "  "+theme.Label.Render("P2P: ")+
-		theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
-	if m.cfg.AutoUnlock {
-		lines = append(lines, "  "+theme.Label.Render("Auto-unlock: ")+
-			theme.GreenDot.Render("● ")+"enabled")
-	}
-	lines = append(lines, "")
-
-	if m.status.lndSyncedChain {
-		lines = append(lines, "  "+theme.GreenDot.Render("●")+
-			" Chain synced")
-	} else {
-		lines = append(lines, "  "+theme.RedDot.Render("○")+
-			" Chain syncing...")
-	}
-	if m.status.lndSyncedGraph {
-		lines = append(lines, "  "+theme.GreenDot.Render("●")+
-			" Graph synced")
-	} else {
-		lines = append(lines, "  "+theme.RedDot.Render("○")+
-			" Graph syncing...")
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, "")
-	lines = append(lines, "  "+theme.Action.Render("[s] Send"))
-	lines = append(lines, "  "+theme.Action.Render("[r] Receive"))
-	lines = append(lines, "  "+theme.Action.Render("[v] History"))
-	lines = append(lines, "")
-	lines = append(lines, "  "+theme.Action.Render("enter details ▸"))
-
-	border := theme.NormalBorder
-	if m.walletFocus == 1 {
-		border = theme.SelectedBorder
-	}
-	return border.Width(w).Padding(1, 2).
-		Render(padLines(lines, h))
+		sidebar, strings.Repeat(" ", gap), content)
 }
 
 func (m Model) viewWalletInfo() string {

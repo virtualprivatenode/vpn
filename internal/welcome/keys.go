@@ -256,50 +256,40 @@ func (m Model) handleMainNavKey(key string) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "tab":
-		m.activeTab = (m.activeTab + 1) % 5
-		m.cardActive = false
-		m.svcConfirm = ""
+		m.switchTab((int(m.activeTab) + 1) % 5)
 		return m, nil
 	case "shift+tab":
-		m.activeTab = (m.activeTab + 4) % 5
-		m.cardActive = false
-		m.svcConfirm = ""
+		m.switchTab((int(m.activeTab) + 4) % 5)
 		return m, nil
 	case "1":
-		m.activeTab = tabDashboard
+		m.switchTab(0)
+		return m, nil
 	case "2":
-		m.activeTab = tabWallet
+		m.switchTab(1)
+		return m, nil
 	case "3":
-		m.activeTab = tabPairing
+		m.switchTab(2)
+		return m, nil
 	case "4":
-		m.activeTab = tabAddons
+		m.switchTab(3)
+		return m, nil
 	case "5":
-		m.activeTab = tabSystem
-	case "o":
-		if m.activeTab == tabWallet && m.walletFocus == 0 {
-			return m.startChannelOpen()
-		}
-	case "s":
-		if m.activeTab == tabWallet && m.walletFocus == 1 &&
-			m.cfg.HasLND() && m.cfg.WalletExists() {
-			m.resetSendState()
-			m.subview = svSend
-			return m, nil
-		}
-	case "r":
-		if m.activeTab == tabWallet && m.walletFocus == 1 &&
-			m.cfg.HasLND() && m.cfg.WalletExists() {
-			m.resetReceiveState()
-			m.subview = svReceive
-			return m, nil
-		}
-	case "v":
-		if m.activeTab == tabWallet && m.walletFocus == 1 &&
-			m.cfg.HasLND() && m.cfg.WalletExists() {
-			m.payHistoryCursor = 0
-			m.subview = svPaymentHistory
-			return m, fetchPaymentHistoryCmd(m.lndClient)
-		}
+		m.switchTab(4)
+		return m, nil
+	}
+
+	// ── Wallet tab with sidebar navigation ───────────────
+	if m.activeTab == tabWallet && m.subview == svNone {
+		return m.handleWalletNavKey(key)
+	}
+
+	// ── Dashboard tab channel navigation ─────────────────
+	if m.activeTab == tabDashboard {
+		return m.handleDashboardNavKey(key)
+	}
+
+	// ── Other tab navigation ─────────────────────────────
+	switch key {
 	case "up", "k":
 		m = m.navUp()
 	case "down", "j":
@@ -314,6 +304,65 @@ func (m Model) handleMainNavKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// switchTab changes the active tab and resets focus state.
+func (m *Model) switchTab(idx int) {
+	m.activeTab = wTab(idx)
+	m.cardActive = false
+	m.svcConfirm = ""
+	m.walletPaneFocused = false
+
+	// Update tab bar
+	m.tabBar.ActiveIndex = idx
+	m.tabBar.FocusIndex = idx
+
+	// Manage sidebar focus
+	if m.activeTab == tabWallet {
+		m.walletSidebar.Focus()
+	} else {
+		m.walletSidebar.Blur()
+	}
+}
+
+// handleDashboardNavKey handles navigation on the dashboard tab
+// (channel list navigation and open channel).
+func (m Model) handleDashboardNavKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		if m.status != nil && len(m.status.channels) > 0 {
+			if m.chanCursor > 0 {
+				m.chanCursor--
+				if m.chanCursor < m.chanScrollOffset {
+					m.chanScrollOffset = m.chanCursor
+				}
+			}
+		}
+		return m, nil
+	case "down", "j":
+		if m.status != nil && len(m.status.channels) > 0 {
+			if m.chanCursor < len(m.status.channels)-1 {
+				m.chanCursor++
+				visibleCount := m.channelVisibleCount()
+				if m.chanCursor >= m.chanScrollOffset+visibleCount {
+					m.chanScrollOffset = m.chanCursor - visibleCount + 1
+				}
+			}
+		}
+		return m, nil
+	case "enter":
+		if m.status != nil && len(m.status.channels) > 0 &&
+			m.chanCursor < len(m.status.channels) {
+			m.subview = svChannelDetail
+		}
+		return m, nil
+	case "o":
+		if m.cfg.HasLND() && m.cfg.WalletExists() {
+			return m.startChannelOpen()
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m Model) navUp() Model {
 	switch m.activeTab {
 	case tabSystem:
@@ -322,15 +371,6 @@ func (m Model) navUp() Model {
 			m.sysCard = cardServices
 		case cardUpdate:
 			m.sysCard = cardSysStats
-		}
-	case tabWallet:
-		if m.walletFocus == 0 {
-			if m.chanCursor > 0 {
-				m.chanCursor--
-				if m.chanCursor < m.chanScrollOffset {
-					m.chanScrollOffset = m.chanCursor
-				}
-			}
 		}
 	}
 	return m
@@ -345,16 +385,6 @@ func (m Model) navDown() Model {
 		case cardSysStats:
 			m.sysCard = cardUpdate
 		}
-	case tabWallet:
-		if m.walletFocus == 0 {
-			if m.status != nil && m.chanCursor < len(m.status.channels)-1 {
-				m.chanCursor++
-				visibleCount := m.channelVisibleCount()
-				if m.chanCursor >= m.chanScrollOffset+visibleCount {
-					m.chanScrollOffset = m.chanCursor - visibleCount + 1
-				}
-			}
-		}
 	}
 	return m
 }
@@ -367,10 +397,6 @@ func (m Model) navLeft() Model {
 			m.sysCard = cardServices
 		case cardUpdate:
 			m.sysCard = cardBitcoin
-		}
-	case tabWallet:
-		if m.walletFocus > 0 {
-			m.walletFocus--
 		}
 	case tabAddons:
 		if m.addonFocus > 0 {
@@ -389,10 +415,6 @@ func (m Model) navRight() Model {
 		case cardBitcoin:
 			m.sysCard = cardUpdate
 		}
-	case tabWallet:
-		if m.walletFocus < 1 {
-			m.walletFocus++
-		}
 	case tabAddons:
 		if m.addonFocus < 1 {
 			m.addonFocus++
@@ -405,8 +427,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	switch m.activeTab {
 	case tabSystem:
 		return m.handleSystemEnter()
-	case tabWallet:
-		return m.handleWalletEnter()
 	case tabPairing:
 		if m.cfg.HasLND() && m.cfg.WalletExists() {
 			m.subview = svZeus
@@ -440,29 +460,6 @@ func (m Model) handleSystemEnter() (tea.Model, tea.Cmd) {
 			m.updateConfirm = true
 		}
 		return m, nil
-	}
-	return m, nil
-}
-
-func (m Model) handleWalletEnter() (tea.Model, tea.Cmd) {
-	switch m.walletFocus {
-	case 0:
-		if !m.cfg.HasLND() || !m.cfg.WalletExists() {
-			return m, nil
-		}
-		if m.status != nil && len(m.status.channels) == 0 {
-			return m.startChannelOpen()
-		}
-		if m.status != nil && len(m.status.channels) > 0 &&
-			m.chanCursor < len(m.status.channels) {
-			m.subview = svChannelDetail
-			return m, nil
-		}
-	case 1:
-		if !m.cfg.HasLND() || !m.cfg.WalletExists() {
-			return m, nil
-		}
-		m.subview = svWalletInfo
 	}
 	return m, nil
 }
