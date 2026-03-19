@@ -87,14 +87,14 @@ func (m Model) View() tea.View {
 			switch m.activeTab {
 			case tabDashboard:
 				tabContent = m.viewDashboard(bw)
-			case tabLightning:
-				tabContent = m.viewLightningTab(bw)
+			case tabWallet:
+				tabContent = m.viewWalletTab(bw)
 			case tabPairing:
 				tabContent = m.viewPairing(bw)
 			case tabAddons:
 				tabContent = m.viewAddons(bw)
-			case tabSettings:
-				tabContent = m.viewSettings(bw)
+			case tabSystem:
+				tabContent = m.viewSystem(bw)
 			}
 
 			title := theme.Title.Width(bw).Align(lipgloss.Center).
@@ -120,10 +120,10 @@ func (m Model) viewTabs(tw int) string {
 		t wTab
 	}{
 		{"Dashboard", tabDashboard},
-		{"Lightning", tabLightning},
+		{"Wallet", tabWallet},
 		{"Pairing", tabPairing},
 		{"Add-ons", tabAddons},
-		{"Settings", tabSettings},
+		{"System", tabSystem},
 	}
 	w := tw / len(tabs)
 	var out []string
@@ -140,12 +140,13 @@ func (m Model) viewTabs(tw int) string {
 }
 
 func (m Model) viewFooter() string {
-	if m.cardActive {
-		if m.dashCard == cardServices {
+	// System tab card-active footers
+	if m.cardActive && m.activeTab == tabSystem {
+		if m.sysCard == cardServices {
 			return theme.Footer.Render(
 				"  ↑↓ select • [r]estart [s]top [a]start [l]ogs • backspace back • q quit  ")
 		}
-		if m.dashCard == cardSystem {
+		if m.sysCard == cardSysStats {
 			if m.status != nil && m.status.rebootRequired {
 				return theme.Footer.Render(
 					"  [u]pdate • [r]eboot • backspace back • q quit  ")
@@ -157,9 +158,9 @@ func (m Model) viewFooter() string {
 	switch m.activeTab {
 	case tabDashboard:
 		return theme.Footer.Render(
-			"  ↑↓←→ navigate • enter select • tab switch • q quit  ")
-	case tabLightning:
-		if m.lightningFocus == 0 {
+			"  tab switch • q quit  ")
+	case tabWallet:
+		if m.walletFocus == 0 {
 			if m.status != nil && len(m.status.channels) > 0 {
 				return theme.Footer.Render(
 					"  ←→ card • ↑↓ select • enter details • o open channel • tab switch • q quit  ")
@@ -175,13 +176,13 @@ func (m Model) viewFooter() string {
 	case tabAddons:
 		return theme.Footer.Render(
 			"  ←→ select • enter install/view • tab switch • q quit  ")
-	case tabSettings:
+	case tabSystem:
 		if m.updateConfirm {
 			return theme.Footer.Render(
 				"  y confirm • any key cancel  ")
 		}
 		return theme.Footer.Render(
-			"  enter update • tab switch • q quit  ")
+			"  ↑↓←→ navigate • enter select • tab switch • q quit  ")
 	}
 	return ""
 }
@@ -195,18 +196,18 @@ func (m Model) viewFullURL() string {
 		lipgloss.Center, lipgloss.Center, content)
 }
 
-func (m Model) viewLightningTab(bw int) string {
+func (m Model) viewWalletTab(bw int) string {
 	halfW := (bw - 2) / 2
 	cardH := theme.BoxHeight
 
-	channelsCard := m.lightningChannelsCard(halfW, cardH)
-	walletCard := m.lightningWalletCard(halfW, cardH)
+	channelsCard := m.walletChannelsCard(halfW, cardH)
+	walletCard := m.walletInfoCard(halfW, cardH)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		channelsCard, "  ", walletCard)
 }
 
-func (m Model) lightningChannelsCard(w, h int) string {
+func (m Model) walletChannelsCard(w, h int) string {
 	if !m.cfg.HasLND() {
 		return m.channelsNotInstalledCard(w, h)
 	}
@@ -220,9 +221,9 @@ func (m Model) channelsNotInstalledCard(w, h int) string {
 	var lines []string
 	lines = append(lines, theme.Lightning.Render("⚡ Channels"))
 	lines = append(lines, "")
-	lines = append(lines, theme.Grayed.Render("  Install LND from Dashboard"))
+	lines = append(lines, theme.Grayed.Render("  Install LND from System tab"))
 	border := theme.NormalBorder
-	if m.lightningFocus == 0 {
+	if m.walletFocus == 0 {
 		border = theme.GrayedBorder
 	}
 	return border.Width(w).Padding(1, 2).
@@ -235,7 +236,7 @@ func (m Model) channelsNoWalletCard(w, h int) string {
 	lines = append(lines, "")
 	lines = append(lines, theme.Grayed.Render("  Create LND wallet first"))
 	border := theme.NormalBorder
-	if m.lightningFocus == 0 {
+	if m.walletFocus == 0 {
 		border = theme.GrayedBorder
 	}
 	return border.Width(w).Padding(1, 2).
@@ -274,7 +275,7 @@ func (m Model) channelsListCard(w, h int) string {
 	if m.status == nil || !m.status.lndResponding {
 		lines = append(lines, "  "+theme.Dim.Render("Waiting for LND..."))
 		border := theme.NormalBorder
-		if m.lightningFocus == 0 {
+		if m.walletFocus == 0 {
 			border = theme.SelectedBorder
 		}
 		return border.Width(w).Padding(1, 2).
@@ -288,7 +289,7 @@ func (m Model) channelsListCard(w, h int) string {
 		lines = append(lines, "  "+theme.Action.Render(
 			"▸ [o] Open Channel"))
 		border := theme.NormalBorder
-		if m.lightningFocus == 0 {
+		if m.walletFocus == 0 {
 			border = theme.SelectedBorder
 		}
 		return border.Width(w).Padding(1, 2).
@@ -318,7 +319,7 @@ func (m Model) channelsListCard(w, h int) string {
 		ch := m.status.channels[i]
 		prefix := "  "
 		nameStyle := theme.Value
-		if m.lightningFocus == 0 && m.chanCursor == i {
+		if m.walletFocus == 0 && m.chanCursor == i {
 			prefix = "▸ "
 			nameStyle = theme.Action
 		}
@@ -350,13 +351,11 @@ func (m Model) channelsListCard(w, h int) string {
 	}
 
 	lines = append(lines, "")
-	var totalCap, totalLocal, totalRemote int64
+	var totalLocal, totalRemote int64
 	for _, ch := range m.status.channels {
-		totalCap += ch.Capacity
 		totalLocal += ch.LocalBalance
 		totalRemote += ch.RemoteBalance
 	}
-	_ = totalCap
 	lines = append(lines, "  "+theme.Label.Render("Send: ")+
 		theme.Value.Render(formatSats(totalLocal)))
 	lines = append(lines, "  "+theme.Label.Render("Recv: ")+
@@ -365,22 +364,22 @@ func (m Model) channelsListCard(w, h int) string {
 	lines = append(lines, "  "+theme.Action.Render("[o] Open channel"))
 
 	border := theme.NormalBorder
-	if m.lightningFocus == 0 {
+	if m.walletFocus == 0 {
 		border = theme.SelectedBorder
 	}
 	return border.Width(w).Padding(1, 2).
 		Render(padLines(lines, h))
 }
 
-func (m Model) lightningWalletCard(w, h int) string {
+func (m Model) walletInfoCard(w, h int) string {
 	var lines []string
 	lines = append(lines, theme.Lightning.Render("⚡ Wallet"))
 	lines = append(lines, "")
 
 	if !m.cfg.HasLND() {
-		lines = append(lines, theme.Grayed.Render("  Install LND from Dashboard"))
+		lines = append(lines, theme.Grayed.Render("  Install LND from System tab"))
 		border := theme.NormalBorder
-		if m.lightningFocus == 1 {
+		if m.walletFocus == 1 {
 			border = theme.GrayedBorder
 		}
 		return border.Width(w).Padding(1, 2).
@@ -388,9 +387,9 @@ func (m Model) lightningWalletCard(w, h int) string {
 	}
 
 	if !m.cfg.WalletExists() {
-		lines = append(lines, theme.Grayed.Render("  Create wallet from Dashboard"))
+		lines = append(lines, theme.Grayed.Render("  Create wallet from System tab"))
 		border := theme.NormalBorder
-		if m.lightningFocus == 1 {
+		if m.walletFocus == 1 {
 			border = theme.GrayedBorder
 		}
 		return border.Width(w).Padding(1, 2).
@@ -400,7 +399,7 @@ func (m Model) lightningWalletCard(w, h int) string {
 	if m.status == nil || !m.status.lndResponding {
 		lines = append(lines, "  "+theme.Dim.Render("Waiting for LND..."))
 		border := theme.NormalBorder
-		if m.lightningFocus == 1 {
+		if m.walletFocus == 1 {
 			border = theme.SelectedBorder
 		}
 		return border.Width(w).Padding(1, 2).
@@ -456,7 +455,7 @@ func (m Model) lightningWalletCard(w, h int) string {
 	lines = append(lines, "  "+theme.Action.Render("enter details ▸"))
 
 	border := theme.NormalBorder
-	if m.lightningFocus == 1 {
+	if m.walletFocus == 1 {
 		border = theme.SelectedBorder
 	}
 	return border.Width(w).Padding(1, 2).

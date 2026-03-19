@@ -16,10 +16,10 @@ type wTab int
 
 const (
 	tabDashboard wTab = iota
-	tabLightning
+	tabWallet
 	tabPairing
 	tabAddons
-	tabSettings
+	tabSystem
 )
 
 type wSubview int
@@ -67,13 +67,14 @@ const (
 	svPaymentDetail
 )
 
+// cardPos is used for System tab card navigation (2x2 grid).
 type cardPos int
 
 const (
 	cardServices cardPos = iota
-	cardSystem
+	cardSysStats
 	cardBitcoin
-	cardLightning
+	cardUpdate
 )
 
 type svcActionDoneMsg struct{}
@@ -190,9 +191,9 @@ type Model struct {
 	version              string
 	activeTab            wTab
 	subview              wSubview
-	dashCard             cardPos
+	sysCard              cardPos
 	cardActive           bool
-	lightningFocus       int // 0=channels, 1=wallet
+	walletFocus          int // 0=channels, 1=wallet (on Wallet tab)
 	svcCursor            int
 	svcConfirm           string
 	sysConfirm           string
@@ -205,7 +206,6 @@ type Model struct {
 	height               int
 	shellAction          wSubview
 	status               *statusMsg
-	settingsFocus        int
 	latestVersion        string
 	updateConfirm        bool
 	fetchInFlight        bool
@@ -275,7 +275,7 @@ func NewModel(cfg *config.AppConfig, version string) Model {
 	return Model{
 		cfg: cfg, lndClient: client, version: version,
 		activeTab: tabDashboard, subview: svNone,
-		dashCard: cardServices, fetchInFlight: true,
+		sysCard: cardServices, fetchInFlight: true,
 	}
 }
 
@@ -283,7 +283,7 @@ func NewTestModel(cfg *config.AppConfig, version string, store *config.Store) Mo
 	m := Model{
 		cfg: cfg, version: version,
 		activeTab: tabDashboard, subview: svNone,
-		dashCard: cardServices, fetchInFlight: true,
+		sysCard: cardServices, fetchInFlight: true,
 	}
 	m.cfgStore = store
 	return m

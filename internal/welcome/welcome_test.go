@@ -58,16 +58,16 @@ func TestInitialState(t *testing.T) {
 		t.Errorf("initial subview: got %d, want %d (none)",
 			m.subview, svNone)
 	}
-	if m.dashCard != cardServices {
+	if m.sysCard != cardServices {
 		t.Errorf("initial card: got %d, want %d (services)",
-			m.dashCard, cardServices)
+			m.sysCard, cardServices)
 	}
 	if m.cardActive {
 		t.Error("card should not be active initially")
 	}
-	if m.lightningFocus != 0 {
-		t.Errorf("initial lightningFocus: got %d, want 0",
-			m.lightningFocus)
+	if m.walletFocus != 0 {
+		t.Errorf("initial walletFocus: got %d, want 0",
+			m.walletFocus)
 	}
 }
 
@@ -76,8 +76,8 @@ func TestTabForward(t *testing.T) {
 	m.width = 80
 	m.height = 24
 
-	expected := []wTab{tabLightning, tabPairing, tabAddons,
-		tabSettings, tabDashboard}
+	expected := []wTab{tabWallet, tabPairing, tabAddons,
+		tabSystem, tabDashboard}
 	for _, want := range expected {
 		newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = newM.(Model)
@@ -95,9 +95,9 @@ func TestTabBackward(t *testing.T) {
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = newM.(Model)
-	if m.activeTab != tabSettings {
-		t.Errorf("after shift+tab: got %d, want %d (settings)",
-			m.activeTab, tabSettings)
+	if m.activeTab != tabSystem {
+		t.Errorf("after shift+tab: got %d, want %d (system)",
+			m.activeTab, tabSystem)
 	}
 }
 
@@ -111,10 +111,10 @@ func TestNumberKeySwitchesTab(t *testing.T) {
 		want wTab
 	}{
 		{"1", tabDashboard},
-		{"2", tabLightning},
+		{"2", tabWallet},
 		{"3", tabPairing},
 		{"4", tabAddons},
-		{"5", tabSettings},
+		{"5", tabSystem},
 	}
 	for _, tt := range tests {
 		r := []rune(tt.key)
@@ -127,52 +127,83 @@ func TestNumberKeySwitchesTab(t *testing.T) {
 	}
 }
 
-// ── Dashboard Navigation ─────────────────────────────────
+// ── System Tab Card Navigation ───────────────────────────
 
-func TestDashboardCardNavigation(t *testing.T) {
+func TestSystemCardNavigation(t *testing.T) {
+	m := testModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabSystem
+	m.sysCard = cardServices
+
+	// right: Services → SysStats
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	m = newM.(Model)
+	if m.sysCard != cardSysStats {
+		t.Errorf("right from services: got %d, want %d (sysstats)",
+			m.sysCard, cardSysStats)
+	}
+
+	// down: SysStats → Update
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = newM.(Model)
+	if m.sysCard != cardUpdate {
+		t.Errorf("down from sysstats: got %d, want %d (update)",
+			m.sysCard, cardUpdate)
+	}
+
+	// left: Update → Bitcoin
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	m = newM.(Model)
+	if m.sysCard != cardBitcoin {
+		t.Errorf("left from update: got %d, want %d (bitcoin)",
+			m.sysCard, cardBitcoin)
+	}
+
+	// up: Bitcoin → Services
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = newM.(Model)
+	if m.sysCard != cardServices {
+		t.Errorf("up from bitcoin: got %d, want %d (services)",
+			m.sysCard, cardServices)
+	}
+}
+
+// ── Dashboard is Read-Only ───────────────────────────────
+
+func TestDashboardNoCardNavigation(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
 	m.activeTab = tabDashboard
-	m.dashCard = cardServices
 
+	// Arrow keys should not change any card state on Dashboard
 	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
-	if m.dashCard != cardSystem {
-		t.Errorf("right from services: got %d, want %d (system)",
-			m.dashCard, cardSystem)
+	if m.cardActive {
+		t.Error("dashboard should not activate cards")
 	}
 
-	newM, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	// Enter should not activate anything on Dashboard
+	newM, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
-	if m.dashCard != cardLightning {
-		t.Errorf("down from system: got %d, want %d (lightning)",
-			m.dashCard, cardLightning)
+	if m.cardActive {
+		t.Error("enter on dashboard should not activate cards")
 	}
-
-	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	m = newM.(Model)
-	if m.dashCard != cardBitcoin {
-		t.Errorf("left from lightning: got %d, want %d (bitcoin)",
-			m.dashCard, cardBitcoin)
-	}
-
-	newM, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	m = newM.(Model)
-	if m.dashCard != cardServices {
-		t.Errorf("up from bitcoin: got %d, want %d (services)",
-			m.dashCard, cardServices)
+	if m.subview != svNone {
+		t.Errorf("enter on dashboard: got subview %d, want %d",
+			m.subview, svNone)
 	}
 }
 
-// ── Card Activation ──────────────────────────────────────
+// ── System Tab Card Activation ───────────────────────────
 
 func TestEnterActivatesServicesCard(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
-	m.dashCard = cardServices
+	m.activeTab = tabSystem
+	m.sysCard = cardServices
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
@@ -185,17 +216,17 @@ func TestEnterActivatesServicesCard(t *testing.T) {
 	}
 }
 
-func TestEnterActivatesSystemCard(t *testing.T) {
+func TestEnterActivatesSysStatsCard(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
-	m.dashCard = cardSystem
+	m.activeTab = tabSystem
+	m.sysCard = cardSysStats
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if !m.cardActive {
-		t.Error("enter on system card should activate it")
+		t.Error("enter on sysstats card should activate it")
 	}
 }
 
@@ -203,8 +234,8 @@ func TestBackspaceDeactivatesCard(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
-	m.dashCard = cardServices
+	m.activeTab = tabSystem
+	m.sysCard = cardServices
 	m.cardActive = true
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -214,102 +245,144 @@ func TestBackspaceDeactivatesCard(t *testing.T) {
 	}
 }
 
-// ── Lightning Dashboard Card → Tab Switch ────────────────
+// ── Software Card → Install/Update Actions ───────────────
 
-func TestLightningCardInstallLND(t *testing.T) {
+func TestSoftwareCardInstallLND(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
-	m.dashCard = cardLightning
+	m.activeTab = tabSystem
+	m.sysCard = cardUpdate
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svLNDInstall {
-		t.Errorf("enter on lightning without LND: got %d, want %d",
+		t.Errorf("enter on software without LND: got %d, want %d",
 			m.shellAction, svLNDInstall)
 	}
 }
 
-func TestLightningCardCreateWallet(t *testing.T) {
+func TestSoftwareCardCreateWallet(t *testing.T) {
 	m := testModelWithLND()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
-	m.dashCard = cardLightning
+	m.activeTab = tabSystem
+	m.sysCard = cardUpdate
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
 	if m.shellAction != svWalletCreate {
-		t.Errorf("enter on lightning no wallet: got %d, want %d",
+		t.Errorf("enter on software no wallet: got %d, want %d",
 			m.shellAction, svWalletCreate)
 	}
 }
 
-func TestLightningCardSwitchesToTab(t *testing.T) {
+func TestSoftwareCardUpdateConfirm(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	cfg.WalletCreated = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
-	m.dashCard = cardLightning
+	m.activeTab = tabSystem
+	m.sysCard = cardUpdate
+	m.latestVersion = "9.9.9"
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
-	if m.activeTab != tabLightning {
-		t.Errorf("enter on configured lightning card: got tab %d, want %d",
-			m.activeTab, tabLightning)
+	if !m.updateConfirm {
+		t.Error("enter with new version should set updateConfirm")
 	}
-	if m.shellAction != svNone {
-		t.Error("should not trigger shell action")
+
+	// Cancel with n
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	m = newM.(Model)
+	if m.updateConfirm {
+		t.Error("pressing n should cancel updateConfirm")
 	}
 }
 
-// ── Lightning Tab Navigation ─────────────────────────────
-
-func TestLightningTabLeftRight(t *testing.T) {
+func TestSoftwareCardUpdateConfirmYes(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	cfg.WalletCreated = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabLightning
-	m.lightningFocus = 0
+	m.activeTab = tabSystem
+	m.sysCard = cardUpdate
+	m.latestVersion = "9.9.9"
+	m.updateConfirm = true
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m = newM.(Model)
+	if m.shellAction != svSelfUpdate {
+		t.Errorf("y should trigger update: got %d, want %d",
+			m.shellAction, svSelfUpdate)
+	}
+}
+
+func TestSoftwareCardNoUpdateWhenCurrent(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabSystem
+	m.sysCard = cardUpdate
+	m.latestVersion = "0.0.0-test" // matches m.version
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.updateConfirm {
+		t.Error("should not confirm when already on latest")
+	}
+}
+
+// ── Wallet Tab Navigation ────────────────────────────────
+
+func TestWalletTabLeftRight(t *testing.T) {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabWallet
+	m.walletFocus = 0
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
-	if m.lightningFocus != 1 {
+	if m.walletFocus != 1 {
 		t.Errorf("right from 0: got %d, want 1",
-			m.lightningFocus)
+			m.walletFocus)
 	}
 
 	newM, _ = m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	m = newM.(Model)
-	if m.lightningFocus != 1 {
+	if m.walletFocus != 1 {
 		t.Errorf("right from 1: got %d, want 1 (clamped)",
-			m.lightningFocus)
+			m.walletFocus)
 	}
 
 	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
 	m = newM.(Model)
-	if m.lightningFocus != 0 {
+	if m.walletFocus != 0 {
 		t.Errorf("left from 1: got %d, want 0",
-			m.lightningFocus)
+			m.walletFocus)
 	}
 }
 
-func TestLightningWalletCardEnter(t *testing.T) {
+func TestWalletCardEnter(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	cfg.WalletCreated = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabLightning
-	m.lightningFocus = 1
+	m.activeTab = tabWallet
+	m.walletFocus = 1
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
@@ -401,7 +474,7 @@ func TestTabSwitchResetsCardActive(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabDashboard
+	m.activeTab = tabSystem
 	m.cardActive = true
 	m.svcConfirm = "restart"
 
@@ -484,44 +557,6 @@ func TestAddonsSyncthingRequiresLND(t *testing.T) {
 	m = newM.(Model)
 	if m.shellAction == svSyncthingInstall {
 		t.Error("syncthing install should not trigger without LND")
-	}
-}
-
-// ── Settings ─────────────────────────────────────────────
-
-func TestSettingsUpdateConfirm(t *testing.T) {
-	m := testModel()
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabSettings
-	m.latestVersion = "9.9.9"
-
-	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	_ = newM
-	newM, _ = m.handleSettingsTabKey("enter")
-	m = newM.(Model)
-	if !m.updateConfirm {
-		t.Error("enter with new version should set updateConfirm")
-	}
-
-	newM, _ = m.handleSettingsTabKey("n")
-	m = newM.(Model)
-	if m.updateConfirm {
-		t.Error("pressing n should cancel updateConfirm")
-	}
-}
-
-func TestSettingsNoUpdateWhenCurrent(t *testing.T) {
-	m := testModel()
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabSettings
-	m.latestVersion = installer.GetVersion()
-
-	newM, _ := m.handleSettingsTabKey("enter")
-	m = newM.(Model)
-	if m.updateConfirm {
-		t.Error("should not confirm when already on latest")
 	}
 }
 
@@ -839,13 +874,13 @@ func TestServiceNamesNoProxyTorMode(t *testing.T) {
 	}
 }
 
-// ── Lightning Tab ────────────────────────────────────────
+// ── Wallet Tab ───────────────────────────────────────────
 
-func TestLightningTabNoLND(t *testing.T) {
+func TestWalletTabNoLND(t *testing.T) {
 	m := testModel()
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabLightning
+	m.activeTab = tabWallet
 
 	view := m.View()
 	if !strings.Contains(view.Content, "Install LND") {
@@ -853,13 +888,13 @@ func TestLightningTabNoLND(t *testing.T) {
 	}
 }
 
-func TestLightningTabNoWallet(t *testing.T) {
+func TestWalletTabNoWallet(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabLightning
+	m.activeTab = tabWallet
 
 	view := m.View()
 	if !strings.Contains(view.Content, "Create") {
@@ -867,14 +902,14 @@ func TestLightningTabNoWallet(t *testing.T) {
 	}
 }
 
-func TestLightningTabWithChannels(t *testing.T) {
+func TestWalletTabWithChannels(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
 	cfg.WalletCreated = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabLightning
+	m.activeTab = tabWallet
 	m.status = &statusMsg{
 		lndResponding: true,
 		lndBalance:    "1000000",
@@ -905,8 +940,8 @@ func TestChannelDetailSubview(t *testing.T) {
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
-	m.activeTab = tabLightning
-	m.lightningFocus = 0
+	m.activeTab = tabWallet
+	m.walletFocus = 0
 	m.chanCursor = 0
 	m.status = &statusMsg{
 		lndResponding: true,
