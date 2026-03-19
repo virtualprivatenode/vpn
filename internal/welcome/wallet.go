@@ -39,7 +39,7 @@ func (m Model) viewReceive() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Receive ")
 	footer := theme.Footer.Render(
-		"  tab switch field • enter create invoice • esc back  ")
+		"  tab switch field  enter create invoice  esc back  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -88,7 +88,7 @@ func (m Model) viewReceiveWaiting() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Invoice Created ")
 	footer := theme.Footer.Render(
-		"  f full invoice • esc cancel • q quit  ")
+		"  f full invoice  esc cancel  q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -134,7 +134,7 @@ func (m Model) viewReceiveExpired() string {
 		Render(strings.Join(lines, "\n"))
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Invoice Expired ")
-	footer := theme.Footer.Render("  enter return • q quit  ")
+	footer := theme.Footer.Render("  enter return  q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -168,7 +168,7 @@ func (m Model) viewSend() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Send ")
 	footer := theme.Footer.Render(
-		"  enter decode • esc back  ")
+		"  enter decode  esc back  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -213,7 +213,7 @@ func (m Model) viewSendConfirm() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Confirm Payment ")
 	footer := theme.Footer.Render(
-		"  y confirm • esc cancel  ")
+		"  y confirm  esc cancel  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -310,7 +310,7 @@ func (m Model) viewSendResult() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Payment Result ")
 	footer := theme.Footer.Render(
-		"  enter return to wallet • q quit  ")
+		"  enter return to wallet  q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -341,7 +341,7 @@ func renderRouteVisualization(hops []lndrpc.RouteHop) string {
 	return "  " + theme.Good.Render(strings.Join(parts, " ━━▸ "))
 }
 
-// ── Payment History ──────────────────────────────────────
+// ── Payment History (fullscreen, legacy) ─────────────────
 
 func (m Model) viewPaymentHistory() string {
 	bw := min(m.width-4, theme.ContentWidth)
@@ -428,7 +428,7 @@ func (m Model) viewPaymentHistory() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Payment History ")
 	footer := theme.Footer.Render(
-		"  ↑↓ select • enter details • esc back • q quit  ")
+		"  ↑↓ select  enter details  esc back  q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -524,7 +524,7 @@ func (m Model) viewPaymentDetail() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Payment Details ")
 	footer := theme.Footer.Render(
-		"  esc back • q quit  ")
+		"  backspace back  q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,

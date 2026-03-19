@@ -68,6 +68,14 @@ const (
 	svPaymentDetail
 )
 
+// Wallet sidebar section indices.
+const (
+	walletSectionTransactions = 0
+	walletSectionSend         = 1
+	walletSectionReceive      = 2
+	walletSectionOnChain      = 3
+)
+
 // cardPos is used for System tab card navigation (2x2 grid).
 type cardPos int
 
@@ -194,7 +202,6 @@ type Model struct {
 	subview              wSubview
 	sysCard              cardPos
 	cardActive           bool
-	walletFocus          int // 0=channels, 1=wallet (on Wallet tab)
 	svcCursor            int
 	svcConfirm           string
 	sysConfirm           string
@@ -233,7 +240,12 @@ type Model struct {
 	chanAmountPreset     int
 	chanFundAddress      string
 
-	// ── Text inputs (bubbles/v2/textinput) ───────────
+	// ── Button groups ────────────────────────────────────
+	tabBar            ButtonGroup
+	walletSidebar     ButtonGroup
+	walletPaneFocused bool // false = sidebar focused, true = content pane focused
+
+	// ── Text inputs (bubbles/v2/textinput) ───────────────
 	sendInput       textinput.Model
 	recvAmountInput textinput.Model
 	recvMemoInput   textinput.Model
@@ -269,6 +281,27 @@ type Model struct {
 	payHistoryCursor int
 }
 
+func newTabBar() ButtonGroup {
+	tabBar := NewButtonGroup(
+		[]string{"Dashboard", "Wallet", "Pairing", "Add-ons", "System"},
+		Horizontal,
+	)
+	tabBar.ActivateIndex(0)
+	tabBar.Focus()
+	return tabBar
+}
+
+func newWalletSidebar() ButtonGroup {
+	sidebar := NewButtonGroup(
+		[]string{"Transactions", "Send", "Receive", "On-Chain"},
+		Vertical,
+	)
+	sidebar.SetWidth(18)
+	sidebar.ActivateIndex(walletSectionTransactions)
+	sidebar.SetDisabled(walletSectionOnChain, true)
+	return sidebar
+}
+
 func NewModel(cfg *config.AppConfig, version string) Model {
 	var client *lndrpc.Client
 	if cfg.HasLND() && cfg.WalletExists() {
@@ -278,6 +311,8 @@ func NewModel(cfg *config.AppConfig, version string) Model {
 		cfg: cfg, lndClient: client, version: version,
 		activeTab: tabDashboard, subview: svNone,
 		sysCard: cardServices, fetchInFlight: true,
+		tabBar:        newTabBar(),
+		walletSidebar: newWalletSidebar(),
 	}
 }
 
@@ -286,6 +321,8 @@ func NewTestModel(cfg *config.AppConfig, version string, store *config.Store) Mo
 		cfg: cfg, version: version,
 		activeTab: tabDashboard, subview: svNone,
 		sysCard: cardServices, fetchInFlight: true,
+		tabBar:        newTabBar(),
+		walletSidebar: newWalletSidebar(),
 	}
 	m.cfgStore = store
 	return m

@@ -91,11 +91,9 @@ func (m Model) dashboardOverview(bw int) string {
 	balances := m.dashboardBalances(bw)
 	sections = append(sections, balances)
 
-	// ── Channel Liquidity ────────────────────────────────
-	if m.status != nil && len(m.status.channels) > 0 {
-		liquidity := m.dashboardLiquidity(bw)
-		sections = append(sections, liquidity)
-	}
+	// ── Channel List (Interactive) ───────────────────────
+	channels := m.dashboardChannels(bw)
+	sections = append(sections, channels)
 
 	// ── Status Indicators ────────────────────────────────
 	status := m.dashboardStatus(bw)
@@ -117,12 +115,8 @@ func (m Model) dashboardIdentity(bw int) string {
 	}
 
 	if m.status.lndPubkey != "" {
-		pubkey := m.status.lndPubkey
-		if len(pubkey) > 20 {
-			pubkey = pubkey[:20] + "..."
-		}
 		lines = append(lines, "  "+theme.Label.Render("Pubkey:  ")+
-			theme.Mono.Render(pubkey))
+			theme.Mono.Render(m.status.lndPubkey))
 	}
 	lines = append(lines, "  "+theme.Label.Render("P2P:     ")+
 		theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
@@ -185,79 +179,120 @@ func (m Model) dashboardBalances(bw int) string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func (m Model) dashboardLiquidity(bw int) string {
+func (m Model) dashboardChannels(bw int) string {
 	var lines []string
-	lines = append(lines, theme.Header.Render("  Channel Liquidity"))
+
+	activeCount := 0
+	inactiveCount := 0
+	if m.status != nil {
+		for _, ch := range m.status.channels {
+			if ch.Active {
+				activeCount++
+			} else {
+				inactiveCount++
+			}
+		}
+	}
+
+	headerText := "  Channels"
+	if m.status != nil && len(m.status.channels) > 0 {
+		headerText = fmt.Sprintf("  Channels (%d active", activeCount)
+		if inactiveCount > 0 {
+			headerText += fmt.Sprintf(", %d offline", inactiveCount)
+		}
+		if m.status.pendingOpen > 0 {
+			headerText += fmt.Sprintf(", %d pending", m.status.pendingOpen)
+		}
+		headerText += ")"
+	}
+	lines = append(lines, theme.Header.Render(headerText))
 	lines = append(lines, "")
 
-	if m.status == nil || len(m.status.channels) == 0 {
-		lines = append(lines, "  "+theme.Dim.Render(
-			"No channels"))
+	if m.status == nil || !m.status.lndResponding {
+		lines = append(lines, "  "+theme.Dim.Render("Waiting for LND..."))
+		lines = append(lines, "")
+		lines = append(lines, "  "+theme.Action.Render("o  Open Channel"))
 		return theme.NormalBorder.Width(bw).Padding(0, 1).
 			Render(strings.Join(lines, "\n"))
 	}
 
-	// Bar width for channel visualization
+	if len(m.status.channels) == 0 {
+		lines = append(lines, "  "+theme.Dim.Render(
+			"No channels yet. Open a channel to start."))
+		lines = append(lines, "")
+		lines = append(lines, "  "+theme.Action.Render("o  Open Channel"))
+		return theme.NormalBorder.Width(bw).Padding(0, 1).
+			Render(strings.Join(lines, "\n"))
+	}
+
+	// Channel list with selection cursor
+	visibleCount := theme.BoxHeight - 10
+	if visibleCount < 3 {
+		visibleCount = 3
+	}
+
+	if m.chanScrollOffset > 0 {
+		lines = append(lines, "  "+theme.Dim.Render("  ↑ more"))
+	}
+
+	viewEnd := m.chanScrollOffset + visibleCount
+	if viewEnd > len(m.status.channels) {
+		viewEnd = len(m.status.channels)
+	}
+
 	barWidth := bw - 28
-	if barWidth < 20 {
-		barWidth = 20
+	if barWidth < 10 {
+		barWidth = 10
 	}
 
-	// Show up to 10 channels, sorted by capacity (status already has them)
-	maxShow := 10
-	if maxShow > len(m.status.channels) {
-		maxShow = len(m.status.channels)
-	}
-
-	for i := 0; i < maxShow; i++ {
+	for i := m.chanScrollOffset; i < viewEnd; i++ {
 		ch := m.status.channels[i]
-		name := ch.PeerAlias
-		if name == "" {
-			if len(ch.RemotePubkey) > 10 {
-				name = ch.RemotePubkey[:10] + ".."
-			} else {
-				name = ch.RemotePubkey
-			}
+		prefix := "  "
+		nameStyle := theme.Value
+		if m.chanCursor == i {
+			prefix = "▸ "
+			nameStyle = theme.Action
 		}
-		if len(name) > 12 {
-			name = name[:12]
-		}
-		name = fmt.Sprintf("%-12s", name)
-
 		dot := theme.RedDot.Render("○")
 		if ch.Active {
 			dot = theme.GreenDot.Render("●")
 		}
+		name := ch.PeerAlias
+		if name == "" {
+			if len(ch.RemotePubkey) > 12 {
+				name = ch.RemotePubkey[:12] + "..."
+			} else {
+				name = ch.RemotePubkey
+			}
+		}
+		if len(name) > 14 {
+			name = name[:14]
+		}
+		name = fmt.Sprintf("%-14s", name)
 
 		bar := renderBalanceBar(ch.LocalBalance, ch.RemoteBalance,
 			ch.Capacity, barWidth)
-		lines = append(lines, fmt.Sprintf("  %s %s %s",
-			dot, theme.Dim.Render(name), bar))
+		lines = append(lines, fmt.Sprintf("%s%s %s %s",
+			prefix, dot, nameStyle.Render(name), bar))
 	}
 
-	if len(m.status.channels) > maxShow {
-		lines = append(lines, fmt.Sprintf("  "+
-			theme.Dim.Render("  ... and %d more"),
-			len(m.status.channels)-maxShow))
+	if viewEnd < len(m.status.channels) {
+		lines = append(lines, "  "+theme.Dim.Render("  ↓ more"))
 	}
 
-	// Aggregate bar
-	var totalLocal, totalRemote, totalCap int64
+	// Totals
+	lines = append(lines, "")
+	var totalLocal, totalRemote int64
 	for _, ch := range m.status.channels {
 		totalLocal += ch.LocalBalance
 		totalRemote += ch.RemoteBalance
-		totalCap += ch.Capacity
 	}
+	lines = append(lines, "  "+theme.Label.Render("Send: ")+
+		theme.Value.Render(formatSats(totalLocal)))
+	lines = append(lines, "  "+theme.Label.Render("Recv: ")+
+		theme.Value.Render(formatSats(totalRemote)))
 	lines = append(lines, "")
-	aggBar := renderBalanceBar(totalLocal, totalRemote, totalCap, barWidth)
-	lines = append(lines, "  "+theme.Label.Render("Total:       ")+aggBar)
-	localPct := 0
-	if totalCap > 0 {
-		localPct = int(totalLocal * 100 / totalCap)
-	}
-	lines = append(lines, "  "+theme.Dim.Render(
-		fmt.Sprintf("             %d%% outbound / %d%% inbound",
-			localPct, 100-localPct)))
+	lines = append(lines, "  "+theme.Action.Render("o  Open Channel"))
 
 	return theme.NormalBorder.Width(bw).Padding(0, 1).
 		Render(strings.Join(lines, "\n"))
@@ -305,30 +340,6 @@ func (m Model) dashboardStatus(bw int) string {
 	} else {
 		lines = append(lines, "  "+theme.RedDot.Render("●")+
 			" LND not responding")
-	}
-
-	// Channels summary
-	if len(m.status.channels) > 0 {
-		activeCount := 0
-		for _, ch := range m.status.channels {
-			if ch.Active {
-				activeCount++
-			}
-		}
-		inactive := len(m.status.channels) - activeCount
-		chanText := fmt.Sprintf("%d channels", len(m.status.channels))
-		if inactive > 0 {
-			chanText += fmt.Sprintf(" (%d active, %d offline)",
-				activeCount, inactive)
-		}
-		if m.status.pendingOpen > 0 {
-			chanText += fmt.Sprintf(", %d pending", m.status.pendingOpen)
-		}
-		lines = append(lines, "  "+theme.GreenDot.Render("●")+
-			" "+chanText)
-	} else {
-		lines = append(lines, "  "+theme.Dim.Render("○")+
-			" No channels")
 	}
 
 	// Tor

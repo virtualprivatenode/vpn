@@ -43,6 +43,109 @@ func (m Model) handleWalletKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.
 	return m, nil
 }
 
+// ── Wallet sidebar navigation ────────────────────────────
+
+// handleWalletNavKey handles navigation on the wallet tab's sidebar
+// and content pane.
+func (m Model) handleWalletNavKey(key string) (tea.Model, tea.Cmd) {
+	if !m.walletPaneFocused {
+		return m.handleWalletSidebarKey(key)
+	}
+	return m.handleWalletContentKey(key)
+}
+
+// handleWalletSidebarKey handles keys when the wallet sidebar has focus.
+func (m Model) handleWalletSidebarKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "right", "l", "enter":
+		// First activate the focused button if not already active
+		if m.walletSidebar.FocusIndex != m.walletSidebar.ActiveIndex {
+			m.walletSidebar.Activate()
+		}
+		return m.activateWalletSection(m.walletSidebar.ActiveIndex)
+	default:
+		handled, activated := m.walletSidebar.HandleKeyPress(key)
+		if handled {
+			if activated >= 0 {
+				return m.activateWalletSection(activated)
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// activateWalletSection enters the selected wallet sidebar section.
+func (m Model) activateWalletSection(idx int) (tea.Model, tea.Cmd) {
+	switch idx {
+	case walletSectionTransactions:
+		m.walletPaneFocused = true
+		m.walletSidebar.Blur()
+		m.payHistoryCursor = 0
+		return m, fetchPaymentHistoryCmd(m.lndClient)
+	case walletSectionSend:
+		if m.cfg.HasLND() && m.cfg.WalletExists() {
+			m.resetSendState()
+			m.subview = svSend
+		}
+		return m, nil
+	case walletSectionReceive:
+		if m.cfg.HasLND() && m.cfg.WalletExists() {
+			m.resetReceiveState()
+			m.subview = svReceive
+		}
+		return m, nil
+	case walletSectionOnChain:
+		// Disabled / stub — no-op
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleWalletContentKey handles keys when the wallet content pane has focus.
+func (m Model) handleWalletContentKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h", "backspace":
+		// Return to sidebar
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
+		return m, nil
+	}
+
+	// Delegate to active section
+	switch m.walletSidebar.ActiveIndex {
+	case walletSectionTransactions:
+		return m.handleTransactionsPaneKey(key)
+	}
+
+	return m, nil
+}
+
+// handleTransactionsPaneKey handles keys in the transactions content pane.
+func (m Model) handleTransactionsPaneKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		if m.payHistoryCursor > 0 {
+			m.payHistoryCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.payHistoryCursor < len(m.payHistory)-1 {
+			m.payHistoryCursor++
+		}
+		return m, nil
+	case "enter":
+		if len(m.payHistory) > 0 &&
+			m.payHistoryCursor < len(m.payHistory) {
+			m.subview = svPaymentDetail
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
 // ── Receive ──────────────────────────────────────────────
 
 func (m Model) handleReceiveKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -52,6 +155,8 @@ func (m Model) handleReceiveKey(key string, msg tea.KeyPressMsg) (tea.Model, tea
 	case "esc":
 		m.resetReceiveState()
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, nil
 	case "tab":
 		// Toggle focus between amount and memo
@@ -79,7 +184,7 @@ func (m Model) handleReceiveKey(key string, msg tea.KeyPressMsg) (tea.Model, tea
 		return m, createInvoiceCmd(
 			m.lndClient, amt, m.recvMemoInput.Value())
 	default:
-		// Forward to focused textinput (cast to tea.Msg for full event handling)
+		// Forward to focused textinput
 		var cmd tea.Cmd
 		if m.recvAmountInput.Focused() {
 			m.recvAmountInput, cmd = m.recvAmountInput.Update(tea.Msg(msg))
@@ -97,6 +202,8 @@ func (m Model) handleReceiveWaitingKey(key string) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		m.resetReceiveState()
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, nil
 	case "f":
 		if m.recvPayReq != "" {
@@ -116,6 +223,8 @@ func (m Model) handleReceivePaidKey(key string) (tea.Model, tea.Cmd) {
 	case "enter", "esc", "backspace":
 		m.resetReceiveState()
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, fetchStatus(m.cfg, m.lndClient)
 	}
 	return m, nil
@@ -128,6 +237,8 @@ func (m Model) handleReceiveExpiredKey(key string) (tea.Model, tea.Cmd) {
 	case "enter", "esc", "backspace":
 		m.resetReceiveState()
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, nil
 	}
 	return m, nil
@@ -142,6 +253,8 @@ func (m Model) handleSendKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cm
 	case "esc":
 		m.resetSendState()
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, nil
 	case "enter":
 		payReq := strings.TrimSpace(m.sendInput.Value())
@@ -201,6 +314,8 @@ func (m Model) handleSendResultKey(key string) (tea.Model, tea.Cmd) {
 	case "enter", "esc", "backspace":
 		m.resetSendState()
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, fetchStatus(m.cfg, m.lndClient)
 	}
 	return m, nil
@@ -214,6 +329,8 @@ func (m Model) handlePaymentHistoryKey(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "esc", "backspace":
 		m.subview = svNone
+		m.walletPaneFocused = false
+		m.walletSidebar.Focus()
 		return m, nil
 	case "up", "k":
 		if m.payHistoryCursor > 0 {
@@ -240,7 +357,9 @@ func (m Model) handlePaymentDetailKey(key string) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc", "backspace":
-		m.subview = svPaymentHistory
+		// Return to transactions pane, not fullscreen history
+		m.subview = svNone
+		m.walletPaneFocused = true
 		return m, nil
 	}
 	return m, nil

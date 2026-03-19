@@ -46,6 +46,49 @@ func testModelWithStore(t *testing.T, cfg *config.AppConfig) Model {
 	return NewTestModel(cfg, "0.0.0-test", store)
 }
 
+func testModelWalletReady() Model {
+	cfg := config.Default()
+	cfg.LNDInstalled = true
+	cfg.WalletCreated = true
+	m := NewModel(cfg, "0.0.0-test")
+	m.width = 80
+	m.height = 24
+	return m
+}
+
+func testModelWalletWithStatus() Model {
+	m := testModelWalletReady()
+	m.status = &statusMsg{
+		lndResponding:  true,
+		lndBalance:     "1000000",
+		lndPubkey:      "03abc123def456789012345678901234567890123456789012345678901234dead",
+		lndSyncedChain: true,
+		lndSyncedGraph: true,
+		channels: []channelInfo{
+			{
+				ChanID: 123, PeerAlias: "ACINQ",
+				RemotePubkey:  "03abc123def456",
+				Capacity:      250000,
+				LocalBalance:  150000,
+				RemoteBalance: 100000,
+				Active:        true,
+				Initiator:     true,
+			},
+			{
+				ChanID: 456, PeerAlias: "Zeus",
+				RemotePubkey:  "02def789abc012",
+				Capacity:      500000,
+				LocalBalance:  200000,
+				RemoteBalance: 300000,
+				Active:        true,
+			},
+		},
+		services:  map[string]bool{"tor": true, "bitcoind": true, "lnd": true},
+		btcSynced: true,
+	}
+	return m
+}
+
 // ── Tab Navigation ───────────────────────────────────────
 
 func TestInitialState(t *testing.T) {
@@ -65,9 +108,41 @@ func TestInitialState(t *testing.T) {
 	if m.cardActive {
 		t.Error("card should not be active initially")
 	}
-	if m.walletFocus != 0 {
-		t.Errorf("initial walletFocus: got %d, want 0",
-			m.walletFocus)
+	if m.walletPaneFocused {
+		t.Error("walletPaneFocused should be false initially")
+	}
+}
+
+func TestInitialButtonGroups(t *testing.T) {
+	m := testModel()
+
+	// Tab bar
+	if len(m.tabBar.Labels) != 5 {
+		t.Errorf("tab bar labels: got %d, want 5", len(m.tabBar.Labels))
+	}
+	if m.tabBar.ActiveIndex != 0 {
+		t.Errorf("tab bar active: got %d, want 0", m.tabBar.ActiveIndex)
+	}
+	if !m.tabBar.Focused {
+		t.Error("tab bar should be focused initially")
+	}
+
+	// Wallet sidebar
+	if len(m.walletSidebar.Labels) != 4 {
+		t.Errorf("sidebar labels: got %d, want 4", len(m.walletSidebar.Labels))
+	}
+	if m.walletSidebar.ActiveIndex != walletSectionTransactions {
+		t.Errorf("sidebar active: got %d, want %d",
+			m.walletSidebar.ActiveIndex, walletSectionTransactions)
+	}
+	if m.walletSidebar.Focused {
+		t.Error("sidebar should not be focused initially (dashboard is active)")
+	}
+	if !m.walletSidebar.Disabled[walletSectionOnChain] {
+		t.Error("On-Chain button should be disabled")
+	}
+	if m.walletSidebar.Width != 18 {
+		t.Errorf("sidebar width: got %d, want 18", m.walletSidebar.Width)
 	}
 }
 
@@ -127,6 +202,45 @@ func TestNumberKeySwitchesTab(t *testing.T) {
 	}
 }
 
+// ── Tab Switching Focus Management ───────────────────────
+
+func TestSwitchToWalletFocusesSidebar(t *testing.T) {
+	m := testModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabDashboard
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	m = newM.(Model)
+	if m.activeTab != tabWallet {
+		t.Fatalf("expected wallet tab, got %d", m.activeTab)
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("wallet sidebar should be focused when switching to wallet tab")
+	}
+	if m.walletPaneFocused {
+		t.Error("wallet pane should not be focused when switching to wallet tab")
+	}
+}
+
+func TestSwitchAwayFromWalletBlursSidebar(t *testing.T) {
+	m := testModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+	m.walletPaneFocused = true
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
+	m = newM.(Model)
+	if m.walletSidebar.Focused {
+		t.Error("sidebar should be blurred after leaving wallet tab")
+	}
+	if m.walletPaneFocused {
+		t.Error("walletPaneFocused should be reset after leaving wallet tab")
+	}
+}
+
 // ── System Tab Card Navigation ───────────────────────────
 
 func TestSystemCardNavigation(t *testing.T) {
@@ -169,30 +283,114 @@ func TestSystemCardNavigation(t *testing.T) {
 	}
 }
 
-// ── Dashboard is Read-Only ───────────────────────────────
+// ── Dashboard Navigation ─────────────────────────────────
 
-func TestDashboardNoCardNavigation(t *testing.T) {
-	m := testModel()
-	m.width = 80
-	m.height = 24
+func TestDashboardChannelNavigation(t *testing.T) {
+	m := testModelWalletWithStatus()
+	m.activeTab = tabDashboard
+	m.chanCursor = 0
+
+	// Down to second channel
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = newM.(Model)
+	if m.chanCursor != 1 {
+		t.Errorf("down: got cursor %d, want 1", m.chanCursor)
+	}
+
+	// Down again should clamp (only 2 channels)
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = newM.(Model)
+	if m.chanCursor != 1 {
+		t.Errorf("down clamped: got cursor %d, want 1", m.chanCursor)
+	}
+
+	// Up back to first
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = newM.(Model)
+	if m.chanCursor != 0 {
+		t.Errorf("up: got cursor %d, want 0", m.chanCursor)
+	}
+
+	// Up should clamp at 0
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = newM.(Model)
+	if m.chanCursor != 0 {
+		t.Errorf("up clamped: got cursor %d, want 0", m.chanCursor)
+	}
+}
+
+func TestDashboardEnterOpensChannelDetail(t *testing.T) {
+	m := testModelWalletWithStatus()
+	m.activeTab = tabDashboard
+	m.chanCursor = 0
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svChannelDetail {
+		t.Errorf("enter on dashboard channel: got %d, want %d",
+			m.subview, svChannelDetail)
+	}
+}
+
+func TestDashboardEnterNoChannels(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabDashboard
+	m.status = &statusMsg{
+		lndResponding: true,
+		channels:      []channelInfo{},
+		services:      map[string]bool{},
+	}
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("enter with no channels: got %d, want %d",
+			m.subview, svNone)
+	}
+}
+
+func TestDashboardOpenChannel(t *testing.T) {
+	m := testModelWalletWithStatus()
 	m.activeTab = tabDashboard
 
-	// Arrow keys should not change any card state on Dashboard
-	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	m = newM.(Model)
-	if m.cardActive {
-		t.Error("dashboard should not activate cards")
+	if m.subview != svChannelOpen {
+		t.Errorf("o on dashboard: got %d, want %d",
+			m.subview, svChannelOpen)
 	}
+}
 
-	// Enter should not activate anything on Dashboard
-	newM, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+func TestDashboardNoNavWithoutChannels(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabDashboard
+	m.status = nil
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = newM.(Model)
-	if m.cardActive {
-		t.Error("enter on dashboard should not activate cards")
+	if m.chanCursor != 0 {
+		t.Errorf("no channels, down should no-op: got %d", m.chanCursor)
 	}
-	if m.subview != svNone {
-		t.Errorf("enter on dashboard: got subview %d, want %d",
-			m.subview, svNone)
+}
+
+func TestDashboardShowsFullPubkey(t *testing.T) {
+	m := testModelWalletWithStatus()
+	m.activeTab = tabDashboard
+
+	view := m.View()
+	// Full pubkey should be displayed (not truncated)
+	if !strings.Contains(view.Content, "03abc123def456789012345678901234567890123456789012345678901234dead") {
+		t.Error("dashboard should show full pubkey")
+	}
+}
+
+func TestDashboardShowsP2PMode(t *testing.T) {
+	m := testModelWalletWithStatus()
+	m.activeTab = tabDashboard
+
+	view := m.View()
+	if !strings.Contains(view.Content, "Tor only") {
+		t.Error("dashboard should show P2P mode")
 	}
 }
 
@@ -340,55 +538,322 @@ func TestSoftwareCardNoUpdateWhenCurrent(t *testing.T) {
 	}
 }
 
-// ── Wallet Tab Navigation ────────────────────────────────
+// ── Wallet Tab — Sidebar Navigation ──────────────────────
 
-func TestWalletTabLeftRight(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	cfg.WalletCreated = true
-	m := NewModel(cfg, "0.0.0-test")
-	m.width = 80
-	m.height = 24
+func TestWalletSidebarUpDown(t *testing.T) {
+	m := testModelWalletReady()
 	m.activeTab = tabWallet
-	m.walletFocus = 0
+	m.walletSidebar.Focus()
 
-	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	// Start at Transactions (0), go down to Send (1)
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = newM.(Model)
-	if m.walletFocus != 1 {
-		t.Errorf("right from 0: got %d, want 1",
-			m.walletFocus)
+	if m.walletSidebar.FocusIndex != walletSectionSend {
+		t.Errorf("down from 0: got focus %d, want %d",
+			m.walletSidebar.FocusIndex, walletSectionSend)
 	}
 
-	newM, _ = m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	// Down to Receive (2)
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = newM.(Model)
-	if m.walletFocus != 1 {
-		t.Errorf("right from 1: got %d, want 1 (clamped)",
-			m.walletFocus)
+	if m.walletSidebar.FocusIndex != walletSectionReceive {
+		t.Errorf("down from 1: got focus %d, want %d",
+			m.walletSidebar.FocusIndex, walletSectionReceive)
 	}
 
-	newM, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	// Down again should skip On-Chain (3, disabled) and wrap to Transactions (0)
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = newM.(Model)
-	if m.walletFocus != 0 {
-		t.Errorf("left from 1: got %d, want 0",
-			m.walletFocus)
+	if m.walletSidebar.FocusIndex != walletSectionTransactions {
+		t.Errorf("down from 2 (skip disabled): got focus %d, want %d",
+			m.walletSidebar.FocusIndex, walletSectionTransactions)
+	}
+
+	// Up from Transactions should skip On-Chain and go to Receive
+	newM, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = newM.(Model)
+	if m.walletSidebar.FocusIndex != walletSectionReceive {
+		t.Errorf("up from 0 (skip disabled): got focus %d, want %d",
+			m.walletSidebar.FocusIndex, walletSectionReceive)
 	}
 }
 
-func TestWalletCardEnter(t *testing.T) {
+func TestWalletSidebarEnterTransactions(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+	m.walletSidebar.FocusIndex = walletSectionTransactions
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if !m.walletPaneFocused {
+		t.Error("enter on Transactions should focus content pane")
+	}
+	if m.walletSidebar.Focused {
+		t.Error("sidebar should be blurred after entering content pane")
+	}
+	if m.walletSidebar.ActiveIndex != walletSectionTransactions {
+		t.Errorf("active index: got %d, want %d",
+			m.walletSidebar.ActiveIndex, walletSectionTransactions)
+	}
+}
+
+func TestWalletSidebarRightEntersPane(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+	m.walletSidebar.FocusIndex = walletSectionTransactions
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	m = newM.(Model)
+	if !m.walletPaneFocused {
+		t.Error("right arrow should enter content pane")
+	}
+}
+
+func TestWalletSidebarEnterSendOpensSubview(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+	m.walletSidebar.SetFocus(walletSectionSend)
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svSend {
+		t.Errorf("enter on Send: got subview %d, want %d",
+			m.subview, svSend)
+	}
+}
+
+func TestWalletSidebarEnterReceiveOpensSubview(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+	m.walletSidebar.SetFocus(walletSectionReceive)
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svReceive {
+		t.Errorf("enter on Receive: got subview %d, want %d",
+			m.subview, svReceive)
+	}
+}
+
+func TestWalletSidebarEnterOnChainDisabled(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+	// Can't focus disabled button via SetFocus, so FocusIndex stays at 0
+	m.walletSidebar.SetFocus(walletSectionOnChain)
+
+	// Focus should not have moved to On-Chain since it's disabled
+	if m.walletSidebar.FocusIndex == walletSectionOnChain {
+		t.Error("should not be able to focus disabled On-Chain button")
+	}
+}
+
+// ── Wallet Content Pane Navigation ───────────────────────
+
+func TestWalletContentPaneBackToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletPaneFocused = true
+	m.walletSidebar.Blur()
+
+	// Left arrow goes back to sidebar
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	m = newM.(Model)
+	if m.walletPaneFocused {
+		t.Error("left should return focus to sidebar")
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after returning")
+	}
+}
+
+func TestWalletContentPaneBackspaceToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletPaneFocused = true
+	m.walletSidebar.Blur()
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = newM.(Model)
+	if m.walletPaneFocused {
+		t.Error("backspace should return focus to sidebar")
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after backspace")
+	}
+}
+
+func TestWalletTransactionsPaneNavigation(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletPaneFocused = true
+	m.walletSidebar.ActiveIndex = walletSectionTransactions
+	m.payHistoryCursor = 0
+
+	// Down with no history should be safe
+	newM, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = newM.(Model)
+	if m.payHistoryCursor != 0 {
+		t.Errorf("down with no history: got %d, want 0", m.payHistoryCursor)
+	}
+}
+
+// ── Send/Receive Return to Sidebar ───────────────────────
+
+func TestSendEscReturnsToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.subview = svSend
+	m.sendInput = newSendPayReqInput()
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("esc from send: got subview %d, want %d", m.subview, svNone)
+	}
+	if m.walletPaneFocused {
+		t.Error("should return to sidebar, not content pane")
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after esc from send")
+	}
+}
+
+func TestReceiveEscReturnsToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.subview = svReceive
+	m.recvAmountInput = newRecvAmountInput()
+	m.recvMemoInput = newRecvMemoInput()
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("esc from receive: got subview %d, want %d", m.subview, svNone)
+	}
+	if m.walletPaneFocused {
+		t.Error("should return to sidebar, not content pane")
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after esc from receive")
+	}
+}
+
+func TestSendResultEnterReturnsToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.subview = svSendResult
+	m.sendInput = newSendPayReqInput()
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("enter from send result: got %d, want %d", m.subview, svNone)
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after returning from send result")
+	}
+}
+
+func TestReceivePaidEnterReturnsToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.subview = svReceivePaid
+	m.recvAmountInput = newRecvAmountInput()
+	m.recvMemoInput = newRecvMemoInput()
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("enter from receive paid: got %d, want %d", m.subview, svNone)
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after returning from receive paid")
+	}
+}
+
+func TestReceiveExpiredReturnsToSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.subview = svReceiveExpired
+	m.recvAmountInput = newRecvAmountInput()
+	m.recvMemoInput = newRecvMemoInput()
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("enter from receive expired: got %d, want %d", m.subview, svNone)
+	}
+	if !m.walletSidebar.Focused {
+		t.Error("sidebar should be focused after returning from receive expired")
+	}
+}
+
+func TestPaymentDetailBackReturnsToTransactionsPane(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.subview = svPaymentDetail
+	m.walletSidebar.ActiveIndex = walletSectionTransactions
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("backspace from detail: got %d, want %d", m.subview, svNone)
+	}
+	if !m.walletPaneFocused {
+		t.Error("should return to transactions pane, not sidebar")
+	}
+}
+
+// ── Wallet Tab View Rendering ────────────────────────────
+
+func TestWalletTabShowsSidebar(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletSidebar.Focus()
+
+	view := m.View()
+	if !strings.Contains(view.Content, "Transactions") {
+		t.Error("wallet tab should show Transactions button")
+	}
+	if !strings.Contains(view.Content, "Send") {
+		t.Error("wallet tab should show Send button")
+	}
+	if !strings.Contains(view.Content, "Receive") {
+		t.Error("wallet tab should show Receive button")
+	}
+	if !strings.Contains(view.Content, "On-Chain") {
+		t.Error("wallet tab should show On-Chain button")
+	}
+}
+
+func TestWalletTabNoLND(t *testing.T) {
+	m := testModel()
+	m.width = 80
+	m.height = 24
+	m.activeTab = tabWallet
+
+	view := m.View()
+	if !strings.Contains(view.Content, "Install LND") {
+		t.Error("should show install message")
+	}
+}
+
+func TestWalletTabNoWallet(t *testing.T) {
 	cfg := config.Default()
 	cfg.LNDInstalled = true
-	cfg.WalletCreated = true
 	m := NewModel(cfg, "0.0.0-test")
 	m.width = 80
 	m.height = 24
 	m.activeTab = tabWallet
-	m.walletFocus = 1
 
-	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = newM.(Model)
-	if m.subview != svWalletInfo {
-		t.Errorf("enter on wallet card: got %d, want %d",
-			m.subview, svWalletInfo)
+	view := m.View()
+	if !strings.Contains(view.Content, "create wallet") {
+		t.Error("should show create wallet message")
 	}
 }
 
@@ -485,6 +950,18 @@ func TestTabSwitchResetsCardActive(t *testing.T) {
 	}
 	if m.svcConfirm != "" {
 		t.Error("tab switch should clear svcConfirm")
+	}
+}
+
+func TestTabSwitchResetsWalletPaneFocused(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+	m.walletPaneFocused = true
+
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = newM.(Model)
+	if m.walletPaneFocused {
+		t.Error("tab switch should reset walletPaneFocused")
 	}
 }
 
@@ -682,7 +1159,6 @@ func TestLndHubCreateNameBackspaceWithText(t *testing.T) {
 	if m.subview != svLndHubCreateName {
 		t.Error("backspace with text should stay")
 	}
-	// Correct method to retrieve the value from textinput.Model
 	if m.hubNameInput.Value() != "Al" {
 		t.Errorf("got %q, want Al", m.hubNameInput.Value())
 	}
@@ -879,88 +1355,38 @@ func TestServiceNamesNoProxyTorMode(t *testing.T) {
 	}
 }
 
-// ── Wallet Tab ───────────────────────────────────────────
+// ── Channel Detail from Dashboard ────────────────────────
 
-func TestWalletTabNoLND(t *testing.T) {
-	m := testModel()
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabWallet
+func TestChannelDetailFromDashboard(t *testing.T) {
+	m := testModelWalletWithStatus()
+	m.activeTab = tabDashboard
+	m.chanCursor = 0
 
-	view := m.View()
-	if !strings.Contains(view.Content, "Install LND") {
-		t.Error("should show install message")
-	}
-}
-
-func TestWalletTabNoWallet(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	m := NewModel(cfg, "0.0.0-test")
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabWallet
-
-	view := m.View()
-	if !strings.Contains(view.Content, "Create") {
-		t.Error("should show create wallet message")
-	}
-}
-
-func TestWalletTabWithChannels(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	cfg.WalletCreated = true
-	m := NewModel(cfg, "0.0.0-test")
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabWallet
-	m.status = &statusMsg{
-		lndResponding: true,
-		lndBalance:    "1000000",
-		channels: []channelInfo{
-			{
-				ChanID: 123, PeerAlias: "ACINQ",
-				RemotePubkey: "03abc123",
-				Capacity:     250000, LocalBalance: 150000,
-				RemoteBalance: 100000, Active: true,
-			},
-		},
-		services: map[string]bool{},
+	// Enter opens detail
+	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = newM.(Model)
+	if m.subview != svChannelDetail {
+		t.Errorf("enter should open detail, got %d", m.subview)
 	}
 
+	// View should show channel info
 	view := m.View()
 	if !strings.Contains(view.Content, "ACINQ") {
-		t.Error("should show peer alias")
+		t.Error("channel detail should show peer alias")
 	}
-	if !strings.Contains(view.Content, "Wallet") {
-		t.Error("should show wallet card")
+
+	// Backspace returns
+	newM, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = newM.(Model)
+	if m.subview != svNone {
+		t.Errorf("backspace should return, got %d", m.subview)
 	}
 }
 
-func TestChannelDetailSubview(t *testing.T) {
-	cfg := config.Default()
-	cfg.LNDInstalled = true
-	cfg.WalletCreated = true
-	m := NewModel(cfg, "0.0.0-test")
-	m.width = 80
-	m.height = 24
-	m.activeTab = tabWallet
-	m.walletFocus = 0
-	m.chanCursor = 0
-	m.status = &statusMsg{
-		lndResponding: true,
-		channels: []channelInfo{
-			{
-				ChanID: 123, PeerAlias: "ACINQ",
-				RemotePubkey: "03abc123def456",
-				Capacity:     250000, LocalBalance: 150000,
-				RemoteBalance: 100000, Active: true,
-				Initiator: true,
-			},
-		},
-		services: map[string]bool{},
-	}
+func TestChannelDetailSecondChannel(t *testing.T) {
+	m := testModelWalletWithStatus()
+	m.activeTab = tabDashboard
+	m.chanCursor = 1
 
 	newM, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = newM.(Model)
@@ -968,12 +1394,13 @@ func TestChannelDetailSubview(t *testing.T) {
 		t.Errorf("enter should open detail, got %d", m.subview)
 	}
 
-	newM, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	m = newM.(Model)
-	if m.subview != svNone {
-		t.Errorf("backspace should return, got %d", m.subview)
+	view := m.View()
+	if !strings.Contains(view.Content, "Zeus") {
+		t.Error("channel detail should show Zeus peer alias")
 	}
 }
+
+// ── Formatting ───────────────────────────────────────────
 
 func TestFormatSats(t *testing.T) {
 	tests := []struct {
@@ -1117,5 +1544,36 @@ func TestIsAddonSubview(t *testing.T) {
 	}
 	if isAddonSubview(svNone) {
 		t.Error("svNone should not be addon")
+	}
+}
+
+// ── Wallet Section Constants ─────────────────────────────
+
+func TestWalletSectionConstants(t *testing.T) {
+	if walletSectionTransactions != 0 {
+		t.Errorf("walletSectionTransactions: got %d, want 0", walletSectionTransactions)
+	}
+	if walletSectionSend != 1 {
+		t.Errorf("walletSectionSend: got %d, want 1", walletSectionSend)
+	}
+	if walletSectionReceive != 2 {
+		t.Errorf("walletSectionReceive: got %d, want 2", walletSectionReceive)
+	}
+	if walletSectionOnChain != 3 {
+		t.Errorf("walletSectionOnChain: got %d, want 3", walletSectionOnChain)
+	}
+}
+
+// ── On-Chain Stub ────────────────────────────────────────
+
+func TestOnChainPaneShowsComingSoon(t *testing.T) {
+	m := testModelWalletReady()
+	m.activeTab = tabWallet
+
+	// Force On-Chain pane to render (even though button is disabled,
+	// test the rendering function directly)
+	pane := m.walletOnChainPane(50)
+	if !strings.Contains(pane, "coming soon") {
+		t.Error("On-Chain pane should show 'coming soon' message")
 	}
 }

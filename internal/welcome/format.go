@@ -123,7 +123,7 @@ func (m Model) viewChannelDetail() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Channel Details ")
 	footer := theme.Footer.Render(
-		"  backspace back • q quit  ")
+		"  backspace back  q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
