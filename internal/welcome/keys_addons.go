@@ -1,5 +1,3 @@
-// internal/welcome/keys_addons.go
-
 package welcome
 
 import (
@@ -28,7 +26,7 @@ func (m Model) handleAddonsKey(key string) (tea.Model, tea.Cmd) {
 			m.subview = svNone
 		case svLndHubCreateAccount:
 			m.lastAccount = nil
-			m.hubNameInput = ""
+			m.hubNameInput = newHubNameInput()
 			m.subview = svLndHubManage
 		case svLndHubAccountDetail:
 			m.subview = svLndHubManage
@@ -46,17 +44,14 @@ func (m Model) handleAddonsKey(key string) (tea.Model, tea.Cmd) {
 	case svSyncthingWebUI:
 		return m.handleSyncthingWebUIKey(key)
 	case svSyncthingDeviceDetail:
-		// no extra keys
 		return m, nil
 	case svSyncthingDeviceQR:
-		// no extra keys
 		return m, nil
 	case svLndHubManage:
 		return m.handleLndHubManageKey(key)
 	case svLndHubCreateAccount:
 		return m.handleLndHubQRKeys(key)
 	case svLndHubAccountDetail:
-		// no extra keys
 		return m, nil
 	case svLndHubDeactivateConfirm:
 		return m.handleLndHubDeactivateKey(key)
@@ -67,7 +62,7 @@ func (m Model) handleAddonsKey(key string) (tea.Model, tea.Cmd) {
 func (m Model) handleSyncthingDetailKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "a":
-		m.syncDeviceInput = ""
+		m.syncDeviceInput = newSyncthingIDInput()
 		m.syncPairError = ""
 		m.syncPairSuccess = false
 		m.subview = svSyncthingPairInput
@@ -114,28 +109,25 @@ func (m Model) handleSyncthingWebUIKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleSyncthingPairInputKey(key string) (tea.Model, tea.Cmd) {
+func (m Model) handleSyncthingPairInputKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if len(m.syncDeviceInput) > 0 {
-			m.syncDeviceInput = m.syncDeviceInput[:len(m.syncDeviceInput)-1]
-		} else {
-			m.syncPairError = ""
-			m.syncPairSuccess = false
-			m.subview = svSyncthingDetail
-		}
+	case "esc":
+		m.syncPairError = ""
+		m.syncPairSuccess = false
+		m.subview = svSyncthingDetail
 		return m, nil
 	case "enter":
 		if m.syncPairSuccess {
-			m.syncDeviceInput = ""
+			m.syncDeviceInput = newSyncthingIDInput()
 			m.syncPairSuccess = false
 			m.subview = svSyncthingDetail
 			return m, nil
 		}
-		if m.syncDeviceInput != "" {
-			parts := strings.Split(m.syncDeviceInput, "-")
+		deviceID := syncthingIDValue(m.syncDeviceInput)
+		if deviceID != "" {
+			parts := strings.Split(deviceID, "-")
 			if len(parts) != 8 {
 				m.syncPairError = "Invalid Device ID format. Expected 8 groups separated by hyphens."
 				return m, nil
@@ -147,51 +139,40 @@ func (m Model) handleSyncthingPairInputKey(key string) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.syncPairError = ""
-			return m, pairSyncthingDeviceCmd(m.syncDeviceInput)
+			return m, pairSyncthingDeviceCmd(deviceID)
 		}
 		return m, nil
 	default:
-		for _, ch := range key {
-			if len(m.syncDeviceInput) >= 63 {
-				break
-			}
-			if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-				(ch >= '0' && ch <= '9') || ch == '-' {
-				m.syncDeviceInput += strings.ToUpper(string(ch))
-			}
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.syncDeviceInput, cmd = m.syncDeviceInput.Update(tea.Msg(msg))
+		return m, cmd
 	}
 }
 
-func (m Model) handleLndHubCreateNameKey(key string) (tea.Model, tea.Cmd) {
+func (m Model) handleLndHubCreateNameKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if len(m.hubNameInput) > 0 {
-			m.hubNameInput = m.hubNameInput[:len(m.hubNameInput)-1]
-		} else {
-			m.subview = svLndHubManage
-		}
+	case "esc":
+		m.subview = svLndHubManage
 		return m, nil
 	case "enter":
-		if m.hubNameInput != "" {
+		name := m.hubNameInput.Value()
+		if name != "" {
 			return m, createLndHubAccountCmd(m.cfg.LndHubAdminToken)
 		}
 		return m, nil
 	default:
-		if isAllowedHubNameChar(key) && len(m.hubNameInput) < 30 {
-			m.hubNameInput += key
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.hubNameInput, cmd = m.hubNameInput.Update(tea.Msg(msg))
+		return m, cmd
 	}
 }
 
 func (m Model) handleLndHubManageKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "c":
-		m.hubNameInput = ""
+		m.hubNameInput = newHubNameInput()
 		m.subview = svLndHubCreateName
 		return m, nil
 	case "u":

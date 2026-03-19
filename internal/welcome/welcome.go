@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
@@ -211,9 +212,7 @@ type Model struct {
 	fetchInFlight        bool
 	lastAccount          *installer.LndHubAccount
 	hubCursor            int
-	hubNameInput         string
 	hubDeactivateBalance string
-	syncDeviceInput      string
 	syncDeviceLabel      string
 	syncPairError        string
 	syncPairSuccess      bool
@@ -230,26 +229,29 @@ type Model struct {
 	chanOpenInFlight     bool
 	chanOpenTxid         string
 	chanOpenError        string
-	chanCustomPubkey     string
-	chanCustomHost       string
-	chanCustomInputField int
-	chanCustomAmountStr  string
-	chanFundAddress      string
 	chanPeerList         []peerOption
 	chanAmountPreset     int
-	// Receive
-	recvAmountStr   string
-	recvMemo        string
+	chanFundAddress      string
+
+	// ── Text inputs (bubbles/v2/textinput) ───────────
+	sendInput       textinput.Model
+	recvAmountInput textinput.Model
+	recvMemoInput   textinput.Model
+	chanPubkeyInput textinput.Model
+	chanHostInput   textinput.Model
+	chanAmountInput textinput.Model
+	hubNameInput    textinput.Model
+	syncDeviceInput textinput.Model
+
+	// Receive state
 	recvPayReq      string
 	recvPaymentHash string
 	recvAmountSats  int64
 	recvSettled     bool
 	recvExpired     bool
-	recvInputField  int // 0=amount, 1=memo
 	recvError       string
 
-	// Send
-	sendPayReqInput  string
+	// Send state
 	sendDecodedValid bool
 	sendDecodedDesc  string
 	sendDecodedAmt   int64

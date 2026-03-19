@@ -72,7 +72,7 @@ func (m Model) handleLndHubQRKeys(key string) (tea.Model, tea.Cmd) {
 				m.urlTarget = fmt.Sprintf("lndhub://%s:%s@http://%s:%s",
 					m.lastAccount.Login, m.lastAccount.Password,
 					hubOnion, paths.LndHubExternalPort)
-				m.qrLabel = m.hubNameInput + " — Tor"
+				m.qrLabel = m.hubNameInput.Value() + " — Tor"
 				m.subview = svQR
 			}
 		}
@@ -87,7 +87,7 @@ func (m Model) handleLndHubQRKeys(key string) (tea.Model, tea.Cmd) {
 				m.urlTarget = fmt.Sprintf("lndhub://%s:%s@https://%s:%s",
 					m.lastAccount.Login, m.lastAccount.Password,
 					ip, paths.LndHubExternalPort)
-				m.qrLabel = m.hubNameInput + " — Clearnet"
+				m.qrLabel = m.hubNameInput.Value() + " — Clearnet"
 				m.subview = svQR
 			}
 		}

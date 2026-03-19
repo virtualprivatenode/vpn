@@ -21,6 +21,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.PasteMsg:
+		return m.handlePaste(msg)
 	case svcActionDoneMsg:
 		return m, fetchStatus(m.cfg, m.lndClient)
 	case statusMsg:
@@ -43,7 +45,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.account != nil {
 			m.lastAccount = msg.account
 			m.cfg.LndHubAccounts = append(m.cfg.LndHubAccounts, config.LndHubAccount{
-				Label:     m.hubNameInput,
+				Label:     m.hubNameInput.Value(),
 				Login:     msg.account.Login,
 				CreatedAt: time.Now().Format("2006-01-02"),
 				Active:    true,
@@ -80,7 +82,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				config.SyncthingDevice{
 					Name: "Device " + fmt.Sprintf("%d",
 						len(m.cfg.SyncthingDevices)+1),
-					DeviceID: m.syncDeviceInput,
+					DeviceID: syncthingIDValue(m.syncDeviceInput),
 					PairedAt: time.Now().Format("2006-01-02"),
 				})
 			m.saveCfg()
@@ -183,15 +185,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// ── Text input subviews (must be handled first) ──────
 	if m.subview == svLndHubCreateName {
-		return m.handleLndHubCreateNameKey(key)
+		return m.handleLndHubCreateNameKey(key, msg)
 	}
 	if m.subview == svSyncthingPairInput {
-		return m.handleSyncthingPairInputKey(key)
+		return m.handleSyncthingPairInputKey(key, msg)
 	}
 
 	// ── Channel open subviews ────────────────────────────
 	if isChannelSubview(m.subview) {
-		return m.handleChannelsKey(key)
+		return m.handleChannelsKey(key, msg)
 	}
 
 	// ── Wallet subviews ──────────────────────────────────
@@ -579,4 +581,44 @@ func (m Model) channelVisibleCount() int {
 		available = 3
 	}
 	return available
+}
+
+func (m Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svSend:
+		var cmd tea.Cmd
+		m.sendInput, cmd = m.sendInput.Update(msg)
+		return m, cmd
+	case svReceive:
+		var cmd tea.Cmd
+		if m.recvAmountInput.Focused() {
+			m.recvAmountInput, cmd = m.recvAmountInput.Update(msg)
+		} else {
+			m.recvMemoInput, cmd = m.recvMemoInput.Update(msg)
+		}
+		return m, cmd
+	case svChannelCustomPeer:
+		var cmd tea.Cmd
+		if m.chanPubkeyInput.Focused() {
+			m.chanPubkeyInput, cmd = m.chanPubkeyInput.Update(msg)
+		} else {
+			m.chanHostInput, cmd = m.chanHostInput.Update(msg)
+		}
+		return m, cmd
+	case svChannelAmountSelect:
+		if m.chanAmountPreset == len(amountPresets)-1 {
+			var cmd tea.Cmd
+			m.chanAmountInput, cmd = m.chanAmountInput.Update(msg)
+			return m, cmd
+		}
+	case svLndHubCreateName:
+		var cmd tea.Cmd
+		m.hubNameInput, cmd = m.hubNameInput.Update(msg)
+		return m, cmd
+	case svSyncthingPairInput:
+		var cmd tea.Cmd
+		m.syncDeviceInput, cmd = m.syncDeviceInput.Update(msg)
+		return m, cmd
+	}
+	return m, nil
 }

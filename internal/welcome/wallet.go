@@ -20,14 +20,10 @@ func (m Model) viewReceive() string {
 	lines = append(lines, theme.Lightning.Render("⚡ Receive Payment"))
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Label.Render("Amount (sats):"))
-	lines = append(lines, "  "+theme.Value.Render(m.recvAmountStr+"_"))
+	lines = append(lines, m.recvAmountInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Label.Render("Memo (optional):"))
-	if m.recvInputField == 0 {
-		lines = append(lines, "  "+theme.Dim.Render(m.recvMemo))
-	} else {
-		lines = append(lines, "  "+theme.Value.Render(m.recvMemo+"_"))
-	}
+	lines = append(lines, m.recvMemoInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Dim.Render("Tab to switch fields"))
 	lines = append(lines, "  "+theme.Dim.Render(
@@ -43,7 +39,7 @@ func (m Model) viewReceive() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Receive ")
 	footer := theme.Footer.Render(
-		"  tab switch field • enter create invoice • backspace back  ")
+		"  tab switch field • enter create invoice • esc back  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -58,9 +54,9 @@ func (m Model) viewReceiveWaiting() string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Label.Render("Amount: ")+
 		theme.Value.Render(formatSats(m.recvAmountSats)+" sats"))
-	if m.recvMemo != "" {
+	if m.recvMemoInput.Value() != "" {
 		lines = append(lines, "  "+theme.Label.Render("Memo:   ")+
-			theme.Value.Render(m.recvMemo))
+			theme.Value.Render(m.recvMemoInput.Value()))
 	}
 	lines = append(lines, "")
 
@@ -71,7 +67,6 @@ func (m Model) viewReceiveWaiting() string {
 		}
 		lines = append(lines, "")
 		lines = append(lines, "  "+theme.Label.Render("Invoice:"))
-		// Show truncated invoice for copy
 		display := m.recvPayReq
 		if len(display) > 60 {
 			display = display[:60] + "..."
@@ -93,7 +88,7 @@ func (m Model) viewReceiveWaiting() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Invoice Created ")
 	footer := theme.Footer.Render(
-		"  f full invoice • backspace cancel • q quit  ")
+		"  f full invoice • esc cancel • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -108,9 +103,9 @@ func (m Model) viewReceivePaid() string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Label.Render("Amount: ")+
 		theme.Value.Render(formatSats(m.recvAmountSats)+" sats"))
-	if m.recvMemo != "" {
+	if m.recvMemoInput.Value() != "" {
 		lines = append(lines, "  "+theme.Label.Render("Memo:   ")+
-			theme.Value.Render(m.recvMemo))
+			theme.Value.Render(m.recvMemoInput.Value()))
 	}
 
 	box := theme.Box.Width(bw).Padding(1, 2).
@@ -156,20 +151,12 @@ func (m Model) viewSend() string {
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Label.Render("Payment Request:"))
 	lines = append(lines, "")
-
-	display := m.sendPayReqInput
-	if len(display) > 55 {
-		// Show last 55 chars with ellipsis at start
-		display = "..." + display[len(display)-55:]
-	}
-	lines = append(lines, "  "+theme.Value.Render(display+"_"))
+	lines = append(lines, m.sendInput.View())
 	lines = append(lines, "")
 	lines = append(lines, "  "+theme.Dim.Render(
 		"Paste a bolt11 Lightning invoice"))
 	lines = append(lines, "  "+theme.Dim.Render(
 		"(starts with lnbc or lntb)"))
-	lines = append(lines, "  "+theme.Dim.Render(
-		"ctrl+u to clear field"))
 
 	if m.sendError != "" {
 		lines = append(lines, "")
@@ -181,7 +168,7 @@ func (m Model) viewSend() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Send ")
 	footer := theme.Footer.Render(
-		"  enter decode • backspace back  ")
+		"  enter decode • esc back  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -226,7 +213,7 @@ func (m Model) viewSendConfirm() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Confirm Payment ")
 	footer := theme.Footer.Render(
-		"  y confirm • backspace cancel  ")
+		"  y confirm • esc cancel  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -279,7 +266,6 @@ func (m Model) viewSendResult() string {
 				theme.Value.Render(m.sendDecodedDesc))
 		}
 
-		// Route visualization
 		if len(m.sendRouteHops) > 0 {
 			lines = append(lines, "")
 			lines = append(lines, "  "+
@@ -442,7 +428,7 @@ func (m Model) viewPaymentHistory() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Payment History ")
 	footer := theme.Footer.Render(
-		"  ↑↓ select • enter details • backspace back • q quit  ")
+		"  ↑↓ select • enter details • esc back • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,
@@ -503,7 +489,6 @@ func (m Model) viewPaymentDetail() string {
 			lines = append(lines, "  "+theme.Mono.Render(hash))
 		}
 
-		// Route hops for outgoing payments
 		if !entry.IsIncoming && len(entry.Hops) > 0 {
 			lines = append(lines, "")
 			lines = append(lines, "  "+
@@ -539,7 +524,7 @@ func (m Model) viewPaymentDetail() string {
 	title := theme.Title.Width(bw).Align(lipgloss.Center).
 		Render(" ⚡ Payment Details ")
 	footer := theme.Footer.Render(
-		"  backspace back • q quit  ")
+		"  esc back • q quit  ")
 	full := lipgloss.JoinVertical(lipgloss.Center,
 		"", title, "", box, "", footer)
 	return lipgloss.Place(m.width, m.height,

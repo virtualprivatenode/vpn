@@ -72,31 +72,29 @@ func TestParseRecvAmount(t *testing.T) {
 
 func TestResetReceiveState(t *testing.T) {
 	m := testModel()
-	m.recvAmountStr = "1000"
-	m.recvMemo = "test"
+	m.recvAmountInput = newRecvAmountInput()
+	m.recvAmountInput.SetValue("1000")
+	m.recvMemoInput = newRecvMemoInput()
+	m.recvMemoInput.SetValue("test")
 	m.recvPayReq = "lnbc..."
 	m.recvPaymentHash = "abc"
 	m.recvAmountSats = 1000
 	m.recvSettled = true
-	m.recvInputField = 1
 	m.recvError = "some error"
 
 	m.resetReceiveState()
 
-	if m.recvAmountStr != "" {
-		t.Error("recvAmountStr not reset")
+	if m.recvAmountInput.Value() != "" {
+		t.Error("recvAmountInput not reset")
 	}
-	if m.recvMemo != "" {
-		t.Error("recvMemo not reset")
+	if m.recvMemoInput.Value() != "" {
+		t.Error("recvMemoInput not reset")
 	}
 	if m.recvPayReq != "" {
 		t.Error("recvPayReq not reset")
 	}
 	if m.recvAmountSats != 0 {
 		t.Error("recvAmountSats not reset")
-	}
-	if m.recvInputField != 0 {
-		t.Error("recvInputField not reset")
 	}
 	if m.recvError != "" {
 		t.Error("recvError not reset")
@@ -105,7 +103,8 @@ func TestResetReceiveState(t *testing.T) {
 
 func TestResetSendState(t *testing.T) {
 	m := testModel()
-	m.sendPayReqInput = "lnbc..."
+	m.sendInput = newSendPayReqInput()
+	m.sendInput.SetValue("lnbc...")
 	m.sendDecodedAmt = 5000
 	m.sendInFlight = true
 	m.sendError = "error"
@@ -114,8 +113,8 @@ func TestResetSendState(t *testing.T) {
 
 	m.resetSendState()
 
-	if m.sendPayReqInput != "" {
-		t.Error("sendPayReqInput not reset")
+	if m.sendInput.Value() != "" {
+		t.Error("sendInput not reset")
 	}
 	if m.sendDecodedAmt != 0 {
 		t.Error("sendDecodedAmt not reset")

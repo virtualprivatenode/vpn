@@ -47,31 +47,29 @@ func (m Model) handleWalletKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.
 
 func (m Model) handleReceiveKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if m.recvInputField == 0 {
-			if len(m.recvAmountStr) > 0 {
-				m.recvAmountStr = m.recvAmountStr[:len(m.recvAmountStr)-1]
-			} else {
-				m.recvError = ""
-				m.subview = svNone
-			}
-		} else {
-			if len(m.recvMemo) > 0 {
-				m.recvMemo = m.recvMemo[:len(m.recvMemo)-1]
-			}
-		}
+	case "esc":
+		m.resetReceiveState()
+		m.subview = svNone
 		return m, nil
 	case "tab":
-		m.recvInputField = (m.recvInputField + 1) % 2
+		// Toggle focus between amount and memo
+		if m.recvAmountInput.Focused() {
+			m.recvAmountInput.Blur()
+			m.recvMemoInput.Focus()
+		} else {
+			m.recvMemoInput.Blur()
+			m.recvAmountInput.Focus()
+		}
 		return m, nil
 	case "enter":
-		if m.recvAmountStr == "" {
+		val := m.recvAmountInput.Value()
+		if val == "" {
 			m.recvError = "Enter an amount"
 			return m, nil
 		}
-		amt, err := parseRecvAmount(m.recvAmountStr)
+		amt, err := parseRecvAmount(val)
 		if err != nil {
 			m.recvError = err.Error()
 			return m, nil
@@ -79,31 +77,16 @@ func (m Model) handleReceiveKey(key string, msg tea.KeyPressMsg) (tea.Model, tea
 		m.recvAmountSats = amt
 		m.recvError = ""
 		return m, createInvoiceCmd(
-			m.lndClient, amt, m.recvMemo)
-	case "up", "down", "left", "right":
-		// Ignore arrow keys in text input
-		return m, nil
+			m.lndClient, amt, m.recvMemoInput.Value())
 	default:
-		//
-		text := msg.Text
-		if len(text) == 0 {
-			return m, nil
-		}
-		if m.recvInputField == 0 {
-			for _, ch := range text {
-				if ch >= '0' && ch <= '9' &&
-					len(m.recvAmountStr) < 10 {
-					m.recvAmountStr += string(ch)
-				}
-			}
+		// Forward to focused textinput (cast to tea.Msg for full event handling)
+		var cmd tea.Cmd
+		if m.recvAmountInput.Focused() {
+			m.recvAmountInput, cmd = m.recvAmountInput.Update(tea.Msg(msg))
 		} else {
-			for _, ch := range text {
-				if len(m.recvMemo) < 100 && ch >= 32 && ch < 127 {
-					m.recvMemo += string(ch)
-				}
-			}
+			m.recvMemoInput, cmd = m.recvMemoInput.Update(tea.Msg(msg))
 		}
-		return m, nil
+		return m, cmd
 	}
 }
 
@@ -111,7 +94,7 @@ func (m Model) handleReceiveWaitingKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.resetReceiveState()
 		m.subview = svNone
 		return m, nil
@@ -130,7 +113,7 @@ func (m Model) handleReceivePaidKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "enter", "backspace":
+	case "enter", "esc", "backspace":
 		m.resetReceiveState()
 		m.subview = svNone
 		return m, fetchStatus(m.cfg, m.lndClient)
@@ -142,7 +125,7 @@ func (m Model) handleReceiveExpiredKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "enter", "backspace":
+	case "enter", "esc", "backspace":
 		m.resetReceiveState()
 		m.subview = svNone
 		return m, nil
@@ -154,31 +137,20 @@ func (m Model) handleReceiveExpiredKey(key string) (tea.Model, tea.Cmd) {
 
 func (m Model) handleSendKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if len(m.sendPayReqInput) > 0 {
-			m.sendPayReqInput = m.sendPayReqInput[:len(m.sendPayReqInput)-1]
-			m.sendError = ""
-		} else {
-			m.resetSendState()
-			m.subview = svNone
-		}
-		return m, nil
-	case "ctrl+u":
-		// Clear entire input field
-		m.sendPayReqInput = ""
-		m.sendError = ""
+	case "esc":
+		m.resetSendState()
+		m.subview = svNone
 		return m, nil
 	case "enter":
-		payReq := strings.TrimSpace(m.sendPayReqInput)
+		payReq := strings.TrimSpace(m.sendInput.Value())
 		if payReq == "" {
 			m.sendError = "Paste a payment request"
 			return m, nil
 		}
-		// Strip any bracket paste artifacts
 		payReq = cleanPayReq(payReq)
-		m.sendPayReqInput = payReq
+		m.sendInput.SetValue(payReq)
 		if !strings.HasPrefix(payReq, "lnbc") &&
 			!strings.HasPrefix(payReq, "lntb") &&
 			!strings.HasPrefix(payReq, "lnbcrt") {
@@ -187,22 +159,10 @@ func (m Model) handleSendKey(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cm
 		}
 		m.sendError = ""
 		return m, decodePayReqCmd(m.lndClient, payReq)
-	case "up", "down", "left", "right":
-		// Ignore arrow keys in text input
-		return m, nil
 	default:
-		//
-		text := msg.Text
-		if len(text) == 0 {
-			return m, nil
-		}
-		for _, ch := range text {
-			// Accept only valid bolt11 characters
-			if isBolt11Char(ch) && len(m.sendPayReqInput) < 1500 {
-				m.sendPayReqInput += string(ch)
-			}
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.sendInput, cmd = m.sendInput.Update(tea.Msg(msg))
+		return m, cmd
 	}
 }
 
@@ -210,7 +170,7 @@ func (m Model) handleSendConfirmKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.sendError = ""
 		m.subview = svSend
 		return m, nil
@@ -222,7 +182,7 @@ func (m Model) handleSendConfirmKey(key string) (tea.Model, tea.Cmd) {
 		m.sendError = ""
 		m.subview = svSendInFlight
 		return m, sendPaymentCmd(
-			m.lndClient, strings.TrimSpace(m.sendPayReqInput))
+			m.lndClient, strings.TrimSpace(m.sendInput.Value()))
 	}
 	return m, nil
 }
@@ -238,7 +198,7 @@ func (m Model) handleSendResultKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "enter", "backspace":
+	case "enter", "esc", "backspace":
 		m.resetSendState()
 		m.subview = svNone
 		return m, fetchStatus(m.cfg, m.lndClient)
@@ -252,7 +212,7 @@ func (m Model) handlePaymentHistoryKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.subview = svNone
 		return m, nil
 	case "up", "k":
@@ -279,7 +239,7 @@ func (m Model) handlePaymentDetailKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
+	case "esc", "backspace":
 		m.subview = svPaymentHistory
 		return m, nil
 	}
@@ -289,19 +249,18 @@ func (m Model) handlePaymentDetailKey(key string) (tea.Model, tea.Cmd) {
 // ── State reset helpers ──────────────────────────────────
 
 func (m *Model) resetReceiveState() {
-	m.recvAmountStr = ""
-	m.recvMemo = ""
+	m.recvAmountInput = newRecvAmountInput()
+	m.recvMemoInput = newRecvMemoInput()
 	m.recvPayReq = ""
 	m.recvPaymentHash = ""
 	m.recvAmountSats = 0
 	m.recvSettled = false
 	m.recvExpired = false
-	m.recvInputField = 0
 	m.recvError = ""
 }
 
 func (m *Model) resetSendState() {
-	m.sendPayReqInput = ""
+	m.sendInput = newSendPayReqInput()
 	m.sendDecodedValid = false
 	m.sendDecodedDesc = ""
 	m.sendDecodedAmt = 0
@@ -336,8 +295,6 @@ func parseRecvAmount(s string) (int64, error) {
 }
 
 // isBolt11Char returns true if the rune is valid in a bolt11 invoice.
-// Bolt11 invoices are bech32-encoded: lowercase alphanumeric only,
-// plus the "lnbc"/"lntb" prefix.
 func isBolt11Char(ch rune) bool {
 	if ch >= 'a' && ch <= 'z' {
 		return true
@@ -345,7 +302,6 @@ func isBolt11Char(ch rune) bool {
 	if ch >= '0' && ch <= '9' {
 		return true
 	}
-	// Some wallets output uppercase — accept and we'll lowercase
 	if ch >= 'A' && ch <= 'Z' {
 		return true
 	}
@@ -354,15 +310,11 @@ func isBolt11Char(ch rune) bool {
 
 // cleanPayReq strips common paste artifacts from a payment request.
 func cleanPayReq(s string) string {
-	// Remove bracket paste artifacts
 	s = strings.ReplaceAll(s, "[", "")
 	s = strings.ReplaceAll(s, "]", "")
-	// Remove quotes some terminals add
 	s = strings.ReplaceAll(s, "\"", "")
 	s = strings.ReplaceAll(s, "'", "")
-	// Remove whitespace
 	s = strings.TrimSpace(s)
-	// Remove "lightning:" URI prefix
 	s = strings.TrimPrefix(s, "lightning:")
 	s = strings.TrimPrefix(s, "LIGHTNING:")
 	return s
