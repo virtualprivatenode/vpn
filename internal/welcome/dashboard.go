@@ -1,190 +1,347 @@
-// internal/welcome/dashboard.go
-
 package welcome
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/bitcoin"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
 func (m Model) viewDashboard(bw int) string {
-	halfW := (bw - 4) / 2
-	cardH := theme.BoxHeight / 2
-
-	svc := m.cardServicesView(halfW, cardH)
-	sys := m.cardSystemView(halfW, cardH)
-	btc := m.cardBitcoinView(halfW, cardH)
-	ln := m.cardLightningView(halfW, cardH)
-
-	top := lipgloss.JoinHorizontal(lipgloss.Top, svc, "  ", sys)
-	bot := lipgloss.JoinHorizontal(lipgloss.Top, btc, "  ", ln)
-	return lipgloss.JoinVertical(lipgloss.Left, top, "", bot)
-}
-
-func (m Model) getBorder(pos cardPos) lipgloss.Style {
-	if m.activeTab == tabDashboard && m.dashCard == pos {
-		return theme.SelectedBorder
+	if !m.cfg.HasLND() {
+		return m.dashboardNoLND(bw)
 	}
-	return theme.NormalBorder
+	if !m.cfg.WalletExists() {
+		return m.dashboardNoWallet(bw)
+	}
+	return m.dashboardOverview(bw)
 }
 
-func (m Model) cardServicesView(w, h int) string {
+func (m Model) dashboardNoLND(bw int) string {
 	var lines []string
-	lines = append(lines, theme.Header.Render(" Services"))
+	lines = append(lines, theme.Header.Render("  Node Overview"))
 	lines = append(lines, "")
-
-	names := serviceNames(m.cfg)
-
-	for i, name := range names {
-		dot := theme.RedDot.Render("●")
-		if m.status != nil {
-			if active, ok := m.status.services[name]; ok && active {
-				dot = theme.GreenDot.Render("●")
-			}
-		}
-		prefix := "  "
-		style := theme.Value
-		if m.cardActive && m.dashCard == cardServices && m.svcCursor == i {
-			prefix = "▸ "
-			style = theme.Action
-		}
-		lines = append(lines, prefix+dot+" "+style.Render(name))
-	}
-
-	if m.cardActive && m.dashCard == cardServices {
-		lines = append(lines, "")
-		if m.svcConfirm != "" {
-			svc := m.svcName(m.svcCursor)
-			lines = append(lines, theme.Warning.Render(
-				fmt.Sprintf("%s %s? [y/n]", m.svcConfirm, svc)))
-		} else {
-			lines = append(lines,
-				theme.Dim.Render("[r]estart [s]top [a]start [l]ogs"))
-		}
-	}
-
-	return m.getBorder(cardServices).Width(w).
-		Padding(0, 1).Render(padLines(lines, h))
-}
-
-func (m Model) cardSystemView(w, h int) string {
-	var lines []string
-	lines = append(lines, theme.Header.Render(" System"))
+	lines = append(lines, "  "+theme.Dim.Render(
+		"LND is not installed."))
+	lines = append(lines, "  "+theme.Dim.Render(
+		"Go to the System tab to install LND and create a wallet."))
 	lines = append(lines, "")
 
 	if m.status != nil {
-		lines = append(lines, theme.Label.Render("Disk: ")+
-			theme.Value.Render(fmt.Sprintf("%s / %s (%s)",
-				m.status.diskUsed, m.status.diskTotal,
-				m.status.diskPct)))
-		lines = append(lines, theme.Label.Render("RAM:  ")+
-			theme.Value.Render(fmt.Sprintf("%s / %s (%s)",
-				m.status.ramUsed, m.status.ramTotal,
-				m.status.ramPct)))
-		lines = append(lines, theme.Label.Render("Bitcoin: ")+
-			theme.Value.Render(m.status.btcSize))
-		if m.cfg.HasLND() {
-			lines = append(lines, theme.Label.Render("LND: ")+
-				theme.Value.Render(m.status.lndSize))
-		}
-	} else {
-		lines = append(lines, theme.Dim.Render("Loading..."))
-	}
-
-	if m.cardActive && m.dashCard == cardSystem {
-		lines = append(lines, "")
-		if m.sysConfirm != "" {
-			lines = append(lines, theme.Warning.Render(
-				fmt.Sprintf("%s system? [y/n]", m.sysConfirm)))
-		} else {
-			lines = append(lines,
-				theme.Action.Render("[u]pdate packages"))
-			if m.status != nil && m.status.rebootRequired {
-				lines = append(lines,
-					theme.Warning.Render("⚠️ Reboot required"))
-				lines = append(lines,
-					theme.Action.Render("[r]eboot"))
+		if m.status.btcSynced {
+			lines = append(lines, "  "+theme.GreenDot.Render("●")+
+				" Bitcoin Core synced")
+		} else if m.status.btcResponding {
+			pct := ""
+			if m.status.btcProgress > 0 {
+				pct = fmt.Sprintf(" (%.1f%%)",
+					m.status.btcProgress*100)
 			}
+			lines = append(lines, "  "+theme.Dim.Render("◌")+
+				" Bitcoin Core syncing"+pct)
+		} else {
+			lines = append(lines, "  "+theme.RedDot.Render("●")+
+				" Bitcoin Core not responding")
 		}
-	} else if m.status != nil && m.status.rebootRequired {
-		lines = append(lines, "")
-		lines = append(lines,
-			theme.Warning.Render("⚠️ Reboot required"))
 	}
 
-	return m.getBorder(cardSystem).Width(w).
-		Padding(0, 1).Render(padLines(lines, h))
+	content := strings.Join(lines, "\n")
+	return theme.Box.Width(bw).Padding(1, 2).Render(content)
 }
 
-func (m Model) cardBitcoinView(w, h int) string {
+func (m Model) dashboardNoWallet(bw int) string {
 	var lines []string
-	lines = append(lines, theme.Bitcoin.Render("₿ Bitcoin"))
+	lines = append(lines, theme.Header.Render("  Node Overview"))
+	lines = append(lines, "")
+	lines = append(lines, "  "+theme.Dim.Render(
+		"LND wallet has not been created."))
+	lines = append(lines, "  "+theme.Dim.Render(
+		"Go to the System tab to create your wallet."))
+	lines = append(lines, "")
+
+	if m.status != nil {
+		if m.status.btcSynced {
+			lines = append(lines, "  "+theme.GreenDot.Render("●")+
+				" Bitcoin Core synced")
+		} else if m.status.btcResponding {
+			pct := ""
+			if m.status.btcProgress > 0 {
+				pct = fmt.Sprintf(" (%.1f%%)",
+					m.status.btcProgress*100)
+			}
+			lines = append(lines, "  "+theme.Dim.Render("◌")+
+				" Bitcoin Core syncing"+pct)
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+	return theme.Box.Width(bw).Padding(1, 2).Render(content)
+}
+
+func (m Model) dashboardOverview(bw int) string {
+	var sections []string
+
+	// ── Node Identity ────────────────────────────────────
+	identity := m.dashboardIdentity(bw)
+	sections = append(sections, identity)
+
+	// ── Balance Summary ──────────────────────────────────
+	balances := m.dashboardBalances(bw)
+	sections = append(sections, balances)
+
+	// ── Channel Liquidity ────────────────────────────────
+	if m.status != nil && len(m.status.channels) > 0 {
+		liquidity := m.dashboardLiquidity(bw)
+		sections = append(sections, liquidity)
+	}
+
+	// ── Status Indicators ────────────────────────────────
+	status := m.dashboardStatus(bw)
+	sections = append(sections, status)
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m Model) dashboardIdentity(bw int) string {
+	var lines []string
+	lines = append(lines, theme.Header.Render("  Node"))
+	lines = append(lines, "")
+
+	if m.status == nil || !m.status.lndResponding {
+		lines = append(lines, "  "+theme.Dim.Render(
+			"Waiting for LND..."))
+		return theme.NormalBorder.Width(bw).Padding(0, 1).
+			Render(strings.Join(lines, "\n"))
+	}
+
+	if m.status.lndPubkey != "" {
+		pubkey := m.status.lndPubkey
+		if len(pubkey) > 20 {
+			pubkey = pubkey[:20] + "..."
+		}
+		lines = append(lines, "  "+theme.Label.Render("Pubkey:  ")+
+			theme.Mono.Render(pubkey))
+	}
+	lines = append(lines, "  "+theme.Label.Render("P2P:     ")+
+		theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
+	lines = append(lines, "  "+theme.Label.Render("Network: ")+
+		theme.Value.Render(m.cfg.Network))
+	if m.cfg.AutoUnlock {
+		lines = append(lines, "  "+theme.Label.Render("Unlock:  ")+
+			theme.Value.Render("automatic"))
+	}
+
+	return theme.NormalBorder.Width(bw).Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) dashboardBalances(bw int) string {
+	var lines []string
+	lines = append(lines, theme.Header.Render("  Balances"))
+	lines = append(lines, "")
+
+	if m.status == nil || !m.status.lndResponding {
+		lines = append(lines, "  "+theme.Dim.Render(
+			"Waiting for LND..."))
+		return theme.NormalBorder.Width(bw).Padding(0, 1).
+			Render(strings.Join(lines, "\n"))
+	}
+
+	// On-chain balance
+	onchain := "0"
+	if m.status.lndBalance != "" {
+		onchain = m.status.lndBalance
+	}
+	lines = append(lines, "  "+theme.Label.Render("On-chain:  ")+
+		theme.Value.Render(formatSats(parseBalance(onchain))+" sats"))
+
+	// Channel balances
+	var totalCap, totalLocal, totalRemote int64
+	for _, ch := range m.status.channels {
+		totalCap += ch.Capacity
+		totalLocal += ch.LocalBalance
+		totalRemote += ch.RemoteBalance
+	}
+
+	lines = append(lines, "  "+theme.Label.Render("Sendable:  ")+
+		theme.Value.Render(formatSats(totalLocal)+" sats"))
+	lines = append(lines, "  "+theme.Label.Render("Receivable:")+
+		theme.Value.Render(" "+formatSats(totalRemote)+" sats"))
+
+	if totalCap > 0 {
+		lines = append(lines, "  "+theme.Label.Render("Capacity:  ")+
+			theme.Dim.Render(formatSats(totalCap)+" sats"))
+	}
+
+	// Total
+	totalBalance := parseBalance(onchain) + totalLocal
+	lines = append(lines, "")
+	lines = append(lines, "  "+theme.Label.Render("Total:     ")+
+		theme.Good.Render(formatSats(totalBalance)+" sats"))
+
+	return theme.NormalBorder.Width(bw).Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) dashboardLiquidity(bw int) string {
+	var lines []string
+	lines = append(lines, theme.Header.Render("  Channel Liquidity"))
+	lines = append(lines, "")
+
+	if m.status == nil || len(m.status.channels) == 0 {
+		lines = append(lines, "  "+theme.Dim.Render(
+			"No channels"))
+		return theme.NormalBorder.Width(bw).Padding(0, 1).
+			Render(strings.Join(lines, "\n"))
+	}
+
+	// Bar width for channel visualization
+	barWidth := bw - 28
+	if barWidth < 20 {
+		barWidth = 20
+	}
+
+	// Show up to 10 channels, sorted by capacity (status already has them)
+	maxShow := 10
+	if maxShow > len(m.status.channels) {
+		maxShow = len(m.status.channels)
+	}
+
+	for i := 0; i < maxShow; i++ {
+		ch := m.status.channels[i]
+		name := ch.PeerAlias
+		if name == "" {
+			if len(ch.RemotePubkey) > 10 {
+				name = ch.RemotePubkey[:10] + ".."
+			} else {
+				name = ch.RemotePubkey
+			}
+		}
+		if len(name) > 12 {
+			name = name[:12]
+		}
+		name = fmt.Sprintf("%-12s", name)
+
+		dot := theme.RedDot.Render("○")
+		if ch.Active {
+			dot = theme.GreenDot.Render("●")
+		}
+
+		bar := renderBalanceBar(ch.LocalBalance, ch.RemoteBalance,
+			ch.Capacity, barWidth)
+		lines = append(lines, fmt.Sprintf("  %s %s %s",
+			dot, theme.Dim.Render(name), bar))
+	}
+
+	if len(m.status.channels) > maxShow {
+		lines = append(lines, fmt.Sprintf("  "+
+			theme.Dim.Render("  ... and %d more"),
+			len(m.status.channels)-maxShow))
+	}
+
+	// Aggregate bar
+	var totalLocal, totalRemote, totalCap int64
+	for _, ch := range m.status.channels {
+		totalLocal += ch.LocalBalance
+		totalRemote += ch.RemoteBalance
+		totalCap += ch.Capacity
+	}
+	lines = append(lines, "")
+	aggBar := renderBalanceBar(totalLocal, totalRemote, totalCap, barWidth)
+	lines = append(lines, "  "+theme.Label.Render("Total:       ")+aggBar)
+	localPct := 0
+	if totalCap > 0 {
+		localPct = int(totalLocal * 100 / totalCap)
+	}
+	lines = append(lines, "  "+theme.Dim.Render(
+		fmt.Sprintf("             %d%% outbound / %d%% inbound",
+			localPct, 100-localPct)))
+
+	return theme.NormalBorder.Width(bw).Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) dashboardStatus(bw int) string {
+	var lines []string
+	lines = append(lines, theme.Header.Render("  Status"))
 	lines = append(lines, "")
 
 	if m.status == nil {
-		lines = append(lines, theme.Dim.Render("Loading..."))
-	} else if !m.status.btcResponding {
-		lines = append(lines, theme.Warn.Render("Not responding"))
-	} else {
-		if m.status.btcSynced {
-			lines = append(lines, theme.Label.Render("Sync: ")+
-				theme.Good.Render("✅ synced"))
-		} else {
-			lines = append(lines, theme.Label.Render("Sync: ")+
-				theme.Warn.Render("🔄 syncing"))
-		}
-		lines = append(lines, theme.Label.Render("Height: ")+
-			theme.Value.Render(fmt.Sprintf("%d / %d",
-				m.status.btcBlocks, m.status.btcHeaders)))
+		lines = append(lines, "  "+theme.Dim.Render("Loading..."))
+		return theme.NormalBorder.Width(bw).Padding(0, 1).
+			Render(strings.Join(lines, "\n"))
+	}
+
+	// Bitcoin sync
+	if m.status.btcSynced {
+		lines = append(lines, "  "+theme.GreenDot.Render("●")+
+			" Bitcoin synced")
+	} else if m.status.btcResponding {
+		pct := ""
 		if m.status.btcProgress > 0 {
-			lines = append(lines, theme.Label.Render("Progress: ")+
-				theme.Value.Render(
-					bitcoin.FormatProgress(m.status.btcProgress)))
+			pct = fmt.Sprintf(" %.1f%%", m.status.btcProgress*100)
 		}
-		lines = append(lines, theme.Label.Render("Network: ")+
-			theme.Value.Render(m.cfg.Network))
-	}
-
-	return m.getBorder(cardBitcoin).Width(w).
-		Padding(0, 1).Render(padLines(lines, h))
-}
-
-func (m Model) cardLightningView(w, h int) string {
-	var lines []string
-	lines = append(lines, theme.Lightning.Render("⚡️ Lightning"))
-	lines = append(lines, "")
-
-	if !m.cfg.HasLND() {
-		lines = append(lines, theme.Grayed.Render("LND not installed"))
-		lines = append(lines, "")
-		lines = append(lines, theme.Action.Render("Select to install ▸"))
-	} else if !m.cfg.WalletExists() {
-		lines = append(lines, theme.Label.Render("Wallet: ")+
-			theme.Warning.Render("not created"))
-		lines = append(lines, theme.Label.Render("P2P: ")+
-			theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
-		lines = append(lines, "")
-		lines = append(lines, theme.Action.Render("Select to create ▸"))
+		lines = append(lines, "  "+theme.Dim.Render("◌")+
+			" Bitcoin syncing"+pct)
 	} else {
-		lines = append(lines, theme.Label.Render("Wallet: ")+
-			theme.Success.Render("created"))
-		if m.cfg.AutoUnlock {
-			lines = append(lines, theme.Label.Render("Auto-unlock: ")+
-				theme.Success.Render("enabled"))
-		}
-		lines = append(lines, theme.Label.Render("P2P: ")+
-			theme.Value.Render(p2pModeLabel(m.cfg.P2PMode)))
-		lines = append(lines, "")
-		lines = append(lines, theme.Action.Render(
-			"Select for Lightning tab ▸"))
+		lines = append(lines, "  "+theme.RedDot.Render("●")+
+			" Bitcoin not responding")
 	}
 
-	return m.getBorder(cardLightning).Width(w).
-		Padding(0, 1).Render(padLines(lines, h))
+	// LND status
+	if m.status.lndResponding {
+		if m.status.lndSyncedChain && m.status.lndSyncedGraph {
+			lines = append(lines, "  "+theme.GreenDot.Render("●")+
+				" LND fully synced")
+		} else if m.status.lndSyncedChain {
+			lines = append(lines, "  "+theme.Dim.Render("◌")+
+				" LND chain synced, graph syncing")
+		} else {
+			lines = append(lines, "  "+theme.Dim.Render("◌")+
+				" LND syncing")
+		}
+	} else {
+		lines = append(lines, "  "+theme.RedDot.Render("●")+
+			" LND not responding")
+	}
+
+	// Channels summary
+	if len(m.status.channels) > 0 {
+		activeCount := 0
+		for _, ch := range m.status.channels {
+			if ch.Active {
+				activeCount++
+			}
+		}
+		inactive := len(m.status.channels) - activeCount
+		chanText := fmt.Sprintf("%d channels", len(m.status.channels))
+		if inactive > 0 {
+			chanText += fmt.Sprintf(" (%d active, %d offline)",
+				activeCount, inactive)
+		}
+		if m.status.pendingOpen > 0 {
+			chanText += fmt.Sprintf(", %d pending", m.status.pendingOpen)
+		}
+		lines = append(lines, "  "+theme.GreenDot.Render("●")+
+			" "+chanText)
+	} else {
+		lines = append(lines, "  "+theme.Dim.Render("○")+
+			" No channels")
+	}
+
+	// Tor
+	if active, ok := m.status.services["tor"]; ok && active {
+		lines = append(lines, "  "+theme.GreenDot.Render("●")+
+			" Tor connected")
+	} else {
+		lines = append(lines, "  "+theme.RedDot.Render("●")+
+			" Tor not running")
+	}
+
+	return theme.NormalBorder.Width(bw).Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
 }
 
 func p2pModeLabel(mode string) string {

@@ -214,14 +214,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleGenericSubviewKey(key)
 	}
 
-	// ── Inside a card ────────────────────────────────────
-	if m.cardActive {
-		return m.handleDashboardCardKey(key)
+	// ── Inside a System tab card ─────────────────────────
+	if m.cardActive && m.activeTab == tabSystem {
+		return m.handleSystemCardKey(key)
 	}
 
-	// ── Settings tab ─────────────────────────────────────
-	if m.activeTab == tabSettings {
-		return m.handleSettingsTabKey(key)
+	// ── System tab update confirm ────────────────────────
+	if m.activeTab == tabSystem && m.updateConfirm {
+		return m.handleSystemUpdateConfirm(key)
 	}
 
 	// ── Main navigation ──────────────────────────────────
@@ -266,33 +266,33 @@ func (m Model) handleMainNavKey(key string) (tea.Model, tea.Cmd) {
 	case "1":
 		m.activeTab = tabDashboard
 	case "2":
-		m.activeTab = tabLightning
+		m.activeTab = tabWallet
 	case "3":
 		m.activeTab = tabPairing
 	case "4":
 		m.activeTab = tabAddons
 	case "5":
-		m.activeTab = tabSettings
+		m.activeTab = tabSystem
 	case "o":
-		if m.activeTab == tabLightning && m.lightningFocus == 0 {
+		if m.activeTab == tabWallet && m.walletFocus == 0 {
 			return m.startChannelOpen()
 		}
 	case "s":
-		if m.activeTab == tabLightning && m.lightningFocus == 1 &&
+		if m.activeTab == tabWallet && m.walletFocus == 1 &&
 			m.cfg.HasLND() && m.cfg.WalletExists() {
 			m.resetSendState()
 			m.subview = svSend
 			return m, nil
 		}
 	case "r":
-		if m.activeTab == tabLightning && m.lightningFocus == 1 &&
+		if m.activeTab == tabWallet && m.walletFocus == 1 &&
 			m.cfg.HasLND() && m.cfg.WalletExists() {
 			m.resetReceiveState()
 			m.subview = svReceive
 			return m, nil
 		}
 	case "v":
-		if m.activeTab == tabLightning && m.lightningFocus == 1 &&
+		if m.activeTab == tabWallet && m.walletFocus == 1 &&
 			m.cfg.HasLND() && m.cfg.WalletExists() {
 			m.payHistoryCursor = 0
 			m.subview = svPaymentHistory
@@ -314,15 +314,15 @@ func (m Model) handleMainNavKey(key string) (tea.Model, tea.Cmd) {
 
 func (m Model) navUp() Model {
 	switch m.activeTab {
-	case tabDashboard:
-		switch m.dashCard {
+	case tabSystem:
+		switch m.sysCard {
 		case cardBitcoin:
-			m.dashCard = cardServices
-		case cardLightning:
-			m.dashCard = cardSystem
+			m.sysCard = cardServices
+		case cardUpdate:
+			m.sysCard = cardSysStats
 		}
-	case tabLightning:
-		if m.lightningFocus == 0 {
+	case tabWallet:
+		if m.walletFocus == 0 {
 			if m.chanCursor > 0 {
 				m.chanCursor--
 				if m.chanCursor < m.chanScrollOffset {
@@ -336,15 +336,15 @@ func (m Model) navUp() Model {
 
 func (m Model) navDown() Model {
 	switch m.activeTab {
-	case tabDashboard:
-		switch m.dashCard {
+	case tabSystem:
+		switch m.sysCard {
 		case cardServices:
-			m.dashCard = cardBitcoin
-		case cardSystem:
-			m.dashCard = cardLightning
+			m.sysCard = cardBitcoin
+		case cardSysStats:
+			m.sysCard = cardUpdate
 		}
-	case tabLightning:
-		if m.lightningFocus == 0 {
+	case tabWallet:
+		if m.walletFocus == 0 {
 			if m.status != nil && m.chanCursor < len(m.status.channels)-1 {
 				m.chanCursor++
 				visibleCount := m.channelVisibleCount()
@@ -359,16 +359,16 @@ func (m Model) navDown() Model {
 
 func (m Model) navLeft() Model {
 	switch m.activeTab {
-	case tabDashboard:
-		switch m.dashCard {
-		case cardSystem:
-			m.dashCard = cardServices
-		case cardLightning:
-			m.dashCard = cardBitcoin
+	case tabSystem:
+		switch m.sysCard {
+		case cardSysStats:
+			m.sysCard = cardServices
+		case cardUpdate:
+			m.sysCard = cardBitcoin
 		}
-	case tabLightning:
-		if m.lightningFocus > 0 {
-			m.lightningFocus--
+	case tabWallet:
+		if m.walletFocus > 0 {
+			m.walletFocus--
 		}
 	case tabAddons:
 		if m.addonFocus > 0 {
@@ -380,16 +380,16 @@ func (m Model) navLeft() Model {
 
 func (m Model) navRight() Model {
 	switch m.activeTab {
-	case tabDashboard:
-		switch m.dashCard {
+	case tabSystem:
+		switch m.sysCard {
 		case cardServices:
-			m.dashCard = cardSystem
+			m.sysCard = cardSysStats
 		case cardBitcoin:
-			m.dashCard = cardLightning
+			m.sysCard = cardUpdate
 		}
-	case tabLightning:
-		if m.lightningFocus < 1 {
-			m.lightningFocus++
+	case tabWallet:
+		if m.walletFocus < 1 {
+			m.walletFocus++
 		}
 	case tabAddons:
 		if m.addonFocus < 1 {
@@ -401,28 +401,10 @@ func (m Model) navRight() Model {
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	switch m.activeTab {
-	case tabDashboard:
-		switch m.dashCard {
-		case cardServices:
-			m.cardActive = true
-			m.svcCursor = 0
-			return m, nil
-		case cardSystem:
-			m.cardActive = true
-			return m, nil
-		case cardLightning:
-			if !m.cfg.HasLND() {
-				m.shellAction = svLNDInstall
-				return m, tea.Quit
-			}
-			if !m.cfg.WalletExists() {
-				m.shellAction = svWalletCreate
-				return m, tea.Quit
-			}
-			m.activeTab = tabLightning
-		}
-	case tabLightning:
-		return m.handleLightningEnter()
+	case tabSystem:
+		return m.handleSystemEnter()
+	case tabWallet:
+		return m.handleWalletEnter()
 	case tabPairing:
 		if m.cfg.HasLND() && m.cfg.WalletExists() {
 			m.subview = svZeus
@@ -433,8 +415,35 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleLightningEnter() (tea.Model, tea.Cmd) {
-	switch m.lightningFocus {
+func (m Model) handleSystemEnter() (tea.Model, tea.Cmd) {
+	switch m.sysCard {
+	case cardServices:
+		m.cardActive = true
+		m.svcCursor = 0
+		return m, nil
+	case cardSysStats:
+		m.cardActive = true
+		return m, nil
+	case cardUpdate:
+		if !m.cfg.HasLND() {
+			m.shellAction = svLNDInstall
+			return m, tea.Quit
+		}
+		if !m.cfg.WalletExists() {
+			m.shellAction = svWalletCreate
+			return m, tea.Quit
+		}
+		if m.latestVersion != "" &&
+			m.latestVersion != m.version {
+			m.updateConfirm = true
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) handleWalletEnter() (tea.Model, tea.Cmd) {
+	switch m.walletFocus {
 	case 0:
 		if !m.cfg.HasLND() || !m.cfg.WalletExists() {
 			return m, nil
@@ -487,6 +496,18 @@ func (m Model) handleAddonEnter() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+func (m Model) handleSystemUpdateConfirm(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "y":
+		m.updateConfirm = false
+		m.shellAction = svSelfUpdate
+		return m, tea.Quit
+	default:
+		m.updateConfirm = false
+		return m, nil
+	}
 }
 
 func isChannelSubview(sv wSubview) bool {

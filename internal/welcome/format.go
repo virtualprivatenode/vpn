@@ -1,5 +1,3 @@
-// internal/welcome/format.go
-
 package welcome
 
 import (
