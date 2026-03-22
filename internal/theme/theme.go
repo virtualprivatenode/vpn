@@ -37,6 +37,21 @@ var (
 	RedDot   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
+// ── Buttons ──────────────────────────────────────────────
+
+var (
+	BtnNormal = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("0")).
+			Background(lipgloss.Color("15")).
+			Bold(true).
+			Padding(0, 1)
+	BtnFocused = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("0")).
+			Background(lipgloss.Color("220")).
+			Bold(true).
+			Padding(0, 1)
+)
+
 // ── Tabs ─────────────────────────────────────────────────
 
 var (
@@ -97,4 +112,16 @@ var (
 const (
 	ContentWidth = 76
 	BoxHeight    = 24
+)
+
+// ── Help bar ─────────────────────────────────────────────
+
+var (
+	HelpKey = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("220")).
+		Bold(true)
+	HelpDesc = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("243"))
+	HelpSep = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("238"))
 )

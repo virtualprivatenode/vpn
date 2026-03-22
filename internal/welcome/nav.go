@@ -112,6 +112,10 @@ func (n *NavSidebar) SetActive(section int) {
 // blocks. Each block is vertically centered text, sized to
 // fill the sidebar evenly. No borders here — the layout
 // frame handles all border drawing.
+//
+// When focused, the active section shows ▸ to the left of
+// the label. The label stays centered — ▸ occupies the
+// margin space that would otherwise be blank.
 func (n NavSidebar) BlockRows(
 	w int, blockHeights [4]int,
 ) [4][]string {
@@ -133,13 +137,49 @@ func (n NavSidebar) BlockRows(
 
 		label := item.Label
 
-		// Vertically center the title
+		// Center the label within w
+		labelLen := len([]rune(label))
+		totalPad := w - labelLen
+		if totalPad < 0 {
+			totalPad = 0
+		}
+		leftPad := totalPad / 2
+		rightPad := totalPad - leftPad
+
+		// Build the title row
 		titleRow := bh / 2
 		var rows []string
 		for r := 0; r < bh; r++ {
 			if r == titleRow {
-				rows = append(rows,
-					style.Render(centerPad(label, w)))
+				// Place ▸ at position 0 when
+				// active+focused. The label is
+				// centered as normal — ▸ replaces
+				// the first padding space.
+				if isActive && n.Focused &&
+					leftPad >= 1 {
+					row := "▸" +
+						strings.Repeat(" ",
+							leftPad-1) +
+						style.Render(label) +
+						strings.Repeat(" ",
+							rightPad)
+					// Render ▸ in the active style
+					row = navActiveStyle.Render(
+						"▸") +
+						strings.Repeat(" ",
+							leftPad-1) +
+						style.Render(label) +
+						strings.Repeat(" ",
+							rightPad)
+					rows = append(rows, row)
+				} else {
+					rows = append(rows,
+						strings.Repeat(" ",
+							leftPad)+
+							style.Render(label)+
+							strings.Repeat(" ",
+								rightPad))
+				}
 			} else {
 				rows = append(rows,
 					strings.Repeat(" ", w))

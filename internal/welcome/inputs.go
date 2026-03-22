@@ -20,6 +20,12 @@ func validateDigits(s string) error {
 	return nil
 }
 
+func isBolt11Char(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= '0' && ch <= '9') ||
+		(ch >= 'A' && ch <= 'Z')
+}
+
 func validateBolt11(s string) error {
 	for _, ch := range s {
 		if !isBolt11Char(ch) {
@@ -204,6 +210,53 @@ func newSyncthingIDInput() textinput.Model {
 	applyInputStyles(&ti)
 	ti.Focus()
 	return ti
+}
+
+func newOnChainAddrInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "bc1q..."
+	ti.CharLimit = 90
+	ti.SetWidth(50)
+	ti.Validate = validateOnChainAddr
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Focus()
+	return ti
+}
+
+func newOnChainAmtInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "amount in sats"
+	ti.CharLimit = 16
+	ti.SetWidth(20)
+	ti.Validate = validateDigits
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Focus()
+	return ti
+}
+
+func newCustomFeeInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "sat/vB"
+	ti.CharLimit = 6
+	ti.SetWidth(10)
+	ti.Validate = validateDigits
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Focus()
+	return ti
+}
+
+func validateOnChainAddr(s string) error {
+	for _, ch := range s {
+		if !((ch >= 'a' && ch <= 'z') ||
+			(ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9')) {
+			return errInvalidChar{}
+		}
+	}
+	return nil
 }
 
 // ── Helpers ──────────────────────────────────────────────
