@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	qrterminal "github.com/mdp/qrterminal/v3"
 
@@ -40,6 +41,8 @@ func (m Model) pairingContent(w, h int) string {
 		return strings.Join(lines, "\n")
 	}
 
+	isFocused := m.contentFocused && !m.tabFocused
+
 	var lines []string
 	lines = append(lines,
 		theme.Lightning.Render(" ⚡ Zeus — LND REST"))
@@ -53,7 +56,8 @@ func (m Model) pairingContent(w, h int) string {
 		if m.status != nil && m.status.publicIP != "" {
 			lines = append(lines,
 				" "+theme.Label.Render("Server: ")+
-					theme.Mono.Render(m.status.publicIP))
+					theme.Mono.Render(
+						m.status.publicIP))
 			lines = append(lines,
 				" "+theme.Label.Render("Port:   ")+
 					theme.Mono.Render("8080"))
@@ -91,40 +95,73 @@ func (m Model) pairingContent(w, h int) string {
 	lines = append(lines, "")
 
 	// Buttons
-	btnQR := " QR (Tor) "
-	btnMac := " Macaroon "
-	btnClear := ""
-
+	maxBtn := 1
 	if m.cfg.P2PMode == "hybrid" {
-		btnClear = " QR (Clearnet) "
-		switch m.pairingButtonIdx {
-		case 0:
-			btnQR = theme.ActiveTab.Render(btnQR)
-			btnMac = theme.InactiveTab.Render(btnMac)
-			btnClear = theme.InactiveTab.Render(btnClear)
-		case 1:
-			btnQR = theme.InactiveTab.Render(btnQR)
-			btnMac = theme.ActiveTab.Render(btnMac)
-			btnClear = theme.InactiveTab.Render(btnClear)
-		case 2:
-			btnQR = theme.InactiveTab.Render(btnQR)
-			btnMac = theme.InactiveTab.Render(btnMac)
-			btnClear = theme.ActiveTab.Render(btnClear)
-		}
-		lines = append(lines,
-			" "+btnQR+"  "+btnMac+"  "+btnClear)
-	} else {
-		if m.pairingButtonIdx == 0 {
-			btnQR = theme.ActiveTab.Render(btnQR)
-			btnMac = theme.InactiveTab.Render(btnMac)
-		} else {
-			btnQR = theme.InactiveTab.Render(btnQR)
-			btnMac = theme.ActiveTab.Render(btnMac)
-		}
-		lines = append(lines, " "+btnQR+"  "+btnMac)
+		maxBtn = 2
 	}
 
+	btnLabels := []string{"QR (Tor)", "Macaroon"}
+	if m.cfg.P2PMode == "hybrid" {
+		btnLabels = append(btnLabels, "QR (Clearnet)")
+	}
+
+	var btnParts []string
+	for i, label := range btnLabels {
+		isActive := isFocused &&
+			m.pairingButtonIdx == i
+		if isActive {
+			btnParts = append(btnParts,
+				"▸ "+theme.BtnFocused.Render(label))
+		} else {
+			btnParts = append(btnParts,
+				"  "+theme.BtnNormal.Render(label))
+		}
+	}
+	_ = maxBtn
+	lines = append(lines,
+		" "+strings.Join(btnParts, "  "))
+
 	return strings.Join(lines, "\n")
+}
+
+// handlePairingEnter processes enter on pairing buttons.
+func (m Model) handlePairingEnter() (tea.Model, tea.Cmd) {
+	switch m.pairingButtonIdx {
+	case 0: // QR (Tor)
+		restOnion := readOnion(paths.TorLNDRESTHostname)
+		mac := readMacaroonHex(m.cfg)
+		if restOnion != "" && mac != "" {
+			m.urlTarget = fmt.Sprintf(
+				"lndconnect://%s:8080?macaroon=%s",
+				restOnion, hexToBase64URL(mac))
+			m.qrLabel = "Tor QR — " +
+				restOnion[:min(20, len(restOnion))] +
+				"..."
+			m.qrMode = "tor"
+			m.urlReturnTo = svWalletPairing
+			m.subview = svQR
+		}
+	case 1: // Macaroon
+		return m, showMacaroonCmd(m.cfg)
+	case 2: // QR (Clearnet)
+		if m.cfg.P2PMode == "hybrid" &&
+			m.status != nil &&
+			m.status.publicIP != "" {
+			mac := readMacaroonHex(m.cfg)
+			if mac != "" {
+				m.urlTarget = fmt.Sprintf(
+					"lndconnect://%s:8080?macaroon=%s",
+					m.status.publicIP,
+					hexToBase64URL(mac))
+				m.qrLabel = "Clearnet QR — " +
+					m.status.publicIP + ":8080"
+				m.qrMode = "clearnet"
+				m.urlReturnTo = svWalletPairing
+				m.subview = svQR
+			}
+		}
+	}
+	return m, nil
 }
 
 func (m Model) viewQR() string {
@@ -142,24 +179,29 @@ func (m Model) viewQR() string {
 			m.status.publicIP != "" {
 			uri = fmt.Sprintf(
 				"lndconnect://%s:8080?macaroon=%s",
-				m.status.publicIP, hexToBase64URL(mac))
+				m.status.publicIP,
+				hexToBase64URL(mac))
 			label = "Clearnet QR — " +
 				m.status.publicIP + ":8080"
 		} else if restOnion != "" && mac != "" {
 			uri = fmt.Sprintf(
 				"lndconnect://%s:8080?macaroon=%s",
 				restOnion, hexToBase64URL(mac))
-			label = "Tor QR — " + restOnion[:20] + "..."
+			label = "Tor QR — " +
+				restOnion[:20] + "..."
 		} else {
-			return lipgloss.Place(m.width, m.height,
+			return lipgloss.Place(
+				m.width, m.height,
 				lipgloss.Center, lipgloss.Center,
-				theme.Warn.Render("QR not available."))
+				theme.Warn.Render(
+					"QR not available."))
 		}
 	}
 
 	qr := renderQRCode(uri)
 	var lines []string
-	lines = append(lines, theme.Header.Render(label))
+	lines = append(lines,
+		theme.Header.Render(label))
 	lines = append(lines, "")
 	if qr != "" {
 		lines = append(lines, qr)
@@ -169,7 +211,8 @@ func (m Model) viewQR() string {
 		"backspace back • q quit"))
 	return lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(lipgloss.Left, lines...))
+		lipgloss.JoinVertical(
+			lipgloss.Left, lines...))
 }
 
 func renderQRCode(data string) string {

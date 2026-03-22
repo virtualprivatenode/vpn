@@ -61,6 +61,11 @@ const (
 	svOnChainResult
 	svSelfUpdate
 	svP2PUpgrade
+	// On-chain send flow
+	svOnChainSendAddr
+	svOnChainSendAmount
+	svOnChainSendConfirm
+	svOnChainSendBroadcast
 )
 
 // Tab types for the top tab bar
@@ -76,6 +81,8 @@ const (
 	tabOnChain                // On-chain screen
 	tabSyncthing
 	tabLndHub
+	tabOpenChannel // Channel open flow
+	tabOnChainTx   // on-chain transaction detail
 )
 
 type openTab struct {
@@ -83,6 +90,12 @@ type openTab struct {
 	Label   string
 	Index   int // channel index, payment index, etc.
 	Section int // which section opened this tab
+}
+
+type feeTier struct {
+	Target   int     // block target: 1, 3, 6, 25
+	SatPerVB float64 // fee rate in sat/vB
+	Label    string  // "~1 blk", "~3 blk", etc.
 }
 
 type svcActionDoneMsg struct{}
@@ -138,6 +151,21 @@ type utxoListMsg struct {
 type sendCoinsResultMsg struct {
 	txid string
 	err  error
+}
+
+type feeTiersMsg struct {
+	tiers [4]feeTier
+	err   error
+}
+
+type feeEstimateMsg struct {
+	feeSats int64
+	err     error
+}
+
+type onChainTxMsg struct {
+	txs []lndrpc.OnChainTx
+	err error
 }
 
 type paymentType int
@@ -255,11 +283,11 @@ type Model struct {
 	contentFocus   int // 0=primary area, 1=buttons
 
 	// Tab bar
-	tabs            []openTab // open tabs (index 0 is always main)
-	activeTab       int       // which tab is active
-	tabFocused      bool      // cursor is on tab bar
-	tabCursorX      int       // 0=tab label, 1=close button
-	tabScrollOffset int       // first visible detail tab index (into tabs)
+	tabs            []openTab
+	activeTab       int
+	tabFocused      bool
+	tabCursorX      int
+	tabScrollOffset int
 
 	// Text inputs
 	sendInput       textinput.Model
@@ -295,6 +323,24 @@ type Model struct {
 	onChainSendError string
 	utxos            []lndrpc.UTXO
 	utxoCursor       int
+
+	// On-chain send flow
+	ocSendAddrInput  textinput.Model
+	ocSendAmtInput   textinput.Model
+	ocCustomFeeInput textinput.Model
+	ocSendAll        bool
+	ocSendStep       int // 0=amount field, 1=fee tiers
+	ocFeeTiers       [4]feeTier
+	ocSelectedTier   int   // 0-3, or 4=custom
+	ocConfirmFee     int64 // precise fee from LND
+	ocSendAddrVal    string
+	ocSendAmtVal     int64
+	ocSendFeeRate    int64
+
+	// On-chain transaction history
+	onChainTxs      []lndrpc.OnChainTx
+	onChainTxCursor int
+	onChainTxFocus  int // 0=buttons, 1=tx table, 2=utxo table
 
 	// Send state
 	sendDecodedValid bool
@@ -655,7 +701,7 @@ func listUnspentCmd(client *lndrpc.Client) tea.Cmd {
 
 func sendCoinsCmd(
 	client *lndrpc.Client, addr string,
-	amount int64, feeRate int64,
+	amount int64, feeRate int64, sendAll bool,
 ) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
@@ -663,11 +709,46 @@ func sendCoinsCmd(
 				"LND not connected")}
 		}
 		result, err := client.SendCoins(
-			addr, amount, feeRate, false)
+			addr, amount, feeRate, sendAll)
 		if err != nil {
 			return sendCoinsResultMsg{err: err}
 		}
 		return sendCoinsResultMsg{txid: result.Txid}
+	}
+}
+
+func fetchFeeTiersCmd(cfg *config.AppConfig) tea.Cmd {
+	return func() tea.Msg {
+		return fetchFeeTiers(cfg)
+	}
+}
+
+func estimateTxFeeCmd(
+	client *lndrpc.Client, addr string,
+	amount int64, targetConf int32,
+) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return feeEstimateMsg{err: fmt.Errorf(
+				"LND not connected")}
+		}
+		est, err := client.EstimateFee(
+			addr, amount, targetConf)
+		if err != nil {
+			return feeEstimateMsg{err: err}
+		}
+		return feeEstimateMsg{feeSats: est.FeeSats}
+	}
+}
+
+func fetchOnChainTxCmd(client *lndrpc.Client) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return onChainTxMsg{err: fmt.Errorf(
+				"LND not connected")}
+		}
+		txs, err := client.GetTransactions()
+		return onChainTxMsg{txs: txs, err: err}
 	}
 }
 

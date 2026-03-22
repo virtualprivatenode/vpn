@@ -13,6 +13,26 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
+// ── Focus helpers ────────────────────────────────────────
+
+func (m *Model) focusSidebar() {
+	m.nav.Focus()
+	m.tabFocused = false
+	m.contentFocused = false
+}
+
+func (m *Model) focusTabBar() {
+	m.nav.Blur()
+	m.tabFocused = true
+	m.contentFocused = false
+}
+
+func (m *Model) focusContent() {
+	m.nav.Blur()
+	m.tabFocused = false
+	m.contentFocused = true
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -117,6 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case newAddressMsg:
 		if msg.err == nil {
 			m.chanFundAddress = msg.address
+			m.onChainAddress = msg.address
 		}
 		return m, nil
 	case invoiceCreatedMsg:
@@ -182,6 +203,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.utxos = msg.utxos
 		}
 		return m, nil
+	case onChainTxMsg:
+		if msg.err == nil {
+			m.onChainTxs = msg.txs
+		}
+		return m, nil
 	case sendCoinsResultMsg:
 		if msg.err != nil {
 			m.onChainSendError = msg.err.Error()
@@ -190,6 +216,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.onChainSendError = ""
 		}
 		m.subview = svOnChainResult
+		return m, nil
+	case feeTiersMsg:
+		if msg.err == nil {
+			m.ocFeeTiers = msg.tiers
+		} else {
+			m.onChainSendError = msg.err.Error()
+		}
+		return m, nil
+	case feeEstimateMsg:
+		if msg.err == nil {
+			m.ocConfirmFee = msg.feeSats
+		} else {
+			m.onChainSendError = msg.err.Error()
+		}
 		return m, nil
 	case tickMsg:
 		if m.fetchInFlight {
@@ -203,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ── Key dispatch ─────────────────────────────────────────
+// ── Key dispatch (restructured: tab-first) ───────────────
 
 func (m Model) handleKey(
 	msg tea.KeyPressMsg,
@@ -214,47 +254,7 @@ func (m Model) handleKey(
 		return m, tea.Suspend
 	}
 
-	// Text input subviews
-	if m.subview == svLndHubCreateName {
-		return m.handleLndHubCreateNameKey(key, msg)
-	}
-	if m.subview == svSyncthingPairInput {
-		return m.handleSyncthingPairInputKey(key, msg)
-	}
-
-	// Flow subviews: up goes to tab bar
-	if isChannelSubview(m.subview) ||
-		isWalletSubview(m.subview) {
-		if key == "up" || key == "k" {
-			if m.hasDetailTabs() {
-				m.tabFocused = true
-				m.contentFocused = false
-				m.tabCursorX = 0
-				// Find the tab for current flow
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		}
-	}
-
-	// Channel open flow
-	if isChannelSubview(m.subview) {
-		return m.handleChannelsKey(key, msg)
-	}
-	// Wallet send/receive flow
-	if isWalletSubview(m.subview) {
-		return m.handleWalletKey(key, msg)
-	}
-	// QR/URL fullscreen
-	if m.subview == svQR || m.subview == svFullURL {
-		return m.handleGenericSubviewKey(key)
-	}
-	// Addon subviews
-	if isAddonSubview(m.subview) {
-		return m.handleAddonSubviewKey(key)
-	}
-
-	// Confirms
+	// ── 1. Confirm dialogs (modal, highest priority)
 	if m.svcConfirm != "" {
 		return m.handleSvcConfirmKey(key)
 	}
@@ -265,377 +265,418 @@ func (m Model) handleKey(
 		return m.handleUpdateConfirmKey(key)
 	}
 
-	// Generic subview back
-	if m.subview != svNone {
+	// ── 2. Fullscreen views (QR, URL)
+	if m.subview == svQR || m.subview == svFullURL ||
+		m.subview == svSyncthingDeviceQR {
 		return m.handleGenericSubviewKey(key)
 	}
 
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	}
-
+	// ── 3. Tab bar focused
 	if m.tabFocused {
 		return m.handleTabBarKey(key)
 	}
+
+	// ── 4. Sidebar focused
 	if m.nav.Focused {
 		return m.handleSidebarKey(key)
 	}
-	return m.handleContentKey(key)
-}
 
-func (m Model) handleOnChainKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	if m.subview == svOnChainResult {
-		switch key {
-		case "enter", "backspace", "esc":
-			m.subview = svOnChain
-			m.onChainSendTxid = ""
-			m.onChainSendError = ""
-			return m, tea.Sequence(
-				listUnspentCmd(m.lndClient),
-				fetchStatus(m.cfg, m.lndClient))
-		}
-		return m, nil
-	}
-
-	switch key {
-	case "backspace", "esc":
-		m.subview = svNone
-		m.contentFocus = 1
-	case "up", "k":
-		if m.onChainFocus == 1 && m.utxoCursor > 0 {
-			m.utxoCursor--
-		} else if m.onChainFocus == 1 {
-			m.onChainFocus = 0
-			m.onChainBtnIdx = 0
-		}
-	case "down", "j":
-		if m.onChainFocus == 0 {
-			m.onChainFocus = 1
-			m.utxoCursor = 0
-		} else if m.onChainFocus == 1 &&
-			m.utxoCursor < len(m.utxos)-1 {
-			m.utxoCursor++
-		}
-	case "left", "h":
-		if m.onChainFocus == 0 && m.onChainBtnIdx > 0 {
-			m.onChainBtnIdx--
-		}
-	case "right", "l":
-		if m.onChainFocus == 0 && m.onChainBtnIdx < 1 {
-			m.onChainBtnIdx++
-		}
-	case "enter":
-		if m.onChainFocus == 0 {
-			switch m.onChainBtnIdx {
-			case 0: // New Address
-				return m, getNewAddressCmd(m.lndClient)
-			case 1: // Refresh UTXOs
-				return m, listUnspentCmd(m.lndClient)
-			}
-		}
-	}
-	return m, nil
-}
-
-// ── Sidebar keys ─────────────────────────────────────────
-
-func (m Model) handleSidebarKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "up", "k":
-		m.nav.MoveUp()
-		sec := m.nav.Activate()
-		m.btnIdx = 0
-		m.subview = svNone
-		m.activeTab = 0
-		m.tabFocused = false
-		m.tabCursorX = 0
-		return m.previewSection(sec)
-	case "down", "j":
-		m.nav.MoveDown()
-		sec := m.nav.Activate()
-		m.btnIdx = 0
-		m.subview = svNone
-		m.activeTab = 0
-		m.tabFocused = false
-		m.tabCursorX = 0
-		return m.previewSection(sec)
-	case "enter", "right", "l":
-		m.nav.Blur()
-		m.contentFocused = true
-		m.btnIdx = 0
-		m.contentFocus = 0
-		// Ensure cursor is visible in content
-		m.ensureContentCursor()
-		return m, nil
-	}
-	return m, nil
-}
-
-// ensureContentCursor makes sure that when entering the
-// content pane, the cursor lands on a visible element.
-func (m *Model) ensureContentCursor() {
-	sec := m.nav.ActiveSection()
-	switch sec {
-	case secChannels:
-		if m.status != nil &&
-			len(m.status.channels) > 0 {
-			if m.chanCursor >= len(m.status.channels) {
-				m.chanCursor = 0
-			}
-		}
-	case secWallet:
-		// Cursor on tx table is fine
-	case secAddons:
-		// Cursor on buttons
-	case secSystem:
-		// Cursor on services list
-	}
-}
-
-func (m Model) previewSection(
-	sec int,
-) (tea.Model, tea.Cmd) {
-	switch sec {
-	case secWallet:
-		m.rebuildTxTable()
-		return m, fetchPaymentHistoryCmd(m.lndClient)
-	case secChannels:
-		m.rebuildChannelTable()
-	}
-	return m, nil
-}
-
-// ── Tab bar keys ─────────────────────────────────────────
-
-func (m Model) handleTabBarKey(
-	key string,
-) (tea.Model, tea.Cmd) {
+	// ── 5. Content focused — dispatch by active tab
 	tabs := m.effectiveTabs()
-
-	switch key {
-	case "down", "j":
-		// From any tab, go back to main content
-		m.activeTab = 0
-		m.tabFocused = false
-		m.contentFocused = true
-		m.contentFocus = 0
-		m.subview = svNone
-		m.nav.Blur()
-		m.ensureContentCursor()
-		return m, nil
-
-	case "left", "h":
-		if m.tabCursorX == 1 {
-			m.tabCursorX = 0
-			return m, nil
-		}
-		if m.activeTab > 1 {
-			m.activeTab--
-			m.tabCursorX = 0
-			// Adjust scroll if needed
-			if m.activeTab-1 < m.tabScrollOffset {
-				m.tabScrollOffset = m.activeTab - 1
-				if m.tabScrollOffset < 0 {
-					m.tabScrollOffset = 0
-				}
-			}
-			return m, nil
-		}
-		// On first detail tab or beyond, go to sidebar
-		m.tabFocused = false
-		m.contentFocused = false
-		m.contentFocus = 0
-		m.activeTab = 0
-		m.tabScrollOffset = 0
-		m.nav.Focus()
-		return m, nil
-
-	case "right", "l":
-		if m.activeTab > 0 && m.activeTab < len(tabs) {
-			tab := tabs[m.activeTab]
-			if tab.Kind != tabMain && m.tabCursorX == 0 {
-				m.tabCursorX = 1
-				return m, nil
-			}
-		}
-		if m.activeTab < len(tabs)-1 {
-			m.activeTab++
-			m.tabCursorX = 0
-			// Scroll will auto-adjust in renderTabBar
-			return m, nil
-		}
-
-	case "enter":
-		if m.tabCursorX == 1 && m.activeTab > 0 {
-			return m.closeTab(m.activeTab)
-		}
+	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
-		// Flow tabs (send/receive/pairing/onchain)
-		// and main tab: enter focuses content
-		if tab.Kind == tabMain ||
-			tab.Kind == tabSend ||
-			tab.Kind == tabReceive ||
-			tab.Kind == tabPairing ||
-			tab.Kind == tabOnChain {
-			m.tabFocused = false
-			m.contentFocused = true
-			m.contentFocus = 0
-			m.nav.Blur()
-			m.ensureContentCursor()
-		}
-		// Channel/payment detail tabs are view-only
-		return m, nil
-
-	case "backspace":
-		// Back to sidebar
-		m.tabFocused = false
-		m.contentFocused = false
-		m.activeTab = 0
-		m.nav.Focus()
-		return m, nil
-
-	case "q", "ctrl+c":
-		return m, tea.Quit
+		return m.handleTabContentKey(tab, key, msg)
 	}
-	return m, nil
+
+	// ── 6. Section home (activeTab == 0)
+	return m.handleSectionHomeKey(key, msg)
 }
 
-func (m Model) closeTab(
-	tabIdx int,
+// ── Tab content dispatch ─────────────────────────────────
+// Routes to the correct handler based on tab kind.
+// Flow tabs dispatch internally by subview.
+// View-only tabs get a simple handler.
+
+func (m Model) handleTabContentKey(
+	tab openTab, key string, msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
-	tabs := m.effectiveTabs()
-	if tabIdx <= 0 || tabIdx >= len(tabs) {
-		// Reset scroll offset
-		if m.tabScrollOffset > len(m.effectiveTabs())-2 {
-			m.tabScrollOffset = len(m.effectiveTabs()) - 2
-			if m.tabScrollOffset < 0 {
-				m.tabScrollOffset = 0
-			}
-		}
+	switch tab.Kind {
+	// View-only tabs
+	case tabChannel:
+		return m.handleChannelDetailKey(key)
+	case tabPayment:
+		return m.handlePaymentDetailKey(key)
+	case tabOnChainTx:
+		return m.handleOnChainTxDetailKey(key)
 
-		return m, nil
+	// Flow tabs
+	case tabOpenChannel:
+		return m.handleOpenChannelTabKey(key, msg)
+	case tabSend:
+		return m.handleSendTabKey(key, msg)
+	case tabReceive:
+		return m.handleReceiveTabKey(key, msg)
+	case tabOnChain:
+		return m.handleOnChainTabKey(key, msg)
+	case tabPairing:
+		return m.handlePairingTabKey(key)
+	case tabSyncthing:
+		return m.handleSyncthingTabKey(key, msg)
+	case tabLndHub:
+		return m.handleLndHubTabKey(key, msg)
 	}
 
-	closingTab := tabs[tabIdx]
-	var newTabs []openTab
-	for _, t := range m.tabs {
-		if t.Kind == closingTab.Kind &&
-			t.Index == closingTab.Index &&
-			t.Section == closingTab.Section {
-			continue
-		}
-		newTabs = append(newTabs, t)
-	}
-	m.tabs = newTabs
-
-	if m.activeTab >= tabIdx {
-		m.activeTab--
-		if m.activeTab < 0 {
-			m.activeTab = 0
-		}
-	}
-	m.tabCursorX = 0
-
-	// If no more detail tabs, leave tab bar
-	if !m.hasDetailTabs() {
-		m.tabFocused = false
-		m.activeTab = 0
-		// Focus content (not lost in tab bar)
-		m.contentFocused = true
-		m.contentFocus = 0
-		m.nav.Blur()
-		m.ensureContentCursor()
-	}
-
-	return m, nil
+	// Fallback: section home
+	return m.handleSectionHomeKey(key, msg)
 }
 
-// ── Content keys ─────────────────────────────────────────
+// ── View-only tab handlers ───────────────────────────────
 
-func (m Model) handleContentKey(
+func (m Model) handleChannelDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "backspace":
-		if m.subview != svNone {
-			m.subview = svNone
-			m.btnIdx = 0
-			m.contentFocus = 0
-			return m, nil
-		}
-		// Back to sidebar — always lands on yellow item
-		m.contentFocused = false
-		m.contentFocus = 0
-		m.tabFocused = false
-		m.nav.Focus()
-		return m, nil
-	case "esc":
-		if m.subview != svNone {
-			m.subview = svNone
-			m.btnIdx = 0
-			m.contentFocus = 0
-			return m, nil
-		}
-	case "left", "h":
-		// If in a context where left should go to sidebar
-		sec := m.nav.ActiveSection()
-		if sec == secChannels && m.contentFocus == 0 {
-			m.contentFocused = false
-			m.contentFocus = 0
-			m.nav.Focus()
-			return m, nil
-		}
-		if sec == secWallet && m.contentFocus == 0 {
-			m.contentFocused = false
-			m.contentFocus = 0
-			m.nav.Focus()
-			return m, nil
-		}
-		if sec == secAddons && m.btnIdx == 0 {
-			m.contentFocused = false
-			m.nav.Focus()
-			return m, nil
-		}
-		if sec == secSystem && m.btnIdx == 0 {
-			m.contentFocused = false
-			m.nav.Focus()
-			return m, nil
-		}
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			return m, nil
+		}
+	case "backspace":
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
+func (m Model) handlePaymentDetailKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			return m, nil
+		}
+	case "backspace":
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
+func (m Model) handleOnChainTxDetailKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			return m, nil
+		}
+	case "backspace":
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
+// ── Flow tab handlers ────────────────────────────────────
+// Each flow tab owns its subview dispatch internally.
+// Backspace on step 1 closes the tab.
+
+func (m Model) handleOpenChannelTabKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svChannelOpen:
+		return m.handleChannelOpenKey(key)
+	case svChannelCustomPeer:
+		return m.handleChannelCustomPeerKey(key, msg)
+	case svChannelAmountSelect:
+		return m.handleChannelAmountKey(key, msg)
+	case svChannelOpenConfirm:
+		return m.handleChannelConfirmKey(key)
+	case svChannelOpening:
+		return m.handleChannelOpeningKey(key)
+	case svChannelOpenResult:
+		return m.handleChannelResultKey(key)
+	case svChannelFundWallet:
+		return m.handleChannelFundKey(key)
+	default:
+		// Tab exists but subview is svNone —
+		// shouldn't happen, close tab
+		return m.closeTab(m.activeTab)
+	}
+}
+
+func (m Model) handleSendTabKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svSend:
+		return m.handleSendKey(key, msg)
+	case svSendConfirm:
+		return m.handleSendConfirmKey(key)
+	case svSendInFlight:
+		return m.handleSendInFlightKey(key)
+	case svSendResult:
+		return m.handleSendResultKey(key)
+	default:
+		return m.closeTab(m.activeTab)
+	}
+}
+
+func (m Model) handleReceiveTabKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svReceive:
+		return m.handleReceiveKey(key, msg)
+	case svReceiveWaiting:
+		return m.handleReceiveWaitingKey(key)
+	case svReceivePaid:
+		return m.handleReceivePaidKey(key)
+	case svReceiveExpired:
+		return m.handleReceiveExpiredKey(key)
+	default:
+		return m.closeTab(m.activeTab)
+	}
+}
+
+func (m Model) handleOnChainTabKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svOnChain:
+		return m.handleOnChainKey(key)
+	case svOnChainResult:
+		return m.handleOnChainKey(key)
+	case svOnChainSendAddr:
+		return m.handleOCSendAddrKey(key, msg)
+	case svOnChainSendAmount:
+		return m.handleOCSendAmountKey(key, msg)
+	case svOnChainSendConfirm:
+		return m.handleOCSendConfirmKey(key)
+	case svOnChainSendBroadcast:
+		if key == "q" || key == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m, nil
+	default:
+		return m.closeTab(m.activeTab)
+	}
+}
+
+func (m Model) handlePairingTabKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		if m.pairingButtonIdx > 0 {
+			m.pairingButtonIdx--
+			return m, nil
+		}
+		m.focusSidebar()
+		return m, nil
+	case "right", "l":
+		maxBtn := 1
+		if m.cfg.P2PMode == "hybrid" {
+			maxBtn = 2
+		}
+		if m.pairingButtonIdx < maxBtn {
+			m.pairingButtonIdx++
+		}
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+		return m, nil
+	case "backspace":
+		return m.closeTab(m.activeTab)
+	case "enter":
+		return m.handlePairingEnter()
+	}
+	return m, nil
+}
+
+func (m Model) handlePairingContentKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "left", "h":
+		if m.pairingButtonIdx > 0 {
+			m.pairingButtonIdx--
+		}
+	case "right", "l":
+		if m.pairingButtonIdx < 3 {
+			m.pairingButtonIdx++
+		}
+	case "enter":
+		return m.handlePairingEnter()
+	}
+	return m, nil
+}
+
+func (m Model) handleSyncthingTabKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svSyncthingDetail:
+		return m.handleSyncDetailKey(key)
+	case svSyncthingPairInput:
+		return m.handleSyncthingPairInputKey(key, msg)
+	case svSyncthingWebUI:
+		return m.handleSyncWebUIKey(key)
+	case svSyncthingDeviceDetail:
+		return m.handleSyncDeviceDetailKey(key)
+	case svSyncthingDeviceQR:
+		return m.handleGenericSubviewKey(key)
+	default:
+		return m.closeTab(m.activeTab)
+	}
+}
+
+func (m Model) handleSyncDeviceDetailKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "backspace":
+		m.subview = svSyncthingDetail
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleLndHubTabKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch m.subview {
+	case svLndHubManage:
+		return m.handleLndhubManageKey(key)
+	case svLndHubCreateName:
+		return m.handleLndHubCreateNameKey(key, msg)
+	case svLndHubCreateAccount:
+		if key == "enter" || key == "backspace" {
+			m.subview = svLndHubManage
+		}
+		return m, nil
+	case svLndHubAccountDetail:
+		return m.handleLndHubAccountDetailKey(key)
+	case svLndHubDeactivateConfirm:
+		return m.handleLndHubDeactivateKey(key)
+	default:
+		return m.closeTab(m.activeTab)
+	}
+}
+
+func (m Model) handleLndHubAccountDetailKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "backspace":
+		m.subview = svLndHubManage
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleLndHubDeactivateKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "y":
+		if m.hubCursor < len(m.cfg.LndHubAccounts) {
+			login := m.cfg.LndHubAccounts[m.hubCursor].Login
+			return m, deactivateLndHubAccountCmd(login)
+		}
+	case "n", "backspace":
+		m.subview = svLndHubManage
+	}
+	return m, nil
+}
+
+// ── Section home key dispatch ────────────────────────────
+// Only reached when activeTab == 0 (no tab selected)
+
+func (m Model) handleSectionHomeKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "backspace":
+		m.focusSidebar()
+		m.contentFocus = 0
+		return m, nil
 	}
 
 	sec := m.nav.ActiveSection()
-
 	switch sec {
 	case secChannels:
-		return m.handleChannelsContentKey(key)
+		return m.handleChannelsHomeKey(key)
 	case secWallet:
-		return m.handleWalletContentKey(key)
+		return m.handleWalletHomeKey(key)
 	case secAddons:
-		return m.handleAddonsContentKey(key)
+		return m.handleAddonsHomeKey(key)
 	case secSystem:
-		return m.handleSystemContentKey(key)
+		return m.handleSystemHomeKey(key)
 	}
 	return m, nil
 }
 
-// ── Channels content ─────────────────────────────────────
+// ── Channels home ────────────────────────────────────────
 
-func (m Model) handleChannelsContentKey(
+func (m Model) handleChannelsHomeKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	if m.subview == svOnChain ||
-		m.subview == svOnChainResult {
-		return m.handleOnChainKey(key)
-	}
-
 	switch key {
+	case "left", "h":
+		m.focusSidebar()
+		m.contentFocus = 0
+		return m, nil
 	case "up", "k":
 		if m.contentFocus == 1 {
 			m.contentFocus = 0
@@ -648,14 +689,10 @@ func (m Model) handleChannelsContentKey(
 			if m.chanCursor > 0 {
 				m.chanCursor--
 			} else if m.hasDetailTabs() {
-				// At top channel → tab bar
-				m.tabFocused = true
-				m.contentFocused = false
+				m.focusTabBar()
 				m.tabCursorX = 0
-				// Start on first detail tab
 				m.activeTab = 1
 			}
-			// If no tabs, stay at top channel
 		}
 	case "down", "j":
 		if m.contentFocus == 0 {
@@ -704,8 +741,7 @@ func (m Model) handleChannelsContentKey(
 					m.activeTab =
 						len(m.effectiveTabs()) - 1
 				}
-				m.tabFocused = true
-				m.contentFocused = false
+				m.focusTabBar()
 				m.tabCursorX = 0
 			}
 		} else if m.contentFocus == 1 {
@@ -715,42 +751,39 @@ func (m Model) handleChannelsContentKey(
 	return m, nil
 }
 
-// ── Wallet content ───────────────────────────────────────
+// ── Wallet home ──────────────────────────────────────────
 
-func (m Model) handleWalletContentKey(
+func (m Model) handleWalletHomeKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	if m.subview == svPaymentDetail {
-		if key == "backspace" || key == "esc" {
-			m.subview = svNone
-			m.contentFocus = 0
-		}
-		return m, nil
-	}
-	if m.subview == svOnChain {
-		if key == "backspace" || key == "esc" {
-			m.subview = svNone
-			m.contentFocus = 1
-		}
-		return m, nil
-	}
-
-	// contentFocus: 0 = tx table, 1 = buttons row (above)
 	switch key {
+	case "left", "h":
+		if m.contentFocus == 1 {
+			if m.btnIdx > 0 {
+				m.btnIdx--
+				return m, nil
+			}
+		}
+		m.focusSidebar()
+		return m, nil
 	case "up", "k":
 		if m.contentFocus == 0 {
 			if m.payHistoryCursor > 0 {
 				m.payHistoryCursor--
 			} else {
-				// At top of table → buttons row
 				m.contentFocus = 1
 				m.btnIdx = 0
 			}
+		} else if m.contentFocus == 1 {
+			if m.hasDetailTabs() {
+				m.focusTabBar()
+				m.tabCursorX = 0
+				m.activeTab = 1
+				return m, nil
+			}
 		}
-		// On buttons, up does nothing (top of content)
 	case "down", "j":
 		if m.contentFocus == 1 {
-			// From buttons → table
 			m.contentFocus = 0
 			m.payHistoryCursor = 0
 		} else if m.contentFocus == 0 {
@@ -758,21 +791,6 @@ func (m Model) handleWalletContentKey(
 				len(m.payHistory)-1 {
 				m.payHistoryCursor++
 			}
-		}
-	case "left", "h":
-		if m.contentFocus == 1 {
-			if m.btnIdx > 0 {
-				m.btnIdx--
-			} else {
-				// Back to sidebar from buttons
-				m.contentFocused = false
-				m.nav.Focus()
-				return m, nil
-			}
-		} else {
-			m.contentFocused = false
-			m.nav.Focus()
-			return m, nil
 		}
 	case "right", "l":
 		if m.contentFocus == 1 {
@@ -783,7 +801,6 @@ func (m Model) handleWalletContentKey(
 	case "enter":
 		if m.contentFocus == 0 &&
 			len(m.payHistory) > 0 {
-			// Open as detail tab (view-only)
 			entry := m.payHistory[m.payHistoryCursor]
 			label := entry.Memo
 			if label == "" {
@@ -804,7 +821,6 @@ func (m Model) handleWalletContentKey(
 				Index:   m.payHistoryCursor,
 				Section: secWallet,
 			}
-			// Check if already open
 			found := false
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
@@ -820,8 +836,7 @@ func (m Model) handleWalletContentKey(
 				m.activeTab =
 					len(m.effectiveTabs()) - 1
 			}
-			m.tabFocused = true
-			m.contentFocused = false
+			m.focusTabBar()
 			m.tabCursorX = 0
 		} else if m.contentFocus == 1 {
 			switch m.btnIdx {
@@ -853,8 +868,13 @@ func (m Model) handleWalletContentKey(
 				}
 			case 2: // On-Chain
 				m.subview = svOnChain
+				m.onChainTxFocus = 0
+				m.onChainBtnIdx = 0
 				m.openFlowTab(tabOnChain,
 					"On-Chain", secWallet)
+				return m, tea.Batch(
+					listUnspentCmd(m.lndClient),
+					fetchOnChainTxCmd(m.lndClient))
 			case 3: // Pairing
 				m.pairingButtonIdx = 0
 				m.subview = svWalletPairing
@@ -866,21 +886,26 @@ func (m Model) handleWalletContentKey(
 	return m, nil
 }
 
-// ── Add-ons content ──────────────────────────────────────
+// ── Addons home ──────────────────────────────────────────
 
-func (m Model) handleAddonsContentKey(
+func (m Model) handleAddonsHomeKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	if m.subview != svNone {
-		return m.handleAddonSubviewKey(key)
-	}
-
 	switch key {
 	case "left", "h":
 		if m.btnIdx > 0 {
 			m.btnIdx--
+		} else {
+			m.focusSidebar()
 		}
-		// leftmost handled by handleContentKey
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = 1
+			return m, nil
+		}
 	case "right", "l":
 		if m.btnIdx < 1 {
 			m.btnIdx++
@@ -915,174 +940,9 @@ func (m Model) handleAddonsContentKey(
 	return m, nil
 }
 
-func (m Model) handleAddonSubviewKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingDetail:
-		return m.handleSyncDetailKey(key)
-	case svSyncthingWebUI:
-		return m.handleSyncWebUIKey(key)
-	case svSyncthingDeviceDetail:
-		if key == "backspace" || key == "esc" {
-			m.subview = svSyncthingDetail
-		}
-		return m, nil
-	case svLndHubManage:
-		return m.handleLndhubManageKey(key)
-	case svLndHubCreateAccount:
-		if key == "enter" || key == "backspace" {
-			m.subview = svLndHubManage
-		}
-		return m, nil
-	case svLndHubAccountDetail:
-		if key == "backspace" || key == "esc" {
-			m.subview = svLndHubManage
-		}
-		return m, nil
-	case svLndHubDeactivateConfirm:
-		if key == "y" {
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts) {
-				login := m.cfg.LndHubAccounts[m.hubCursor].Login
-				return m, deactivateLndHubAccountCmd(login)
-			}
-		}
-		if key == "n" || key == "esc" {
-			m.subview = svLndHubManage
-		}
-		return m, nil
-	}
+// ── System home ──────────────────────────────────────────
 
-	if key == "backspace" || key == "esc" {
-		m.subview = svNone
-		m.btnIdx = 0
-	}
-	return m, nil
-}
-
-func (m Model) handleSyncDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		if m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		}
-	case "right", "l":
-		if m.addonBtnIdx < 2 {
-			m.addonBtnIdx++
-		}
-	case "up", "k":
-		if m.syncCursor > 0 {
-			m.syncCursor--
-		}
-	case "down", "j":
-		if m.syncCursor <
-			len(m.cfg.SyncthingDevices)-1 {
-			m.syncCursor++
-		}
-	case "enter":
-		switch m.addonBtnIdx {
-		case 0:
-			m.subview = svSyncthingPairInput
-			m.syncPairError = ""
-			m.syncPairSuccess = false
-		case 1:
-			m.subview = svSyncthingDeviceQR
-		case 2:
-			m.subview = svSyncthingWebUI
-			m.addonBtnIdx = 0
-		}
-	case "backspace":
-		m.subview = svNone
-		m.btnIdx = 0
-	}
-	return m, nil
-}
-
-func (m Model) handleSyncWebUIKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		if m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		}
-	case "right", "l":
-		if m.addonBtnIdx < 1 {
-			m.addonBtnIdx++
-		}
-	case "enter":
-		switch m.addonBtnIdx {
-		case 0:
-			syncOnion := readOnion(
-				"TorSyncthingHostname placeholder")
-			if syncOnion != "" {
-				m.urlTarget = "http://" + syncOnion +
-					":8384"
-				m.urlReturnTo = svSyncthingWebUI
-				m.subview = svFullURL
-			}
-		case 1:
-			m.showSecrets = !m.showSecrets
-		}
-	case "backspace":
-		m.subview = svSyncthingDetail
-		m.addonBtnIdx = 0
-	}
-	return m, nil
-}
-
-func (m Model) handleLndhubManageKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "up", "k":
-		if m.hubCursor > 0 {
-			m.hubCursor--
-		}
-	case "down", "j":
-		if m.hubCursor <
-			len(m.cfg.LndHubAccounts)-1 {
-			m.hubCursor++
-		}
-	case "left":
-		if m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		}
-	case "right", "l":
-		if m.addonBtnIdx < 2 {
-			m.addonBtnIdx++
-		}
-	case "enter":
-		switch m.addonBtnIdx {
-		case 0:
-			m.hubNameInput = newHubNameInput()
-			m.subview = svLndHubCreateName
-		case 1:
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts) {
-				m.subview = svLndHubAccountDetail
-			}
-		case 2:
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts) &&
-				m.cfg.LndHubAccounts[m.hubCursor].
-					Active {
-				m.subview = svLndHubDeactivateConfirm
-			}
-		}
-	case "backspace":
-		m.subview = svNone
-		m.btnIdx = 0
-	}
-	return m, nil
-}
-
-// ── System content ───────────────────────────────────────
-
-func (m Model) handleSystemContentKey(
+func (m Model) handleSystemHomeKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	maxBtn := 1
@@ -1094,19 +954,26 @@ func (m Model) handleSystemContentKey(
 	case "left", "h":
 		if m.btnIdx > 0 {
 			m.btnIdx--
+		} else {
+			m.focusSidebar()
 		}
-		// leftmost handled by handleContentKey
-	case "right", "l":
-		if m.btnIdx < maxBtn {
-			m.btnIdx++
-		}
+		return m, nil
 	case "up", "k":
 		if m.svcCursor > 0 {
 			m.svcCursor--
+		} else if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = 1
+			return m, nil
 		}
 	case "down", "j":
 		if m.svcCursor < m.svcCount()-1 {
 			m.svcCursor++
+		}
+	case "right", "l":
+		if m.btnIdx < maxBtn {
+			m.btnIdx++
 		}
 	case "r":
 		m.svcConfirm = "Restart"
@@ -1129,6 +996,655 @@ func (m Model) handleSystemContentKey(
 	}
 	return m, nil
 }
+
+// ── On-chain overview keys ───────────────────────────────
+
+func (m Model) handleOnChainKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	if m.subview == svOnChainResult {
+		switch key {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "enter", "backspace":
+			m.subview = svOnChain
+			m.onChainSendTxid = ""
+			m.onChainSendError = ""
+			return m, tea.Sequence(
+				listUnspentCmd(m.lndClient),
+				fetchOnChainTxCmd(m.lndClient),
+				fetchStatus(m.cfg, m.lndClient))
+		}
+		return m, nil
+	}
+
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		if m.onChainTxFocus == 0 &&
+			m.onChainBtnIdx > 0 {
+			m.onChainBtnIdx--
+		} else {
+			m.focusSidebar()
+		}
+		return m, nil
+	case "backspace":
+		// Close on-chain tab
+		return m.closeTab(m.activeTab)
+	case "up", "k":
+		switch m.onChainTxFocus {
+		case 2:
+			if m.utxoCursor > 0 {
+				m.utxoCursor--
+			} else {
+				m.onChainTxFocus = 1
+				if len(m.onChainTxs) > 0 {
+					m.onChainTxCursor =
+						len(m.onChainTxs) - 1
+				}
+			}
+		case 1:
+			if m.onChainTxCursor > 0 {
+				m.onChainTxCursor--
+			} else {
+				m.onChainTxFocus = 0
+				m.onChainBtnIdx = 0
+			}
+		case 0:
+			if m.hasDetailTabs() {
+				m.focusTabBar()
+				m.tabCursorX = 0
+				m.activeTab = m.findFlowTab()
+				return m, nil
+			}
+		}
+	case "down", "j":
+		switch m.onChainTxFocus {
+		case 0:
+			if len(m.onChainTxs) > 0 {
+				m.onChainTxFocus = 1
+				m.onChainTxCursor = 0
+			} else if len(m.utxos) > 0 {
+				m.onChainTxFocus = 2
+				m.utxoCursor = 0
+			}
+		case 1:
+			if m.onChainTxCursor <
+				len(m.onChainTxs)-1 {
+				m.onChainTxCursor++
+			} else if len(m.utxos) > 0 {
+				m.onChainTxFocus = 2
+				m.utxoCursor = 0
+			}
+		case 2:
+			if m.utxoCursor < len(m.utxos)-1 {
+				m.utxoCursor++
+			}
+		}
+	case "right", "l":
+		if m.onChainTxFocus == 0 &&
+			m.onChainBtnIdx < 2 {
+			m.onChainBtnIdx++
+		}
+	case "enter":
+		if m.onChainTxFocus == 0 {
+			switch m.onChainBtnIdx {
+			case 0:
+				return m, getNewAddressCmd(m.lndClient)
+			case 1:
+				return m, tea.Batch(
+					listUnspentCmd(m.lndClient),
+					fetchOnChainTxCmd(m.lndClient))
+			case 2:
+				m.resetOnChainSendState()
+				m.subview = svOnChainSendAddr
+				return m, nil
+			}
+		} else if m.onChainTxFocus == 1 &&
+			m.onChainTxCursor < len(m.onChainTxs) {
+			tx := m.onChainTxs[m.onChainTxCursor]
+			label := tx.Label
+			if len(label) > 14 {
+				label = label[:12] + ".."
+			}
+			newTab := openTab{
+				Kind:    tabOnChainTx,
+				Label:   label,
+				Index:   m.onChainTxCursor,
+				Section: secWallet,
+			}
+			found := false
+			tabs := m.effectiveTabs()
+			for i, t := range tabs {
+				if t.Kind == tabOnChainTx &&
+					t.Index == m.onChainTxCursor {
+					m.activeTab = i
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.tabs = append(m.tabs, newTab)
+				m.activeTab =
+					len(m.effectiveTabs()) - 1
+			}
+			m.focusTabBar()
+			m.tabCursorX = 0
+		}
+	}
+	return m, nil
+}
+
+// ── On-chain send flow keys ──────────────────────────────
+
+func (m Model) handleOCSendAddrKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+		return m, nil
+	case "backspace":
+		if m.ocSendAddrInput.Value() != "" {
+			var cmd tea.Cmd
+			m.ocSendAddrInput, cmd =
+				m.ocSendAddrInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		m.subview = svOnChain
+		m.onChainSendError = ""
+		return m, nil
+	case "enter":
+		addr := strings.TrimSpace(
+			m.ocSendAddrInput.Value())
+		if addr == "" {
+			m.onChainSendError = "Enter an address"
+			return m, nil
+		}
+		if !isValidOnChainAddr(addr, m.cfg.Network) {
+			m.onChainSendError = "Invalid address"
+			return m, nil
+		}
+		m.ocSendAddrVal = addr
+		m.onChainSendError = ""
+		m.subview = svOnChainSendAmount
+		m.ocSendStep = 0
+		m.ocSendAll = false
+		return m, fetchFeeTiersCmd(m.cfg)
+	default:
+		var cmd tea.Cmd
+		m.ocSendAddrInput, cmd =
+			m.ocSendAddrInput.Update(tea.Msg(msg))
+		return m, cmd
+	}
+}
+
+func (m Model) handleOCSendAmountKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		if m.ocSendStep == 1 && m.ocSelectedTier > 0 {
+			m.ocSelectedTier--
+			return m, nil
+		}
+		m.focusSidebar()
+		return m, nil
+	case "backspace":
+		if m.ocSendStep == 0 && !m.ocSendAll {
+			if m.ocSendAmtInput.Value() != "" {
+				var cmd tea.Cmd
+				m.ocSendAmtInput, cmd =
+					m.ocSendAmtInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		}
+		if m.ocSendStep == 2 {
+			if m.ocCustomFeeInput.Value() != "" {
+				var cmd tea.Cmd
+				m.ocCustomFeeInput, cmd =
+					m.ocCustomFeeInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		}
+		m.subview = svOnChainSendAddr
+		m.onChainSendError = ""
+		return m, nil
+	case "tab":
+		m.ocSendAll = !m.ocSendAll
+		if m.ocSendAll {
+			m.ocSendAmtInput.Blur()
+		} else {
+			m.ocSendAmtInput.Focus()
+		}
+		return m, nil
+	case "up", "k":
+		if m.ocSendStep == 1 {
+			m.ocSendStep = 0
+			if !m.ocSendAll {
+				m.ocSendAmtInput.Focus()
+			}
+		} else if m.ocSendStep == 2 {
+			m.ocSendStep = 1
+			m.ocCustomFeeInput.Blur()
+		} else if m.ocSendStep == 0 {
+			if m.hasDetailTabs() {
+				m.focusTabBar()
+				m.tabCursorX = 0
+				m.activeTab = m.findFlowTab()
+				return m, nil
+			}
+		}
+		return m, nil
+	case "down", "j":
+		if m.ocSendStep == 0 {
+			m.ocSendStep = 1
+			m.ocSendAmtInput.Blur()
+		} else if m.ocSendStep == 1 &&
+			m.ocSelectedTier == 4 {
+			m.ocSendStep = 2
+			m.ocCustomFeeInput.Focus()
+		}
+		return m, nil
+	case "right", "l":
+		if m.ocSendStep == 1 && m.ocSelectedTier < 4 {
+			m.ocSelectedTier++
+		}
+		return m, nil
+	case "enter":
+		var amountSats int64
+		if m.ocSendAll {
+			amountSats = 0
+		} else {
+			val := strings.TrimSpace(
+				m.ocSendAmtInput.Value())
+			val = strings.ReplaceAll(val, ",", "")
+			if val == "" {
+				m.onChainSendError = "Enter an amount"
+				return m, nil
+			}
+			for _, c := range val {
+				if c < '0' || c > '9' {
+					m.onChainSendError =
+						"Invalid number"
+					return m, nil
+				}
+			}
+			var n int64
+			for _, c := range val {
+				n = n*10 + int64(c-'0')
+			}
+			if n < 546 {
+				m.onChainSendError =
+					"Minimum 546 sats (dust limit)"
+				return m, nil
+			}
+			amountSats = n
+		}
+
+		var feeRate int64
+		if m.ocSelectedTier < 4 {
+			tier := m.ocFeeTiers[m.ocSelectedTier]
+			if tier.SatPerVB <= 0 {
+				m.onChainSendError =
+					"Fee estimate not available"
+				return m, nil
+			}
+			feeRate = int64(tier.SatPerVB)
+			if feeRate < 1 {
+				feeRate = 1
+			}
+		} else {
+			feeVal := strings.TrimSpace(
+				m.ocCustomFeeInput.Value())
+			if feeVal == "" {
+				m.onChainSendError =
+					"Enter a custom fee rate"
+				return m, nil
+			}
+			var n int64
+			for _, c := range feeVal {
+				if c < '0' || c > '9' {
+					m.onChainSendError =
+						"Invalid fee rate"
+					return m, nil
+				}
+				n = n*10 + int64(c-'0')
+			}
+			if n < 1 {
+				m.onChainSendError =
+					"Minimum 1 sat/vB"
+				return m, nil
+			}
+			feeRate = n
+		}
+
+		m.ocSendAmtVal = amountSats
+		m.ocSendFeeRate = feeRate
+		m.onChainSendError = ""
+		m.ocConfirmFee = 0
+		m.subview = svOnChainSendConfirm
+
+		if !m.ocSendAll && m.ocSendAddrVal != "" {
+			target := int32(1)
+			if m.ocSelectedTier < 4 {
+				target = int32(
+					m.ocFeeTiers[m.ocSelectedTier].
+						Target)
+			}
+			return m, estimateTxFeeCmd(
+				m.lndClient, m.ocSendAddrVal,
+				amountSats, target)
+		}
+		return m, nil
+	default:
+		if m.ocSendStep == 0 && !m.ocSendAll {
+			var cmd tea.Cmd
+			m.ocSendAmtInput, cmd =
+				m.ocSendAmtInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		if m.ocSendStep == 2 {
+			var cmd tea.Cmd
+			m.ocCustomFeeInput, cmd =
+				m.ocCustomFeeInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleOCSendConfirmKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+		return m, nil
+	case "backspace":
+		m.subview = svOnChainSendAmount
+		m.onChainSendError = ""
+		return m, nil
+	case "y":
+		m.onChainSendError = ""
+		m.subview = svOnChainSendBroadcast
+		return m, sendCoinsCmd(
+			m.lndClient,
+			m.ocSendAddrVal,
+			m.ocSendAmtVal,
+			m.ocSendFeeRate,
+			m.ocSendAll)
+	}
+	return m, nil
+}
+
+func (m *Model) resetOnChainSendState() {
+	m.ocSendAddrInput = newOnChainAddrInput()
+	m.ocSendAmtInput = newOnChainAmtInput()
+	m.ocCustomFeeInput = newCustomFeeInput()
+	m.ocSendAll = false
+	m.ocSendStep = 0
+	m.ocFeeTiers = [4]feeTier{}
+	m.ocSelectedTier = 0
+	m.ocConfirmFee = 0
+	m.ocSendAddrVal = ""
+	m.ocSendAmtVal = 0
+	m.ocSendFeeRate = 0
+	m.onChainSendError = ""
+}
+
+// ── Sidebar keys ─────────────────────────────────────────
+
+func (m Model) handleSidebarKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.nav.Cursor == 0 && m.hasDetailTabs() {
+			// At top section, jump to tab bar
+			m.focusTabBar()
+			m.tabCursorX = 0
+			if m.activeTab < 1 {
+				m.activeTab = 1
+			}
+			return m, nil
+		}
+		m.nav.MoveUp()
+		sec := m.nav.Activate()
+		m.btnIdx = 0
+		m.subview = svNone
+		m.activeTab = 0
+		m.tabFocused = false
+		m.tabCursorX = 0
+		return m.previewSection(sec)
+	case "down", "j":
+		m.nav.MoveDown()
+		sec := m.nav.Activate()
+		m.btnIdx = 0
+		m.subview = svNone
+		m.activeTab = 0
+		m.tabFocused = false
+		m.tabCursorX = 0
+		return m.previewSection(sec)
+	case "enter", "right", "l":
+		m.focusContent()
+		m.activeTab = 0
+		m.subview = svNone
+		m.btnIdx = 0
+		m.contentFocus = 0
+		m.ensureContentCursor()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) ensureContentCursor() {
+	sec := m.nav.ActiveSection()
+	switch sec {
+	case secChannels:
+		if m.status != nil &&
+			len(m.status.channels) > 0 {
+			if m.chanCursor >= len(m.status.channels) {
+				m.chanCursor = 0
+			}
+		}
+	case secWallet:
+	case secAddons:
+	case secSystem:
+	}
+}
+
+func (m Model) previewSection(
+	sec int,
+) (tea.Model, tea.Cmd) {
+	switch sec {
+	case secWallet:
+		m.rebuildTxTable()
+		return m, fetchPaymentHistoryCmd(m.lndClient)
+	case secChannels:
+		m.rebuildChannelTable()
+	}
+	return m, nil
+}
+
+// ── Tab bar keys ─────────────────────────────────────────
+
+func (m Model) handleTabBarKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	tabs := m.effectiveTabs()
+
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+
+	case "down", "j":
+		m.focusContent()
+		m.contentFocus = 0
+		if m.activeTab == 0 {
+			m.subview = svNone
+		}
+		m.ensureContentCursor()
+		return m, nil
+
+	case "left", "h":
+		if m.tabCursorX == 1 {
+			m.tabCursorX = 0
+			return m, nil
+		}
+		if m.activeTab > 1 {
+			m.activeTab--
+			m.tabCursorX = 0
+			if m.activeTab-1 < m.tabScrollOffset {
+				m.tabScrollOffset = m.activeTab - 1
+				if m.tabScrollOffset < 0 {
+					m.tabScrollOffset = 0
+				}
+			}
+			return m, nil
+		}
+		// Past first tab → sidebar
+		m.focusSidebar()
+		m.contentFocus = 0
+		m.activeTab = 0
+		m.tabScrollOffset = 0
+		return m, nil
+
+	case "right", "l":
+		if m.activeTab > 0 && m.activeTab < len(tabs) {
+			tab := tabs[m.activeTab]
+			if tab.Kind != tabMain && m.tabCursorX == 0 {
+				m.tabCursorX = 1
+				return m, nil
+			}
+		}
+		if m.activeTab < len(tabs)-1 {
+			m.activeTab++
+			m.tabCursorX = 0
+			return m, nil
+		}
+
+	case "enter":
+		if m.tabCursorX == 1 && m.activeTab > 0 {
+			return m.closeTab(m.activeTab)
+		}
+		m.focusContent()
+		m.contentFocus = 0
+		tab := tabs[m.activeTab]
+		if tab.Kind == tabMain {
+			m.subview = svNone
+		}
+		m.ensureContentCursor()
+		return m, nil
+
+	case "backspace":
+		m.focusSidebar()
+		m.activeTab = 0
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) closeTab(
+	tabIdx int,
+) (tea.Model, tea.Cmd) {
+	tabs := m.effectiveTabs()
+	if tabIdx <= 0 || tabIdx >= len(tabs) {
+		return m, nil
+	}
+
+	closingTab := tabs[tabIdx]
+
+	// Clean up flow state
+	switch closingTab.Kind {
+	case tabOpenChannel:
+		m.subview = svNone
+		m.chanOpenError = ""
+		m.chanOpenTxid = ""
+		m.chanOpenInFlight = false
+	case tabSend:
+		m.resetSendState()
+		m.subview = svNone
+	case tabReceive:
+		m.resetReceiveState()
+		m.subview = svNone
+	case tabOnChain:
+		m.resetOnChainSendState()
+		m.subview = svNone
+	case tabPairing:
+		m.subview = svNone
+	case tabSyncthing:
+		m.subview = svNone
+	case tabLndHub:
+		m.subview = svNone
+	}
+
+	var newTabs []openTab
+	for _, t := range m.tabs {
+		if t.Kind == closingTab.Kind &&
+			t.Index == closingTab.Index &&
+			t.Section == closingTab.Section {
+			continue
+		}
+		newTabs = append(newTabs, t)
+	}
+	m.tabs = newTabs
+
+	if m.activeTab >= tabIdx {
+		m.activeTab--
+		if m.activeTab < 0 {
+			m.activeTab = 0
+		}
+	}
+	m.tabCursorX = 0
+
+	// Return to section home
+	m.focusContent()
+	m.contentFocus = 0
+	m.activeTab = 0
+	m.ensureContentCursor()
+
+	if m.tabScrollOffset > len(m.effectiveTabs())-2 {
+		m.tabScrollOffset = len(m.effectiveTabs()) - 2
+		if m.tabScrollOffset < 0 {
+			m.tabScrollOffset = 0
+		}
+	}
+
+	return m, nil
+}
+
+// ── Confirm keys ─────────────────────────────────────────
 
 func (m Model) handleSvcConfirmKey(
 	key string,
@@ -1175,106 +1691,17 @@ func (m Model) handleGenericSubviewKey(
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "backspace", "esc":
+	case "backspace":
+		if m.urlReturnTo != svNone {
+			m.subview = m.urlReturnTo
+			m.urlReturnTo = svNone
+			return m, nil
+		}
 		m.subview = svNone
 		m.btnIdx = 0
 		return m, nil
 	}
 	return m, nil
-}
-
-func (m Model) handleLndHubCreateNameKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		m.subview = svLndHubManage
-		return m, nil
-	case "enter":
-		name := m.hubNameInput.Value()
-		if name != "" {
-			return m, createLndHubAccountCmd(
-				m.cfg.LndHubAdminToken)
-		}
-		return m, nil
-	default:
-		var cmd tea.Cmd
-		m.hubNameInput, cmd =
-			m.hubNameInput.Update(tea.Msg(msg))
-		return m, cmd
-	}
-}
-
-func (m Model) handleSyncthingPairInputKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		m.syncPairError = ""
-		m.syncPairSuccess = false
-		m.subview = svSyncthingDetail
-		return m, nil
-	case "enter":
-		if m.syncPairSuccess {
-			m.syncDeviceInput = newSyncthingIDInput()
-			m.syncPairSuccess = false
-			m.subview = svSyncthingDetail
-			return m, nil
-		}
-		deviceID := syncthingIDValue(m.syncDeviceInput)
-		if deviceID != "" {
-			parts := strings.Split(deviceID, "-")
-			if len(parts) != 8 {
-				m.syncPairError = "Invalid Device ID format. Expected 8 groups separated by hyphens."
-				return m, nil
-			}
-			for _, p := range parts {
-				if len(p) != 7 {
-					m.syncPairError = "Invalid Device ID format. Each group should be 7 characters."
-					return m, nil
-				}
-			}
-			m.syncPairError = ""
-			return m, pairSyncthingDeviceCmd(deviceID)
-		}
-		return m, nil
-	default:
-		var cmd tea.Cmd
-		m.syncDeviceInput, cmd =
-			m.syncDeviceInput.Update(tea.Msg(msg))
-		return m, cmd
-	}
-}
-
-// ── Subview classifiers ──────────────────────────────────
-
-func isChannelSubview(sv wSubview) bool {
-	switch sv {
-	case svChannelOpen, svChannelCustomPeer,
-		svChannelAmountSelect, svChannelOpenConfirm,
-		svChannelOpening, svChannelOpenResult,
-		svChannelFundWallet:
-		return true
-	}
-	return false
-}
-
-func isAddonSubview(sv wSubview) bool {
-	switch sv {
-	case svSyncthingDetail, svSyncthingDeviceDetail,
-		svSyncthingWebUI, svSyncthingDeviceQR,
-		svSyncthingPairInput,
-		svLndHubManage, svLndHubCreateAccount,
-		svLndHubCreateName,
-		svLndHubAccountDetail,
-		svLndHubDeactivateConfirm:
-		return true
-	}
-	return false
 }
 
 // ── Channel open entry ───────────────────────────────────
@@ -1286,48 +1713,41 @@ func (m Model) startChannelOpenCmd() (tea.Model, tea.Cmd) {
 	}
 	if m.status != nil && m.status.lndBalance == "0" {
 		m.subview = svChannelFundWallet
+		m.openFlowTab(tabOpenChannel,
+			"Open Channel", secChannels)
 		return m, getNewAddressCmd(m.lndClient)
 	}
 	m.chanPeerList = curatedPeers()
 	m.chanOpenPeerIdx = 0
 	m.chanOpenError = ""
 	m.subview = svChannelOpen
+	m.openFlowTab(tabOpenChannel,
+		"Open Channel", secChannels)
 	return m, nil
 }
 
-// openFlowTab opens a flow tab (Send, Receive, etc.)
-// or switches to it if already open. Focuses the tab
-// and enters content.
 func (m *Model) openFlowTab(
 	kind tabKind, label string, section int,
 ) {
-	// Check if already open
 	tabs := m.effectiveTabs()
 	for i, t := range tabs {
 		if t.Kind == kind && t.Section == section {
 			m.activeTab = i
-			m.tabFocused = false
-			m.contentFocused = true
+			m.focusContent()
 			m.contentFocus = 0
-			m.nav.Blur()
 			return
 		}
 	}
-	// Open new tab
 	m.tabs = append(m.tabs, openTab{
 		Kind:    kind,
 		Label:   label,
 		Section: section,
 	})
 	m.activeTab = len(m.effectiveTabs()) - 1
-	m.tabFocused = false
-	m.contentFocused = true
+	m.focusContent()
 	m.contentFocus = 0
-	m.nav.Blur()
 }
 
-// findFlowTab returns the tab index for the current
-// flow subview, or the last activeTab if not found.
 func (m Model) findFlowTab() int {
 	tabs := m.effectiveTabs()
 	var kind tabKind
@@ -1344,9 +1764,10 @@ func (m Model) findFlowTab() int {
 		kind = tabReceive
 	case m.subview == svWalletPairing:
 		kind = tabPairing
-	case m.subview == svOnChain ||
-		m.subview == svOnChainResult:
+	case isOnChainSubview(m.subview):
 		kind = tabOnChain
+	case isChannelSubview(m.subview):
+		kind = tabOpenChannel
 	case m.subview == svSyncthingDetail ||
 		m.subview == svSyncthingPairInput ||
 		m.subview == svSyncthingDeviceDetail ||
@@ -1368,6 +1789,29 @@ func (m Model) findFlowTab() int {
 		}
 	}
 	return m.activeTab
+}
+
+// ── Subview classifiers (still used by findFlowTab) ──────
+
+func isChannelSubview(sv wSubview) bool {
+	switch sv {
+	case svChannelOpen, svChannelCustomPeer,
+		svChannelAmountSelect, svChannelOpenConfirm,
+		svChannelOpening, svChannelOpenResult,
+		svChannelFundWallet:
+		return true
+	}
+	return false
+}
+
+func isOnChainSubview(sv wSubview) bool {
+	switch sv {
+	case svOnChain, svOnChainResult,
+		svOnChainSendAddr, svOnChainSendAmount,
+		svOnChainSendConfirm, svOnChainSendBroadcast:
+		return true
+	}
+	return false
 }
 
 // ── Shell commands ───────────────────────────────────────
@@ -1475,6 +1919,11 @@ func (m Model) handlePaste(
 		var cmd tea.Cmd
 		m.syncDeviceInput, cmd =
 			m.syncDeviceInput.Update(msg)
+		return m, cmd
+	case svOnChainSendAddr:
+		var cmd tea.Cmd
+		m.ocSendAddrInput, cmd =
+			m.ocSendAddrInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil

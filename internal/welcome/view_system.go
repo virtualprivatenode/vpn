@@ -9,12 +9,12 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
-// systemOverview shows all system info on one page + update button
 func (m Model) systemOverview(w, h int) string {
 	var lines []string
 
 	// Services
-	lines = append(lines, theme.Header.Render(" Services"))
+	lines = append(lines,
+		theme.Header.Render(" Services"))
 	names := serviceNames(m.cfg)
 	for i, name := range names {
 		dot := theme.RedDot.Render("●")
@@ -29,47 +29,57 @@ func (m Model) systemOverview(w, h int) string {
 			prefix = "▸ "
 			style = theme.Action
 		}
-		lines = append(lines, prefix+dot+" "+style.Render(name))
+		lines = append(lines,
+			prefix+dot+" "+style.Render(name))
 	}
 
 	if m.svcConfirm != "" {
 		svc := m.svcName(m.svcCursor)
 		lines = append(lines, "")
 		lines = append(lines, " "+theme.Warning.Render(
-			fmt.Sprintf("%s %s? [y/n]", m.svcConfirm, svc)))
+			fmt.Sprintf("%s %s? [y/n]",
+				m.svcConfirm, svc)))
 	}
 
 	lines = append(lines, "")
 
 	// Stats
-	lines = append(lines, theme.Header.Render(" System"))
+	lines = append(lines,
+		theme.Header.Render(" System"))
 	if m.status != nil {
 		lines = append(lines,
 			" "+theme.Label.Render("Disk: ")+
-				theme.Value.Render(fmt.Sprintf("%s / %s (%s)",
-					m.status.diskUsed, m.status.diskTotal,
-					m.status.diskPct)))
+				theme.Value.Render(
+					fmt.Sprintf("%s / %s (%s)",
+						m.status.diskUsed,
+						m.status.diskTotal,
+						m.status.diskPct)))
 		lines = append(lines,
 			" "+theme.Label.Render("RAM:  ")+
-				theme.Value.Render(fmt.Sprintf("%s / %s (%s)",
-					m.status.ramUsed, m.status.ramTotal,
-					m.status.ramPct)))
+				theme.Value.Render(
+					fmt.Sprintf("%s / %s (%s)",
+						m.status.ramUsed,
+						m.status.ramTotal,
+						m.status.ramPct)))
 		lines = append(lines,
 			" "+theme.Label.Render("BTC:  ")+
 				theme.Value.Render(m.status.btcSize))
 		if m.cfg.HasLND() {
 			lines = append(lines,
 				" "+theme.Label.Render("LND:  ")+
-					theme.Value.Render(m.status.lndSize))
+					theme.Value.Render(
+						m.status.lndSize))
 		}
 	} else {
-		lines = append(lines, " "+theme.Dim.Render("Loading..."))
+		lines = append(lines,
+			" "+theme.Dim.Render("Loading..."))
 	}
 
 	if m.status != nil && m.status.rebootRequired {
 		lines = append(lines, "")
 		lines = append(lines,
-			" "+theme.Warning.Render("Reboot required"))
+			" "+theme.Warning.Render(
+				"Reboot required"))
 	}
 
 	if m.sysConfirm != "" {
@@ -81,11 +91,14 @@ func (m Model) systemOverview(w, h int) string {
 	lines = append(lines, "")
 
 	// Bitcoin
-	lines = append(lines, theme.Bitcoin.Render(" ₿ Bitcoin"))
+	lines = append(lines,
+		theme.Bitcoin.Render(" ₿ Bitcoin"))
 	if m.status == nil {
-		lines = append(lines, " "+theme.Dim.Render("Loading..."))
+		lines = append(lines,
+			" "+theme.Dim.Render("Loading..."))
 	} else if !m.status.btcResponding {
-		lines = append(lines, " "+theme.Warn.Render("Not responding"))
+		lines = append(lines,
+			" "+theme.Warn.Render("Not responding"))
 	} else {
 		if m.status.btcSynced {
 			lines = append(lines,
@@ -98,13 +111,16 @@ func (m Model) systemOverview(w, h int) string {
 		}
 		lines = append(lines,
 			" "+theme.Label.Render("Height: ")+
-				theme.Value.Render(fmt.Sprintf("%d / %d",
-					m.status.btcBlocks, m.status.btcHeaders)))
+				theme.Value.Render(
+					fmt.Sprintf("%d / %d",
+						m.status.btcBlocks,
+						m.status.btcHeaders)))
 		if m.status.btcProgress > 0 {
 			lines = append(lines,
 				" "+theme.Label.Render("Progress: ")+
 					theme.Value.Render(
-						bitcoin.FormatProgress(m.status.btcProgress)))
+						bitcoin.FormatProgress(
+							m.status.btcProgress)))
 		}
 		lines = append(lines,
 			" "+theme.Label.Render("Network: ")+
@@ -116,13 +132,15 @@ func (m Model) systemOverview(w, h int) string {
 	// Software + buttons
 	lines = append(lines,
 		" "+theme.Label.Render("VPN v")+
-			theme.Value.Render(installer.GetVersion()))
+			theme.Value.Render(
+				installer.GetVersion()))
 
 	if m.latestVersion != "" &&
 		m.latestVersion != installer.GetVersion() {
 		lines = append(lines,
 			" "+theme.Label.Render("Latest: ")+
-				theme.Action.Render("v"+m.latestVersion))
+				theme.Action.Render(
+					"v"+m.latestVersion))
 	}
 
 	if m.updateConfirm {
@@ -138,34 +156,30 @@ func (m Model) systemOverview(w, h int) string {
 }
 
 func (m Model) systemButtons() string {
-	btnUpdate := " Update Software "
-	btnPkgs := " Update Packages "
-	btnReboot := " Reboot "
-
 	maxBtn := 1
 	if m.status != nil && m.status.rebootRequired {
 		maxBtn = 2
 	}
 
-	switch m.btnIdx {
-	case 0:
-		btnUpdate = theme.ActiveTab.Render(btnUpdate)
-		btnPkgs = theme.InactiveTab.Render(btnPkgs)
-		btnReboot = theme.InactiveTab.Render(btnReboot)
-	case 1:
-		btnUpdate = theme.InactiveTab.Render(btnUpdate)
-		btnPkgs = theme.ActiveTab.Render(btnPkgs)
-		btnReboot = theme.InactiveTab.Render(btnReboot)
-	case 2:
-		btnUpdate = theme.InactiveTab.Render(btnUpdate)
-		btnPkgs = theme.InactiveTab.Render(btnPkgs)
-		btnReboot = theme.ActiveTab.Render(btnReboot)
+	labels := []string{
+		"Update Software", "Update Packages",
+	}
+	if m.status != nil && m.status.rebootRequired {
+		labels = append(labels, "Reboot")
+	}
+
+	var parts []string
+	for i, label := range labels {
+		isActive := m.contentFocused && m.btnIdx == i
+		if isActive {
+			parts = append(parts,
+				"▸ "+theme.BtnFocused.Render(label))
+		} else {
+			parts = append(parts,
+				"  "+theme.BtnNormal.Render(label))
+		}
 	}
 
 	_ = maxBtn
-	result := " " + btnUpdate + "  " + btnPkgs
-	if m.status != nil && m.status.rebootRequired {
-		result += "  " + btnReboot
-	}
-	return result
+	return " " + strings.Join(parts, "  ")
 }

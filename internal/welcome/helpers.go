@@ -1,9 +1,9 @@
-// internal/welcome/helpers.go
-
 package welcome
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -33,10 +33,8 @@ func readMacaroonHex(cfg *config.AppConfig) string {
 	}
 	path := paths.LNDMacaroon(network)
 
-	// Try direct read first
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// Fallback: sudo read (safe for binary files, no shell)
 		data, err = system.SudoReadFile(path)
 		if err != nil {
 			logger.Status("Warning: failed to read macaroon: %v", err)
@@ -56,4 +54,102 @@ func getSyncthingVersion() string {
 		return fields[1]
 	}
 	return "unknown"
+}
+
+// ── Fee estimation via bitcoin-cli ───────────────────────
+
+type smartFeeResponse struct {
+	FeeRate float64  `json:"feerate"`
+	Errors  []string `json:"errors"`
+	Blocks  int      `json:"blocks"`
+}
+
+func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
+	targets := [4]int{1, 3, 6, 25}
+	labels := [4]string{"~1 blk", "~3 blk", "~6 blk", "~25 blk"}
+	var tiers [4]feeTier
+
+	cliName := "bitcoin-cli"
+	if cfg.Network == "testnet" {
+		cliName = "bitcoin-cli"
+	}
+
+	for i, target := range targets {
+		tiers[i] = feeTier{
+			Target: target,
+			Label:  labels[i],
+		}
+
+		output, err := system.RunContext(
+			5*time.Second,
+			"sudo", "-u", "bitcoin",
+			cliName,
+			fmt.Sprintf("-conf=%s", paths.BitcoinConf),
+			"estimatesmartfee",
+			fmt.Sprintf("%d", target),
+		)
+		if err != nil {
+			continue
+		}
+
+		var resp smartFeeResponse
+		if err := json.Unmarshal(
+			[]byte(strings.TrimSpace(output)),
+			&resp,
+		); err != nil {
+			continue
+		}
+
+		if resp.FeeRate > 0 && len(resp.Errors) == 0 {
+			// bitcoin-cli returns BTC/kB
+			// Convert to sat/vB:
+			// BTC/kB × 100,000,000 / 1000 = sat/vB
+			satPerVB := resp.FeeRate * 100000
+			if satPerVB < 1 {
+				satPerVB = 1
+			}
+			tiers[i].SatPerVB = satPerVB
+		}
+	}
+
+	// Check if we got at least one valid tier
+	anyValid := false
+	for _, t := range tiers {
+		if t.SatPerVB > 0 {
+			anyValid = true
+			break
+		}
+	}
+	if !anyValid {
+		return feeTiersMsg{
+			err: fmt.Errorf("no fee estimates available"),
+		}
+	}
+
+	return feeTiersMsg{tiers: tiers}
+}
+
+// isValidOnChainAddr does a basic prefix check.
+// LND will do full validation on send.
+func isValidOnChainAddr(addr string, network string) bool {
+	if len(addr) < 14 {
+		return false
+	}
+	switch network {
+	case "mainnet":
+		return strings.HasPrefix(addr, "bc1") ||
+			strings.HasPrefix(addr, "1") ||
+			strings.HasPrefix(addr, "3")
+	case "testnet":
+		return strings.HasPrefix(addr, "tb1") ||
+			strings.HasPrefix(addr, "2") ||
+			strings.HasPrefix(addr, "m") ||
+			strings.HasPrefix(addr, "n")
+	case "regtest":
+		return strings.HasPrefix(addr, "bcrt1")
+	case "signet":
+		return strings.HasPrefix(addr, "tb1") ||
+			strings.HasPrefix(addr, "sb1")
+	}
+	return true // unknown network, let LND validate
 }

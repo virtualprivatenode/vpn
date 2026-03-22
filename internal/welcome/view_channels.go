@@ -10,21 +10,6 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
-// ── Button styles ────────────────────────────────────────
-
-var (
-	btnNormal = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("0")).
-			Background(lipgloss.Color("15")).
-			Padding(0, 1)
-
-	btnFocused = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
-			Background(lipgloss.Color("15")).
-			Bold(true).
-			Padding(0, 1)
-)
-
 // ── Channels overview ────────────────────────────────────
 
 func (m Model) channelsOverview(w, h int) string {
@@ -50,8 +35,6 @@ func (m Model) channelsOverview(w, h int) string {
 		return theme.Dim.Render(" Waiting for LND...")
 	}
 
-	var lines []string
-
 	// Calculate totals
 	var totalCap, totalLocal, totalRemote int64
 	activeCount, inactiveCount := 0, 0
@@ -73,48 +56,28 @@ func (m Model) channelsOverview(w, h int) string {
 		onchain = m.status.lndBalance
 	}
 
-	// ── Layout math ──────────────────────────────
-	chanCount := len(m.status.channels)
-	headerRows := 8
-	chanRows := chanCount * 2
-	if chanCount > 0 {
-		chanRows--
-	}
-	buttonRows := 2
-	usedRows := headerRows + 1 + chanRows + buttonRows
-	freeRows := h - usedRows
-	if freeRows < 0 {
-		freeRows = 0
-	}
-	topPad := 1
-	midGap := freeRows / 3
-	if midGap < 1 {
-		midGap = 1
-	}
-	botGap := freeRows - topPad - midGap
-	if botGap < 0 {
-		botGap = 0
-	}
+	// Is content actually focused (not tab bar,
+	// not sidebar)
+	isFocused := m.contentFocused && !m.tabFocused
 
-	for i := 0; i < topPad; i++ {
-		lines = append(lines, "")
-	}
+	// ── Fixed regions ────────────────────────────
+	var headerLines []string
+	headerLines = append(headerLines, "")
 
-	// ── Pubkey and P2P (full width, no box) ──────
+	// Pubkey and P2P
 	if m.status.lndPubkey != "" {
 		pk := truncatePubkey(m.status.lndPubkey, w-14)
-		lines = append(lines,
+		headerLines = append(headerLines,
 			" "+theme.Label.Render("Pubkey:   ")+
 				theme.Mono.Render(pk))
 	}
-	lines = append(lines,
+	headerLines = append(headerLines,
 		" "+theme.Label.Render("P2P:      ")+
 			theme.Value.Render(
 				p2pModeLabel(m.cfg.P2PMode)))
-	lines = append(lines, "")
+	headerLines = append(headerLines, "")
 
-	// ── Liquidity box: right-aligned, wide ───────
-	// Box fills from column ~14 to right edge
+	// ── Liquidity box ────────────────────────────
 	localPct := 0
 	if totalCap > 0 {
 		localPct = int(
@@ -123,7 +86,7 @@ func (m Model) channelsOverview(w, h int) string {
 	}
 	remotePct := 100 - localPct
 
-	labelW := 12 // "On-chain: " etc
+	labelW := 12
 	leftColW := labelW + 18
 	boxW := w - leftColW - 3
 	if boxW < 22 {
@@ -164,7 +127,6 @@ func (m Model) channelsOverview(w, h int) string {
 			activeCount, inactiveCount)
 	}
 
-	// Build box lines
 	boxTop := "┌" + strings.Repeat("─", boxW-2) + "┐"
 	boxLabel := "│" + centerPad(chLabel, boxW-2) + "│"
 	boxBar := "│" + barLine +
@@ -189,7 +151,6 @@ func (m Model) channelsOverview(w, h int) string {
 		boxPct, boxCap, boxBot,
 	}
 
-	// Left column: Outbound, Inbound, On-chain
 	var leftLines []string
 	leftLines = append(leftLines,
 		" "+theme.Label.Render("Outbound: ")+
@@ -205,50 +166,67 @@ func (m Model) channelsOverview(w, h int) string {
 				formatSats(parseBalance(onchain))+
 					" sats"))
 
-	// Merge: left lines align with box rows
-	maxH := len(boxLines)
-	if len(leftLines) > maxH {
-		maxH = len(leftLines)
+	maxBoxH := len(boxLines)
+	if len(leftLines) > maxBoxH {
+		maxBoxH = len(leftLines)
 	}
-	for len(leftLines) < maxH {
+	for len(leftLines) < maxBoxH {
 		leftLines = append(leftLines, "")
 	}
-	for len(boxLines) < maxH {
+	for len(boxLines) < maxBoxH {
 		boxLines = append(boxLines, "")
 	}
 
-	for i := 0; i < maxH; i++ {
+	for i := 0; i < maxBoxH; i++ {
 		lft := leftLines[i]
 		lftW := lipgloss.Width(lft)
 		if lftW < leftColW {
 			lft += strings.Repeat(" ", leftColW-lftW)
 		}
-		lines = append(lines, lft+"  "+boxLines[i])
+		headerLines = append(headerLines,
+			lft+"  "+boxLines[i])
 	}
 
-	// Mid gap
-	for i := 0; i < midGap; i++ {
-		lines = append(lines, "")
+	headerH := len(headerLines)
+	buttonH := 1
+	buttonGap := 1
+	gapAboveChans := 1
+	gapBelowChans := 1
+
+	// Available rows for channel bars
+	chanWindowH := h - headerH - buttonH -
+		buttonGap - gapAboveChans - gapBelowChans
+	if chanWindowH < 1 {
+		chanWindowH = 1
 	}
 
-	// ── Channel bars (single line) ───────────────
-	rightEdge := w - 1
-	nameW := 20
-	valsW := 14
-	barW := rightEdge - nameW - 4 - valsW
+	// ── Channel bars ─────────────────────────────
+	chanCount := len(m.status.channels)
+	nameW := 17
+	// Use fixed bar width to avoid overflow
+	barW := w - nameW - 22
 	if barW < 8 {
 		barW = 8
 	}
 
+	var chanLines []string
+	var chanLineToIdx []int
+
 	if chanCount == 0 {
-		lines = append(lines, theme.Dim.Render(
-			" No channels yet."))
+		chanLines = append(chanLines,
+			theme.Dim.Render(" No channels yet."))
+		chanLineToIdx = append(chanLineToIdx, -1)
 	} else {
 		for i, ch := range m.status.channels {
-			isSelected := m.chanCursor == i &&
-				m.contentFocused &&
-				m.contentFocus == 0 &&
-				!m.tabFocused
+			if i > 0 {
+				chanLines = append(chanLines, "")
+				chanLineToIdx = append(
+					chanLineToIdx, -1)
+			}
+
+			isSelected := isFocused &&
+				m.chanCursor == i &&
+				m.contentFocus == 0
 
 			name := ch.PeerAlias
 			if name == "" {
@@ -293,7 +271,8 @@ func (m Model) channelsOverview(w, h int) string {
 			lBar := lipgloss.NewStyle().
 				Foreground(
 					lipgloss.Color(localColor)).
-				Render(strings.Repeat("█", localFill))
+				Render(
+					strings.Repeat("█", localFill))
 			rBar := lipgloss.NewStyle().
 				Foreground(
 					lipgloss.Color(remoteColor)).
@@ -304,7 +283,7 @@ func (m Model) channelsOverview(w, h int) string {
 			vals := fmt.Sprintf("%s / %s",
 				formatSatsCompact(ch.LocalBalance),
 				formatSatsCompact(ch.RemoteBalance))
-			valsPad := fmt.Sprintf("%*s", valsW, vals)
+			valsPad := pad(vals, 14)
 
 			marker := " "
 			nameStyle := theme.Value
@@ -312,55 +291,134 @@ func (m Model) channelsOverview(w, h int) string {
 				marker = "▸"
 				nameStyle = navActiveStyle
 			}
-			namePad := fmt.Sprintf("%-*s", nameW, name)
+			namePad := pad(name, nameW)
 
-			line := fmt.Sprintf("%s%s %s %s %s",
-				marker, dot,
-				nameStyle.Render(namePad),
-				barStr,
-				theme.Dim.Render(valsPad))
+			line := marker + " " + dot + " " +
+				nameStyle.Render(namePad) + " " +
+				barStr + " " +
+				theme.Dim.Render(valsPad)
 
-			lines = append(lines, line)
-
-			if i < chanCount-1 {
-				lines = append(lines, "")
-			}
+			chanLines = append(chanLines, line)
+			chanLineToIdx = append(chanLineToIdx, i)
 		}
 
 		if m.status.pendingOpen > 0 {
-			lines = append(lines, "")
-			lines = append(lines,
+			chanLines = append(chanLines, "")
+			chanLineToIdx = append(chanLineToIdx, -1)
+			chanLines = append(chanLines,
 				" "+theme.Dim.Render(
 					fmt.Sprintf("%d pending",
 						m.status.pendingOpen)))
+			chanLineToIdx = append(chanLineToIdx, -1)
 		}
 	}
 
-	// Bottom gap
-	for i := 0; i < botGap; i++ {
+	// Scroll window
+	totalChanLines := len(chanLines)
+	needsScroll := totalChanLines > chanWindowH
+
+	cursorLineIdx := 0
+	for li, ci := range chanLineToIdx {
+		if ci == m.chanCursor {
+			cursorLineIdx = li
+			break
+		}
+	}
+
+	scrollOffset := m.chanScrollOffset
+	if needsScroll {
+		if cursorLineIdx < scrollOffset {
+			scrollOffset = cursorLineIdx
+		}
+		if cursorLineIdx >= scrollOffset+chanWindowH {
+			scrollOffset = cursorLineIdx -
+				chanWindowH + 1
+		}
+		maxOffset := totalChanLines - chanWindowH
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+		if scrollOffset > maxOffset {
+			scrollOffset = maxOffset
+		}
+		if scrollOffset < 0 {
+			scrollOffset = 0
+		}
+	} else {
+		scrollOffset = 0
+	}
+
+	visEnd := scrollOffset + chanWindowH
+	if visEnd > totalChanLines {
+		visEnd = totalChanLines
+	}
+	visibleChanLines := chanLines[scrollOffset:visEnd]
+
+	// ── Assemble output ──────────────────────────
+	var lines []string
+
+	lines = append(lines, headerLines...)
+
+	for i := 0; i < gapAboveChans; i++ {
 		lines = append(lines, "")
 	}
 
-	// ── Open Channel button ──────────────────────
+	if needsScroll && scrollOffset > 0 {
+		indicator := strings.Repeat(" ", w-4) +
+			theme.Dim.Render(" ▲")
+		lines = append(lines, indicator)
+		if len(visibleChanLines) > 1 {
+			visibleChanLines =
+				visibleChanLines[1:]
+		}
+	}
+
+	lines = append(lines, visibleChanLines...)
+
+	rendered := len(visibleChanLines)
+	if needsScroll && scrollOffset > 0 {
+		rendered++
+	}
+	for rendered < chanWindowH {
+		lines = append(lines, "")
+		rendered++
+	}
+
+	if needsScroll && visEnd < totalChanLines {
+		indicator := strings.Repeat(" ", w-4) +
+			theme.Dim.Render(" ▼")
+		if len(lines) > 0 {
+			lines[len(lines)-1] = indicator
+		}
+	}
+
+	for i := 0; i < gapBelowChans; i++ {
+		lines = append(lines, "")
+	}
+
+	// ── Open Channel button (anchored bottom-right)
 	label := "Open Channel"
-	isOnButton := m.contentFocused &&
-		m.contentFocus == 1 &&
-		!m.tabFocused
+	isOnButton := isFocused && m.contentFocus == 1
 
 	var btnStr string
 	if isOnButton {
-		btnStr = "▸ " + btnFocused.Render(label)
+		btnStr = "▸ " + theme.BtnFocused.Render(label)
 	} else {
-		btnStr = "  " + btnNormal.Render(label)
+		btnStr = "  " + theme.BtnNormal.Render(label)
 	}
 
 	btnVis := lipgloss.Width(btnStr)
-	btnPadding := rightEdge - btnVis
+	btnPadding := w - 1 - btnVis
 	if btnPadding < 0 {
 		btnPadding = 0
 	}
 	lines = append(lines,
 		strings.Repeat(" ", btnPadding)+btnStr)
+
+	// Gap after button (before footer)
+	for i := 0; i < buttonGap; i++ {
+		lines = append(lines, "")
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -515,10 +573,12 @@ func (m Model) channelOpenPane(w int) string {
 		" "+theme.Header.Render("Select a peer:"))
 	lines = append(lines, "")
 
+	isFocused := m.contentFocused && !m.tabFocused
+
 	for i, peer := range m.chanPeerList {
 		prefix := " "
 		style := theme.Value
-		if m.chanOpenPeerIdx == i {
+		if isFocused && m.chanOpenPeerIdx == i {
 			prefix = "▸"
 			style = theme.Action
 		}
@@ -540,7 +600,8 @@ func (m Model) channelOpenPane(w int) string {
 
 	prefix := " "
 	style := theme.Value
-	if m.chanOpenPeerIdx == len(m.chanPeerList) {
+	if isFocused &&
+		m.chanOpenPeerIdx == len(m.chanPeerList) {
 		prefix = "▸"
 		style = theme.Action
 	}
@@ -601,10 +662,12 @@ func (m Model) channelAmountPane(w int) string {
 		" "+theme.Header.Render("Channel size:"))
 	lines = append(lines, "")
 
+	isFocused := m.contentFocused && !m.tabFocused
+
 	for i, amt := range amountPresets {
 		prefix := " "
 		style := theme.Value
-		if m.chanAmountPreset == i {
+		if isFocused && m.chanAmountPreset == i {
 			prefix = "▸"
 			style = theme.Action
 		}
@@ -673,7 +736,8 @@ func (m Model) channelConfirmPane(w int) string {
 			" sats?"))
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
-		"y confirm  p toggle private  esc cancel"))
+		"y confirm  p toggle private  "+
+			"backspace cancel"))
 
 	if m.chanOpenError != "" {
 		lines = append(lines, "")
@@ -780,7 +844,7 @@ func (m Model) channelFundPane(w int) string {
 		"then return to open a channel."))
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
-		"esc to go back"))
+		"backspace to go back"))
 
 	return strings.Join(lines, "\n")
 }

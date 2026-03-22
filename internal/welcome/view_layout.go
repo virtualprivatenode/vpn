@@ -54,10 +54,19 @@ func (m Model) viewMain() string {
 		sidebarW = insideW - 1 - contentW
 	}
 
+	// Tab bar area is ALWAYS present: 2 rows
+	// (1 for tab content/blank + 1 for separator)
+	tabBarRows := 2
+
+	hasTabContent := m.hasDetailTabs()
+
+	// Rows available for the sidebar+content region
+	bodyH := insideH - tabBarRows
+
 	// ── Sidebar block heights ─────────────────────
 	numSections := 4
-	sepRows := numSections - 1 // 3 horizontal separators
-	sideUsable := insideH - sepRows
+	sepRows := numSections - 1
+	sideUsable := bodyH - sepRows
 
 	if sideUsable < numSections {
 		sideUsable = numSections
@@ -76,25 +85,24 @@ func (m Model) viewMain() string {
 
 	blocks := m.nav.BlockRows(sidebarW, blockHeights)
 
-	// ── Tab bar ───────────────────────────────────
-	// Only detail tabs (channel detail, payment detail)
-	// appear here. The section name does NOT appear.
-	tabBar := m.renderTabBar(contentW)
-	tabBarW := lipgloss.Width(tabBar)
-	if tabBarW < contentW {
-		tabBar += strings.Repeat(" ", contentW-tabBarW)
-	} else if tabBarW > contentW {
-		tabBar = tabBar[:contentW]
+	// ── Tab bar (full width) ──────────────────────
+	var tabBar string
+	if hasTabContent {
+		tabBar = m.renderTabBar(insideW)
+		tabBarVW := lipgloss.Width(tabBar)
+		if tabBarVW < insideW {
+			tabBar += strings.Repeat(" ",
+				insideW-tabBarVW)
+		} else if tabBarVW > insideW {
+			tabBar = tabBar[:insideW]
+		}
+	} else {
+		// Empty tab bar row
+		tabBar = strings.Repeat(" ", insideW)
 	}
-
-	hasTabBar := m.hasDetailTabs()
 
 	// ── Content body ──────────────────────────────
-	footerH := 1
-	contentBodyH := insideH - footerH
-	if hasTabBar {
-		contentBodyH -= 2 // tab row + separator
-	}
+	contentBodyH := bodyH
 
 	rawContent := m.renderActiveTabContent(
 		contentW, contentBodyH)
@@ -108,38 +116,31 @@ func (m Model) viewMain() string {
 		contentLines = contentLines[:contentBodyH]
 	}
 
-	// Footer
-	footerText := m.viewFooter()
-	fr := []rune(footerText)
-	maxFoot := contentW - 4
-	if len(fr) > maxFoot {
-		footerText = string(fr[:maxFoot])
-	}
-
-	footerBubble := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
-		Background(lipgloss.Color("236")).
-		Padding(0, 1).
-		Render(footerText)
-
 	border := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245"))
 
 	// ── Build frame ───────────────────────────────
 	var output []string
 
-	// Top border: ╭──sidebar──┬──content──╮
+	// Top border: always full width
 	output = append(output, border.Render(
-		"╭"+strings.Repeat("─", sidebarW)+
-			"┬"+strings.Repeat("─", contentW)+"╮"))
+		"╭"+strings.Repeat("─", insideW)+"╮"))
 
-	// We iterate through all insideH rows, placing
-	// sidebar blocks with separators and content rows
-	// side by side.
+	// Tab bar row (always present)
+	output = append(output,
+		border.Render("│")+
+			tabBar+
+			border.Render("│"))
+
+	// Separator: ├──sidebar──┬──content──┤
+	output = append(output, border.Render(
+		"├"+strings.Repeat("─", sidebarW)+
+			"┬"+strings.Repeat("─", contentW)+
+			"┤"))
 
 	// Build sidebar rows (blocks + separators)
-	var sideRows []string // the cell content
-	var sideSeps []bool   // true if this row is a sep
+	var sideRows []string
+	var sideSeps []bool
 	for si := 0; si < numSections; si++ {
 		for _, row := range blocks[si] {
 			sideRows = append(sideRows, row)
@@ -152,95 +153,78 @@ func (m Model) viewMain() string {
 		}
 	}
 
-	// Build content rows (tab bar + body + footer)
+	// Build content rows
 	var contentRows []string
-	var contentSeps []bool // true if row is a separator
-
-	if hasTabBar {
-		contentRows = append(contentRows, tabBar)
-		contentSeps = append(contentSeps, false)
-		contentRows = append(contentRows,
-			strings.Repeat("─", contentW))
-		contentSeps = append(contentSeps, true)
-	}
 
 	for _, line := range contentLines {
 		contentRows = append(contentRows,
 			clampLine(line, contentW))
-		contentSeps = append(contentSeps, false)
 	}
 
-	// Footer row
-	contentRows = append(contentRows,
-		centerInWidth(footerBubble, contentW))
-	contentSeps = append(contentSeps, false)
-
-	// Ensure both sides are insideH rows
-	for len(sideRows) < insideH {
+	// Ensure both sides are bodyH rows
+	for len(sideRows) < bodyH {
 		sideRows = append(sideRows,
 			strings.Repeat(" ", sidebarW))
 		sideSeps = append(sideSeps, false)
 	}
-	for len(contentRows) < insideH {
+	for len(contentRows) < bodyH {
 		contentRows = append(contentRows,
 			strings.Repeat(" ", contentW))
-		contentSeps = append(contentSeps, false)
 	}
 
-	// Render each row
-	for r := 0; r < insideH; r++ {
+	// Render each body row
+	for r := 0; r < bodyH; r++ {
+		isSideSep := r < len(sideSeps) && sideSeps[r]
+
 		leftEdge := "│"
 		middle := "│"
 		rightEdge := "│"
 
-		isSideSep := r < len(sideSeps) && sideSeps[r]
-		isContentSep := r < len(contentSeps) &&
-			contentSeps[r]
-
-		if isSideSep && isContentSep {
-			// Both are separators — full cross
-			leftEdge = "├"
-			middle = "┼"
-			rightEdge = "┤"
-		} else if isSideSep {
-			// Sidebar separator, content normal
+		if isSideSep {
 			leftEdge = "├"
 			middle = "┤"
-			rightEdge = "│"
-		} else if isContentSep {
-			// Content separator, sidebar normal
-			leftEdge = "│"
-			middle = "├"
-			rightEdge = "┤"
 		}
 
 		sideCell := sideRows[r]
 		contentCell := contentRows[r]
 
-		output = append(output,
-			border.Render(leftEdge)+
-				sideCell+
-				border.Render(middle)+
-				contentCell+
-				border.Render(rightEdge))
+		if isSideSep {
+			output = append(output,
+				border.Render(leftEdge)+
+					border.Render(sideCell)+
+					border.Render(middle)+
+					contentCell+
+					border.Render(rightEdge))
+		} else {
+			output = append(output,
+				border.Render(leftEdge)+
+					sideCell+
+					border.Render(middle)+
+					contentCell+
+					border.Render(rightEdge))
+		}
 	}
 
-	// Bottom border: ╰──sidebar──┴──content──╯
+	// Bottom border
 	output = append(output, border.Render(
 		"╰"+strings.Repeat("─", sidebarW)+
 			"┴"+strings.Repeat("─", contentW)+"╯"))
 
 	frame := strings.Join(output, "\n")
 
+	// ── Help bar (rendered below frame) ──────────
+	helpStr := m.renderHelpBar(totalW)
+	helpLine := centerInWidth(helpStr, totalW)
+
+	fullContent := frame + "\n" + helpLine
+
 	return lipgloss.Place(
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
-		frame,
+		fullContent,
 	)
 }
 
-// hasDetailTabs returns true if there are open detail tabs
-// (channel detail, payment detail) for the current section.
 func (m Model) hasDetailTabs() bool {
 	sec := m.nav.ActiveSection()
 	for _, t := range m.tabs {
@@ -251,8 +235,6 @@ func (m Model) hasDetailTabs() bool {
 	return false
 }
 
-// renderTabBar draws only detail tabs with scroll support.
-// Empty string if no detail tabs.
 func (m Model) renderTabBar(maxW int) string {
 	tabs := m.effectiveTabs()
 
@@ -260,7 +242,6 @@ func (m Model) renderTabBar(maxW int) string {
 		return ""
 	}
 
-	// Build all tab strings first to measure
 	type tabRender struct {
 		str   string
 		width int
@@ -294,11 +275,9 @@ func (m Model) renderTabBar(maxW int) string {
 		})
 	}
 
-	// Calculate visible range with scroll
-	arrowW := 2 // "◀ " or " ▶"
+	arrowW := 2
 	availW := maxW
 
-	// Determine scroll offset bounds
 	offset := m.tabScrollOffset
 	if offset < 0 {
 		offset = 0
@@ -310,8 +289,7 @@ func (m Model) renderTabBar(maxW int) string {
 		offset = 0
 	}
 
-	// Ensure active tab is visible
-	activeIdx := m.activeTab - 1 // index into allTabs
+	activeIdx := m.activeTab - 1
 	if activeIdx < 0 {
 		activeIdx = 0
 	}
@@ -319,7 +297,6 @@ func (m Model) renderTabBar(maxW int) string {
 		offset = activeIdx
 	}
 
-	// Find how many tabs fit from offset
 	needLeftArrow := offset > 0
 	usedW := 0
 	if needLeftArrow {
@@ -340,21 +317,19 @@ func (m Model) renderTabBar(maxW int) string {
 		endIdx++
 	}
 
-	// Ensure active tab is in visible range
 	if activeIdx >= endIdx {
-		// Shift offset forward
 		endIdx = activeIdx + 1
 		usedW = 0
 		offset = endIdx - 1
 		for offset > 0 {
 			w := allTabs[offset-1].width
-			if usedW+w+allTabs[offset].width > availW-arrowW*2 {
+			if usedW+w+allTabs[offset].width >
+				availW-arrowW*2 {
 				break
 			}
 			usedW += allTabs[offset].width
 			offset--
 		}
-		// Recalculate
 		needLeftArrow = offset > 0
 		usedW = 0
 		if needLeftArrow {
@@ -377,7 +352,6 @@ func (m Model) renderTabBar(maxW int) string {
 
 	needRightArrow := endIdx < len(allTabs)
 
-	// Build output
 	var parts []string
 	if needLeftArrow {
 		parts = append(parts,
@@ -482,6 +456,15 @@ func (m Model) renderActiveTabContent(
 		return m.pairingContent(w, h)
 	case tabOnChain:
 		return m.walletOnChainContent(w)
+	case tabOnChainTx:
+		if tab.Index < len(m.onChainTxs) {
+			return m.onChainTxDetailPane(
+				m.onChainTxs[tab.Index], w)
+		}
+		return theme.Dim.Render(
+			" Transaction not found")
+	case tabOpenChannel:
+		return m.channelOpenContent(w)
 	case tabSyncthing:
 		return m.renderSyncthingTabContent(w, h)
 	case tabLndHub:
@@ -507,13 +490,6 @@ func (m Model) renderContent(w, h int) string {
 }
 
 func (m Model) renderChannelsContent(w, h int) string {
-	switch m.subview {
-	case svChannelOpen, svChannelCustomPeer,
-		svChannelAmountSelect, svChannelOpenConfirm,
-		svChannelOpening, svChannelOpenResult,
-		svChannelFundWallet:
-		return m.channelOpenContent(w)
-	}
 	return m.channelsOverview(w, h)
 }
 
@@ -571,41 +547,6 @@ func (m Model) renderAddonsContent(w, h int) string {
 
 func (m Model) renderSystemContent(w, h int) string {
 	return m.systemOverview(w, h)
-}
-
-func (m Model) viewFooter() string {
-	if m.tabFocused {
-		return "←→ tabs  enter select  ✕ close  q quit"
-	}
-	if m.nav.Focused {
-		return "↑↓ navigate  enter select  q quit"
-	}
-
-	sec := m.nav.ActiveSection()
-	switch sec {
-	case secChannels:
-		if m.subview != svNone {
-			return "backspace back  esc cancel  q quit"
-		}
-		return "↑↓ channels  enter details  ← sidebar  q quit"
-	case secWallet:
-		if m.subview != svNone {
-			return "backspace back  esc cancel  q quit"
-		}
-		return "←→ buttons  ↑↓ select  ← sidebar  q quit"
-	case secAddons:
-		if m.subview != svNone {
-			return "backspace back  esc cancel  q quit"
-		}
-		return "←→ buttons  enter select  ← sidebar  q quit"
-	case secSystem:
-		if m.updateConfirm || m.svcConfirm != "" ||
-			m.sysConfirm != "" {
-			return "y confirm  n cancel"
-		}
-		return "←→ buttons  ↑↓ services  ← sidebar  q quit"
-	}
-	return "← sidebar  q quit"
 }
 
 func (m Model) viewFullURL() string {
