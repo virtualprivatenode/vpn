@@ -1,5 +1,3 @@
-// internal/welcome/status.go
-
 package welcome
 
 import (
@@ -98,15 +96,19 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 				}()
 			}
 
+			// IMPORTANT: fetch open+pending channels together to avoid flicker/races.
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				channels, err := lndClient.ListChannels()
-				mu.Lock()
-				if err == nil {
-					infos := make([]channelInfo, len(channels))
-					for i, ch := range channels {
-						infos[i] = channelInfo{
+
+				channels, errCh := lndClient.ListChannels()
+				pending, errPend := lndClient.GetPendingChannels()
+
+				merged := make([]channelInfo, 0, len(channels)+8)
+
+				if errCh == nil {
+					for _, ch := range channels {
+						merged = append(merged, channelInfo{
 							ChanID:        ch.ChanID,
 							PeerAlias:     ch.PeerAlias,
 							RemotePubkey:  ch.RemotePubkey,
@@ -116,19 +118,25 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 							Active:        ch.Active,
 							Private:       ch.Private,
 							Initiator:     ch.Initiator,
-						}
+						})
 					}
-					s.channels = infos
 				}
-				mu.Unlock()
-			}()
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				pending, err := lndClient.GetPendingChannels()
+				if errPend == nil {
+					for _, pc := range pending.PendingOpenChannels {
+						merged = append(merged, channelInfo{
+							RemotePubkey: pc.RemotePubkey,
+							PeerAlias:    pc.PeerAlias,
+							Capacity:     pc.Capacity,
+							LocalBalance: pc.LocalBalance,
+							Pending:      true,
+						})
+					}
+				}
+
 				mu.Lock()
-				if err == nil {
+				s.channels = merged
+				if errPend == nil {
 					s.pendingOpen = pending.PendingOpen
 					s.pendingForceClose = pending.ForceClose
 				}
@@ -142,6 +150,7 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			s.publicIP = system.PublicIPv4()
 		}
 		s.rebootRequired = system.RebootRequired()
+
 		return s
 	}
 }

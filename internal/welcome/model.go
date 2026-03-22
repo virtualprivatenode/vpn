@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/installer"
@@ -13,27 +15,12 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/logger"
 )
 
-type wTab int
-
-const (
-	tabDashboard wTab = iota
-	tabWallet
-	tabPairing
-	tabAddons
-	tabSystem
-)
-
 type wSubview int
 
 const (
 	svNone wSubview = iota
 	svWalletInfo
-	svZeus
-	svSyncthingDetail
-	svSyncthingPairInput
-	svSyncthingDeviceDetail
-	svSyncthingWebUI
-	svSyncthingDeviceQR
+	svChannelList
 	svChannelDetail
 	svChannelOpen
 	svChannelAmountSelect
@@ -42,49 +29,61 @@ const (
 	svChannelOpening
 	svChannelOpenResult
 	svChannelFundWallet
+	svZeusPairing
+	svWalletPairing
+	svOnChain
+	svSend
+	svSendConfirm
+	svSendInFlight
+	svSendResult
+	svReceive
+	svReceiveWaiting
+	svReceivePaid
+	svReceiveExpired
+	svPaymentDetail
+	svQR
+	svFullURL
+	svSyncthingDetail
+	svSyncthingPairInput
+	svSyncthingDeviceDetail
+	svSyncthingWebUI
+	svSyncthingDeviceQR
 	svLndHubManage
 	svLndHubCreateName
 	svLndHubCreateAccount
 	svLndHubAccountDetail
 	svLndHubDeactivateConfirm
-	svQR
-	svFullURL
+	// Shell actions
 	svWalletCreate
 	svLNDInstall
 	svSyncthingInstall
 	svLndHubInstall
+	svOnChainResult
 	svSelfUpdate
 	svP2PUpgrade
-	// Wallet — send and receive
-	svReceive
-	svReceiveWaiting
-	svReceivePaid
-	svReceiveExpired
-	svSend
-	svSendConfirm
-	svSendInFlight
-	svSendResult
-	svPaymentHistory
-	svPaymentDetail
 )
 
-// Wallet sidebar section indices.
-const (
-	walletSectionTransactions = 0
-	walletSectionSend         = 1
-	walletSectionReceive      = 2
-	walletSectionOnChain      = 3
-)
-
-// cardPos is used for System tab card navigation (2x2 grid).
-type cardPos int
+// Tab types for the top tab bar
+type tabKind int
 
 const (
-	cardServices cardPos = iota
-	cardSysStats
-	cardBitcoin
-	cardUpdate
+	tabMain    tabKind = iota // Main view for current section
+	tabChannel                // Channel detail
+	tabPayment                // Payment detail
+	tabSend                   // Send payment flow
+	tabReceive                // Receive payment flow
+	tabPairing                // Pairing screen
+	tabOnChain                // On-chain screen
+	tabSyncthing
+	tabLndHub
 )
+
+type openTab struct {
+	Kind    tabKind
+	Label   string
+	Index   int // channel index, payment index, etc.
+	Section int // which section opened this tab
+}
 
 type svcActionDoneMsg struct{}
 type tickMsg time.Time
@@ -94,52 +93,51 @@ type lndhubAccountCreatedMsg struct {
 	account *installer.LndHubAccount
 	err     error
 }
-
 type lndhubDeactivatedMsg struct {
 	balance string
 	err     error
 }
-
-type syncthingPairedMsg struct {
-	err error
-}
-
+type syncthingPairedMsg struct{ err error }
 type channelOpenResultMsg struct {
 	txid string
 	err  error
 }
-
 type newAddressMsg struct {
 	address string
 	err     error
 }
-
 type invoiceCreatedMsg struct {
 	payReq      string
 	paymentHash string
 	amountSats  int64
 	err         error
 }
-
 type invoiceSettledMsg struct {
 	settled bool
 	expired bool
 	err     error
 }
-
 type payReqDecodedMsg struct {
 	decoded *lndrpc.DecodedPayReq
 	err     error
 }
-
 type sendPaymentResultMsg struct {
 	result *lndrpc.SendPaymentResult
 	err    error
 }
-
 type paymentHistoryMsg struct {
 	entries []lndrpc.PaymentEntry
 	err     error
+}
+
+type utxoListMsg struct {
+	utxos []lndrpc.UTXO
+	err   error
+}
+
+type sendCoinsResultMsg struct {
+	txid string
+	err  error
 }
 
 type paymentType int
@@ -159,6 +157,7 @@ type channelInfo struct {
 	Active        bool
 	Private       bool
 	Initiator     bool
+	Pending       bool
 }
 
 type peerOption struct {
@@ -194,29 +193,30 @@ type statusMsg struct {
 }
 
 type Model struct {
-	cfg                  *config.AppConfig
-	cfgStore             *config.Store
-	lndClient            *lndrpc.Client
-	version              string
-	activeTab            wTab
-	subview              wSubview
-	sysCard              cardPos
-	cardActive           bool
-	svcCursor            int
-	svcConfirm           string
-	sysConfirm           string
-	addonFocus           int
-	urlTarget            string
-	qrMode               string
-	qrLabel              string
-	urlReturnTo          wSubview
-	width                int
-	height               int
-	shellAction          wSubview
-	status               *statusMsg
-	latestVersion        string
-	updateConfirm        bool
-	fetchInFlight        bool
+	cfg       *config.AppConfig
+	cfgStore  *config.Store
+	lndClient *lndrpc.Client
+	version   string
+	subview   wSubview
+	width     int
+	height    int
+
+	shellAction   wSubview
+	status        *statusMsg
+	latestVersion string
+	updateConfirm bool
+	fetchInFlight bool
+
+	// Button index for content pane buttons
+	btnIdx      int
+	addonBtnIdx int
+
+	// System
+	svcCursor  int
+	svcConfirm string
+	sysConfirm string
+
+	// Addons
 	lastAccount          *installer.LndHubAccount
 	hubCursor            int
 	hubDeactivateBalance string
@@ -225,27 +225,43 @@ type Model struct {
 	syncPairSuccess      bool
 	syncCursor           int
 	showSecrets          bool
-	chanCursor           int
-	chanScrollOffset     int
-	chanOpenPeerIdx      int
-	chanOpenAmount       int64
-	chanOpenPrivate      bool
-	chanOpenPubkey       string
-	chanOpenHost         string
-	chanOpenAlias        string
-	chanOpenInFlight     bool
-	chanOpenTxid         string
-	chanOpenError        string
-	chanPeerList         []peerOption
-	chanAmountPreset     int
-	chanFundAddress      string
 
-	// ── Button groups ────────────────────────────────────
-	tabBar            ButtonGroup
-	walletSidebar     ButtonGroup
-	walletPaneFocused bool // false = sidebar focused, true = content pane focused
+	// Pairing
+	pairingButtonIdx int
+	urlTarget        string
+	qrMode           string
+	qrLabel          string
+	urlReturnTo      wSubview
 
-	// ── Text inputs (bubbles/v2/textinput) ───────────────
+	// Channels
+	chanCursor       int
+	chanScrollOffset int
+	chanOpenPeerIdx  int
+	chanOpenAmount   int64
+	chanOpenPrivate  bool
+	chanOpenPubkey   string
+	chanOpenHost     string
+	chanOpenAlias    string
+	chanOpenInFlight bool
+	chanOpenTxid     string
+	chanOpenError    string
+	chanPeerList     []peerOption
+	chanAmountPreset int
+	chanFundAddress  string
+
+	// Navigation
+	nav            NavSidebar
+	contentFocused bool
+	contentFocus   int // 0=primary area, 1=buttons
+
+	// Tab bar
+	tabs            []openTab // open tabs (index 0 is always main)
+	activeTab       int       // which tab is active
+	tabFocused      bool      // cursor is on tab bar
+	tabCursorX      int       // 0=tab label, 1=close button
+	tabScrollOffset int       // first visible detail tab index (into tabs)
+
+	// Text inputs
 	sendInput       textinput.Model
 	recvAmountInput textinput.Model
 	recvMemoInput   textinput.Model
@@ -255,13 +271,30 @@ type Model struct {
 	hubNameInput    textinput.Model
 	syncDeviceInput textinput.Model
 
+	// Tables
+	channelTable table.Model
+	txTable      table.Model
+
 	// Receive state
+	recvButtonIdx   int
 	recvPayReq      string
 	recvPaymentHash string
 	recvAmountSats  int64
 	recvSettled     bool
 	recvExpired     bool
 	recvError       string
+
+	// On-chain state
+	onChainAddress   string
+	onChainBtnIdx    int
+	onChainFocus     int // 0=buttons, 1=utxo table
+	onChainSendAddr  string
+	onChainSendAmt   string
+	onChainSendFee   int64
+	onChainSendTxid  string
+	onChainSendError string
+	utxos            []lndrpc.UTXO
+	utxoCursor       int
 
 	// Send state
 	sendDecodedValid bool
@@ -281,25 +314,54 @@ type Model struct {
 	payHistoryCursor int
 }
 
-func newTabBar() ButtonGroup {
-	tabBar := NewButtonGroup(
-		[]string{"Dashboard", "Wallet", "Pairing", "Add-ons", "System"},
-		Horizontal,
-	)
-	tabBar.ActivateIndex(0)
-	tabBar.Focus()
-	return tabBar
+func newChannelTable() table.Model {
+	cols := []table.Column{
+		{Title: "", Width: 2},
+		{Title: "Name", Width: 16},
+		{Title: "Local", Width: 10},
+		{Title: "Remote", Width: 10},
+		{Title: "Capacity", Width: 10},
+	}
+	t := table.New(
+		table.WithColumns(cols),
+		table.WithRows([]table.Row{}),
+		table.WithHeight(10),
+		table.WithFocused(false))
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).Bold(false)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).Bold(false)
+	t.SetStyles(s)
+	return t
 }
 
-func newWalletSidebar() ButtonGroup {
-	sidebar := NewButtonGroup(
-		[]string{"Transactions", "Send", "Receive", "On-Chain"},
-		Vertical,
-	)
-	sidebar.SetWidth(18)
-	sidebar.ActivateIndex(walletSectionTransactions)
-	sidebar.SetDisabled(walletSectionOnChain, true)
-	return sidebar
+func newTxTable() table.Model {
+	cols := []table.Column{
+		{Title: "", Width: 2},
+		{Title: "Dir", Width: 6},
+		{Title: "Amount", Width: 14},
+		{Title: "Memo", Width: 20},
+		{Title: "Date", Width: 10},
+	}
+	t := table.New(
+		table.WithColumns(cols),
+		table.WithRows([]table.Row{}),
+		table.WithHeight(10),
+		table.WithFocused(false))
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).Bold(false)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).Bold(false)
+	t.SetStyles(s)
+	return t
 }
 
 func NewModel(cfg *config.AppConfig, version string) Model {
@@ -309,20 +371,20 @@ func NewModel(cfg *config.AppConfig, version string) Model {
 	}
 	return Model{
 		cfg: cfg, lndClient: client, version: version,
-		activeTab: tabDashboard, subview: svNone,
-		sysCard: cardServices, fetchInFlight: true,
-		tabBar:        newTabBar(),
-		walletSidebar: newWalletSidebar(),
+		subview: svNone, fetchInFlight: true,
+		nav:          NewNavSidebar(),
+		channelTable: newChannelTable(),
+		txTable:      newTxTable(),
 	}
 }
 
 func NewTestModel(cfg *config.AppConfig, version string, store *config.Store) Model {
 	m := Model{
 		cfg: cfg, version: version,
-		activeTab: tabDashboard, subview: svNone,
-		sysCard: cardServices, fetchInFlight: true,
-		tabBar:        newTabBar(),
-		walletSidebar: newWalletSidebar(),
+		subview: svNone, fetchInFlight: true,
+		nav:          NewNavSidebar(),
+		channelTable: newChannelTable(),
+		txTable:      newTxTable(),
 	}
 	m.cfgStore = store
 	return m
@@ -351,9 +413,7 @@ func (m Model) saveCfg() {
 	}
 }
 
-func (m Model) svcCount() int {
-	return len(serviceNames(m.cfg))
-}
+func (m Model) svcCount() int { return len(serviceNames(m.cfg)) }
 
 func (m Model) svcName(i int) string {
 	names := serviceNames(m.cfg)
@@ -363,7 +423,6 @@ func (m Model) svcName(i int) string {
 	return ""
 }
 
-// pollInterval returns the status polling interval based on current state.
 func (m Model) pollInterval() time.Duration {
 	if m.status == nil {
 		return 3 * time.Second
@@ -407,7 +466,7 @@ func Show(cfg *config.AppConfig, version string) {
 				cfg = u
 			}
 			if err := installer.AppendLNCLIToShell(cfg); err != nil {
-				logger.TUI("Warning: failed to add lncli wrapper: %v", err)
+				logger.TUI("Warning: lncli wrapper: %v", err)
 			}
 			continue
 		case svSyncthingInstall:
@@ -435,8 +494,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchStatus(m.cfg, m.lndClient),
 		fetchLatestVersion(),
-		tickEvery(m.pollInterval()),
-	)
+		tickEvery(m.pollInterval()))
 }
 
 func tickEvery(d time.Duration) tea.Cmd {
@@ -471,10 +529,7 @@ func pairSyncthingDeviceCmd(deviceID string) tea.Cmd {
 	}
 }
 
-func openChannelCmd(
-	client *lndrpc.Client, pubkey, host string,
-	amount int64, private bool,
-) tea.Cmd {
+func openChannelCmd(client *lndrpc.Client, pubkey, host string, amount int64, private bool) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
 			return channelOpenResultMsg{err: fmt.Errorf("LND not connected")}
@@ -485,8 +540,7 @@ func openChannelCmd(
 			}
 		}
 		if err := client.WaitForPeer(pubkey, 60*time.Second); err != nil {
-			return channelOpenResultMsg{
-				err: fmt.Errorf("could not connect to peer: %v", err)}
+			return channelOpenResultMsg{err: fmt.Errorf("could not connect: %v", err)}
 		}
 		result, err := client.OpenChannel(pubkey, amount, private)
 		if err != nil {
@@ -519,10 +573,8 @@ func createInvoiceCmd(client *lndrpc.Client, amount int64, memo string) tea.Cmd 
 			return invoiceCreatedMsg{err: err}
 		}
 		return invoiceCreatedMsg{
-			payReq:      inv.PaymentRequest,
-			paymentHash: inv.PaymentHash,
-			amountSats:  inv.AmountSats,
-		}
+			payReq: inv.PaymentRequest, paymentHash: inv.PaymentHash,
+			amountSats: inv.AmountSats}
 	}
 }
 
@@ -535,15 +587,11 @@ func waitForInvoiceCmd(client *lndrpc.Client, paymentHash string) tea.Cmd {
 		if err != nil {
 			return invoiceSettledMsg{err: err}
 		}
-		inv, err := client.WaitForInvoiceSettlement(
-			hashBytes, 3600*time.Second)
+		inv, err := client.WaitForInvoiceSettlement(hashBytes, 3600*time.Second)
 		if err != nil {
 			return invoiceSettledMsg{err: err}
 		}
-		return invoiceSettledMsg{
-			settled: inv.Settled,
-			expired: inv.IsExpired,
-		}
+		return invoiceSettledMsg{settled: inv.Settled, expired: inv.IsExpired}
 	}
 }
 
@@ -580,11 +628,9 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 		}
 		invoices, _ := client.ListInvoices(50)
 		payments, _ := client.ListPayments(50)
-
 		var all []lndrpc.PaymentEntry
 		all = append(all, invoices...)
 		all = append(all, payments...)
-
 		for i := 0; i < len(all); i++ {
 			for j := i + 1; j < len(all); j++ {
 				if all[j].CreationDate > all[i].CreationDate {
@@ -592,8 +638,36 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 				}
 			}
 		}
-
 		return paymentHistoryMsg{entries: all}
+	}
+}
+
+func listUnspentCmd(client *lndrpc.Client) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return utxoListMsg{err: fmt.Errorf(
+				"LND not connected")}
+		}
+		utxos, err := client.ListUnspent(0, 999999)
+		return utxoListMsg{utxos: utxos, err: err}
+	}
+}
+
+func sendCoinsCmd(
+	client *lndrpc.Client, addr string,
+	amount int64, feeRate int64,
+) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return sendCoinsResultMsg{err: fmt.Errorf(
+				"LND not connected")}
+		}
+		result, err := client.SendCoins(
+			addr, amount, feeRate, false)
+		if err != nil {
+			return sendCoinsResultMsg{err: err}
+		}
+		return sendCoinsResultMsg{txid: result.Txid}
 	}
 }
 
@@ -624,4 +698,60 @@ func hexVal(c byte) int {
 	default:
 		return -1
 	}
+}
+
+func (m *Model) rebuildChannelTable() {
+	if m.status == nil {
+		m.channelTable.SetRows([]table.Row{})
+		return
+	}
+	var rows []table.Row
+	for _, ch := range m.status.channels {
+		dot := "●"
+		if !ch.Active {
+			dot = "○"
+		}
+		if ch.Pending {
+			dot = "◌"
+		}
+		name := ch.PeerAlias
+		if name == "" && len(ch.RemotePubkey) > 12 {
+			name = ch.RemotePubkey[:12] + ".."
+		}
+		rows = append(rows, table.Row{
+			dot, name,
+			formatSatsCompact(ch.LocalBalance),
+			formatSatsCompact(ch.RemoteBalance),
+			formatSatsCompact(ch.Capacity)})
+	}
+	m.channelTable.SetRows(rows)
+}
+
+func (m *Model) rebuildTxTable() {
+	var rows []table.Row
+	for _, entry := range m.payHistory {
+		dot := "●"
+		if entry.Status == "FAILED" {
+			dot = "✗"
+		} else if entry.Status == "EXPIRED" {
+			dot = "○"
+		} else if entry.Status == "IN_FLIGHT" || entry.Status == "OPEN" {
+			dot = "◌"
+		}
+		dir := "↑ sent"
+		if entry.IsIncoming {
+			dir = "↓ recv"
+		}
+		amt := formatSats(entry.AmountSats) + " sat"
+		memo := entry.Memo
+		if len(memo) > 18 {
+			memo = memo[:18] + ".."
+		}
+		if memo == "" {
+			memo = "—"
+		}
+		ts := formatTimestamp(entry.CreationDate)
+		rows = append(rows, table.Row{dot, dir, amt, memo, ts})
+	}
+	m.txTable.SetRows(rows)
 }

@@ -44,9 +44,17 @@ type Channel struct {
 }
 
 type PendingChannelInfo struct {
-	PendingOpen  int
-	ForceClose   int
-	WaitingClose int
+	PendingOpen         int
+	ForceClose          int
+	WaitingClose        int
+	PendingOpenChannels []PendingChannel
+}
+
+type PendingChannel struct {
+	RemotePubkey string
+	Capacity     int64
+	LocalBalance int64
+	PeerAlias    string
 }
 
 type OnChainAddress struct {
@@ -158,10 +166,26 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 		c.handleError(err)
 		return nil, err
 	}
+
+	var pendingChans []PendingChannel
+	for _, pc := range resp.GetPendingOpenChannels() {
+		ch := pc.GetChannel()
+		if ch != nil {
+			alias := c.getPeerAlias(ch.GetRemoteNodePub())
+			pendingChans = append(pendingChans, PendingChannel{
+				RemotePubkey: ch.GetRemoteNodePub(),
+				Capacity:     ch.GetCapacity(),
+				LocalBalance: ch.GetLocalBalance(),
+				PeerAlias:    alias,
+			})
+		}
+	}
+
 	return &PendingChannelInfo{
-		PendingOpen:  len(resp.GetPendingOpenChannels()),
-		ForceClose:   len(resp.GetPendingForceClosingChannels()),
-		WaitingClose: len(resp.GetWaitingCloseChannels()),
+		PendingOpen:         len(resp.GetPendingOpenChannels()),
+		ForceClose:          len(resp.GetPendingForceClosingChannels()),
+		WaitingClose:        len(resp.GetWaitingCloseChannels()),
+		PendingOpenChannels: pendingChans,
 	}, nil
 }
 

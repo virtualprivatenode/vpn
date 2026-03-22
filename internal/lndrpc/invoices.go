@@ -238,7 +238,7 @@ func (c *Client) ListPayments(limit uint64) ([]PaymentEntry, error) {
 					entry.Hops = append(entry.Hops, RouteHop{
 						PubKey:   hop.GetPubKey(),
 						ChanID:   hop.GetChanId(),
-						FeeSats:  hop.GetFee(),
+						FeeSats:  hop.GetFeeMsat() / 1000,
 						AmtToFwd: hop.GetAmtToForwardMsat() / 1000,
 					})
 				}
