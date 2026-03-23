@@ -399,6 +399,9 @@ func (m Model) renderActiveTabContent(
 	case tabMain:
 		return m.renderContent(w, h)
 	case tabChannel:
+		if isCloseSubview(m.subview) {
+			return m.channelCloseContent(w)
+		}
 		if m.status != nil &&
 			tab.Index < len(m.status.channels) {
 			saved := m.chanCursor
@@ -467,6 +470,8 @@ func (m Model) renderActiveTabContent(
 		return m.onChainReceivePane(w)
 	case tabOpenChannel:
 		return m.channelOpenContent(w)
+	case tabChannelHistory:
+		return m.channelHistoryPane(w, h)
 	case tabSyncthing:
 		return m.renderSyncthingTabContent(w, h)
 	case tabLndHub:
@@ -480,7 +485,7 @@ func (m Model) renderContent(w, h int) string {
 
 	switch sec {
 	case secChannels:
-		return m.renderChannelsContent(w, h)
+		return m.channelsOverview(w, h)
 	case secWallet:
 		return m.renderWalletContent(w, h)
 	case secOnChain:
@@ -488,13 +493,9 @@ func (m Model) renderContent(w, h int) string {
 	case secAddons:
 		return m.renderAddonsContent(w, h)
 	case secSystem:
-		return m.renderSystemContent(w, h)
+		return m.systemOverview(w, h)
 	}
 	return ""
-}
-
-func (m Model) renderChannelsContent(w, h int) string {
-	return m.channelsOverview(w, h)
 }
 
 func (m Model) renderWalletContent(w, h int) string {
@@ -563,10 +564,6 @@ func (m Model) renderAddonsContent(w, h int) string {
 		return m.lndhubDeactivateContent(w)
 	}
 	return m.addonsOverview(w, h)
-}
-
-func (m Model) renderSystemContent(w, h int) string {
-	return m.systemOverview(w, h)
 }
 
 func (m Model) viewFullURL() string {

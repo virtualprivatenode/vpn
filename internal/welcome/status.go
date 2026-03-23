@@ -110,6 +110,7 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 					for _, ch := range channels {
 						merged = append(merged, channelInfo{
 							ChanID:        ch.ChanID,
+							ChannelPoint:  ch.ChannelPoint,
 							PeerAlias:     ch.PeerAlias,
 							RemotePubkey:  ch.RemotePubkey,
 							Capacity:      ch.Capacity,

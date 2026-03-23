@@ -155,21 +155,16 @@ func (m Model) renderBalanceSummary(w int) []string {
 
 func (m Model) channelsOverview(w, h int) string {
 	if !m.cfg.HasLND() {
-		var lines []string
-		lines = append(lines, "")
-		lines = append(lines, theme.Dim.Render(
-			" LND is not installed."))
-		lines = append(lines, theme.Dim.Render(
-			" Go to System to install."))
-		return strings.Join(lines, "\n")
+		p := newPane(w)
+		p.dim("LND is not installed.")
+		p.dim("Go to System to install.")
+		return p.render()
 	}
 
 	if !m.cfg.WalletExists() {
-		var lines []string
-		lines = append(lines, "")
-		lines = append(lines, theme.Dim.Render(
-			" LND wallet not created."))
-		return strings.Join(lines, "\n")
+		p := newPane(w)
+		p.dim("LND wallet not created.")
+		return p.render()
 	}
 
 	if m.status == nil || !m.status.lndResponding {
@@ -178,11 +173,10 @@ func (m Model) channelsOverview(w, h int) string {
 
 	isFocused := m.contentFocused && !m.tabFocused
 
-	// ── Fixed regions ────────────────────────────
+	// ── Fixed header ─────────────────────────────
 	var headerLines []string
 	headerLines = append(headerLines, "")
 
-	// Pubkey and P2P
 	if m.status.lndPubkey != "" {
 		pk := truncatePubkey(m.status.lndPubkey, w-14)
 		headerLines = append(headerLines,
@@ -194,29 +188,32 @@ func (m Model) channelsOverview(w, h int) string {
 			theme.Value.Render(
 				p2pModeLabel(m.cfg.P2PMode)))
 
-	// 2-line gap after P2P
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 
-	// Balance summary with liquidity box
 	headerLines = append(headerLines,
 		m.renderBalanceSummary(w)...)
 
-	// 3-line gap before channel bars
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 
+	header := strings.Join(headerLines, "\n")
 	headerH := len(headerLines)
-	buttonH := 3 // top pad + button + bottom pad
-	gapBelowChans := 0
 
-	// Available rows for channel bars
-	chanWindowH := h - headerH - buttonH - gapBelowChans
-	if chanWindowH < 1 {
-		chanWindowH = 1
-	}
+	// ── Fixed footer (buttons) ───────────────────
+	isOnButton := isFocused && m.contentFocus == 1
+	var footerLines []string
+	footerLines = append(footerLines, "")
+	footerLines = append(footerLines,
+		renderButtons(
+			[]string{"Open Channel", "History"},
+			m.btnIdx, isOnButton, w))
+	footerLines = append(footerLines, "")
 
-	// ── Channel bars ─────────────────────────────
+	footer := strings.Join(footerLines, "\n")
+	footerH := len(footerLines)
+
+	// ── Scrollable middle (all channel bars) ─────
 	chanCount := len(m.status.channels)
 	nameW := 17
 	barW := w - nameW - 22
@@ -224,19 +221,15 @@ func (m Model) channelsOverview(w, h int) string {
 		barW = 8
 	}
 
-	var chanLines []string
-	var chanLineToIdx []int
+	var midLines []string
 
 	if chanCount == 0 {
-		chanLines = append(chanLines,
+		midLines = append(midLines,
 			theme.Dim.Render(" No channels yet."))
-		chanLineToIdx = append(chanLineToIdx, -1)
 	} else {
 		for i, ch := range m.status.channels {
 			if i > 0 {
-				chanLines = append(chanLines, "")
-				chanLineToIdx = append(
-					chanLineToIdx, -1)
+				midLines = append(midLines, "")
 			}
 
 			isSelected := isFocused &&
@@ -291,8 +284,8 @@ func (m Model) channelsOverview(w, h int) string {
 			rBar := lipgloss.NewStyle().
 				Foreground(
 					lipgloss.Color(remoteColor)).
-				Render(
-					strings.Repeat("█", remoteFill))
+				Render(strings.Repeat("█",
+					remoteFill))
 			barStr := lBar + rBar
 
 			vals := fmt.Sprintf("%s / %s",
@@ -313,123 +306,37 @@ func (m Model) channelsOverview(w, h int) string {
 				barStr + " " +
 				theme.Dim.Render(valsPad)
 
-			chanLines = append(chanLines, line)
-			chanLineToIdx = append(chanLineToIdx, i)
+			midLines = append(midLines, line)
 		}
 
 		if m.status.pendingOpen > 0 {
-			chanLines = append(chanLines, "")
-			chanLineToIdx = append(chanLineToIdx, -1)
-			chanLines = append(chanLines,
+			midLines = append(midLines, "")
+			midLines = append(midLines,
 				" "+theme.Dim.Render(
 					fmt.Sprintf("%d pending",
 						m.status.pendingOpen)))
-			chanLineToIdx = append(chanLineToIdx, -1)
 		}
 	}
 
-	// Scroll window
-	totalChanLines := len(chanLines)
-	needsScroll := totalChanLines > chanWindowH
+	midContent := strings.Join(midLines, "\n")
 
-	cursorLineIdx := 0
-	for li, ci := range chanLineToIdx {
-		if ci == m.chanCursor {
-			cursorLineIdx = li
-			break
-		}
+	// ── Viewport ─────────────────────────────────
+	vpH := h - headerH - footerH
+	if vpH < 1 {
+		vpH = 1
 	}
 
-	scrollOffset := m.chanScrollOffset
-	if needsScroll {
-		if cursorLineIdx < scrollOffset {
-			scrollOffset = cursorLineIdx
-		}
-		if cursorLineIdx >= scrollOffset+chanWindowH {
-			scrollOffset = cursorLineIdx -
-				chanWindowH + 1
-		}
-		maxOffset := totalChanLines - chanWindowH
-		if maxOffset < 0 {
-			maxOffset = 0
-		}
-		if scrollOffset > maxOffset {
-			scrollOffset = maxOffset
-		}
-		if scrollOffset < 0 {
-			scrollOffset = 0
-		}
-	} else {
-		scrollOffset = 0
-	}
+	// Each channel is 2 lines (bar + blank gap)
+	// except last which is 1 line
+	cursorLine := m.chanCursor * 2
 
-	visEnd := scrollOffset + chanWindowH
-	if visEnd > totalChanLines {
-		visEnd = totalChanLines
-	}
-	visibleChanLines := chanLines[scrollOffset:visEnd]
+	vpRendered := renderViewport(
+		midContent, w, vpH, cursorLine,
+		len(midLines),
+		chanCount > 0 && m.contentFocus == 0)
 
 	// ── Assemble output ──────────────────────────
-	var lines []string
-
-	lines = append(lines, headerLines...)
-
-	if needsScroll && scrollOffset > 0 {
-		indicator := strings.Repeat(" ", w-4) +
-			theme.Dim.Render(" ▲")
-		lines = append(lines, indicator)
-		if len(visibleChanLines) > 1 {
-			visibleChanLines =
-				visibleChanLines[1:]
-		}
-	}
-
-	lines = append(lines, visibleChanLines...)
-
-	rendered := len(visibleChanLines)
-	if needsScroll && scrollOffset > 0 {
-		rendered++
-	}
-	for rendered < chanWindowH {
-		lines = append(lines, "")
-		rendered++
-	}
-
-	if needsScroll && visEnd < totalChanLines {
-		indicator := strings.Repeat(" ", w-4) +
-			theme.Dim.Render(" ▼")
-		if len(lines) > 0 {
-			lines[len(lines)-1] = indicator
-		}
-	}
-
-	// ── Open Channel button (full width, centered)
-	label := "Open Channel"
-	isOnButton := isFocused && m.contentFocus == 1
-
-	btnW := w - 2
-	if btnW < 16 {
-		btnW = 16
-	}
-
-	var btnStr string
-	if isOnButton {
-		btnStr = theme.BtnFocused.
-			Width(btnW).
-			AlignHorizontal(lipgloss.Center).
-			Render(label)
-	} else {
-		btnStr = theme.BtnNormal.
-			Width(btnW).
-			AlignHorizontal(lipgloss.Center).
-			Render(label)
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, " "+btnStr)
-	lines = append(lines, "")
-
-	return strings.Join(lines, "\n")
+	return header + "\n" + vpRendered + "\n" + footer
 }
 
 // ── Channel detail ───────────────────────────────────────
@@ -439,15 +346,14 @@ func (m Model) channelDetailPane(w int) string {
 		return theme.Dim.Render(" Channel not found")
 	}
 	ch := m.status.channels[m.chanCursor]
-	var lines []string
 
 	name := ch.PeerAlias
 	if name == "" {
 		name = ch.RemotePubkey[:16] + "..."
 	}
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Header.Render(name))
-	lines = append(lines, "")
+
+	p := newPane(w)
+	p.title(theme.Header, name)
 
 	status := theme.Success.Render("active")
 	if !ch.Active {
@@ -457,68 +363,64 @@ func (m Model) channelDetailPane(w int) string {
 		status = theme.Dim.Render("pending")
 	}
 
-	lines = append(lines,
-		" "+theme.Label.Render("Status:    ")+status)
-	lines = append(lines,
-		" "+theme.Label.Render("Capacity:  ")+
-			theme.Value.Render(
-				formatSats(ch.Capacity)+" sats"))
-	lines = append(lines,
-		" "+theme.Label.Render("Local:     ")+
-			theme.Value.Render(
-				formatSats(ch.LocalBalance)+" sats"))
-	lines = append(lines,
-		" "+theme.Label.Render("Remote:    ")+
-			theme.Value.Render(
-				formatSats(ch.RemoteBalance)+" sats"))
+	p.line(" " + theme.Label.Render("Status:    ") +
+		status)
+	p.field("Capacity:  ",
+		formatSats(ch.Capacity)+" sats")
+	p.field("Local:     ",
+		formatSats(ch.LocalBalance)+" sats")
+	p.field("Remote:    ",
+		formatSats(ch.RemoteBalance)+" sats")
 
 	barW := w - 4
 	if barW > 40 {
 		barW = 40
 	}
 	if barW >= 10 {
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+renderLiquidityBar(
-				ch.LocalBalance, ch.RemoteBalance,
-				ch.Capacity, barW))
+		p.blank()
+		p.line(" " + renderLiquidityBar(
+			ch.LocalBalance, ch.RemoteBalance,
+			ch.Capacity, barW))
 	}
-	lines = append(lines, "")
+	p.blank()
 
 	if ch.Private {
-		lines = append(lines,
-			" "+theme.Label.Render("Type:      ")+
-				theme.Value.Render("private"))
+		p.field("Type:      ", "private")
 	} else {
-		lines = append(lines,
-			" "+theme.Label.Render("Type:      ")+
-				theme.Value.Render("public"))
+		p.field("Type:      ", "public")
 	}
 	if ch.Initiator {
-		lines = append(lines,
-			" "+theme.Label.Render("Initiator: ")+
-				theme.Value.Render("you"))
+		p.field("Initiator: ", "you")
 	}
 
-	lines = append(lines, "")
-	lines = append(lines,
-		" "+theme.Label.Render("Pubkey:"))
+	p.blank()
+	p.labelLine("Pubkey:")
 	pk := ch.RemotePubkey
 	maxPk := w - 4
 	if len(pk) > maxPk {
 		pk = pk[:maxPk-3] + "..."
 	}
-	lines = append(lines, " "+theme.Mono.Render(pk))
+	p.mono(pk)
 
 	if ch.ChanID > 0 {
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Label.Render("Channel ID: ")+
-				theme.Mono.Render(
-					fmt.Sprintf("%d", ch.ChanID)))
+		p.blank()
+		p.monoField("Channel ID: ",
+			fmt.Sprintf("%d", ch.ChanID))
 	}
 
-	return strings.Join(lines, "\n")
+	// Close button (not shown for pending)
+	if !ch.Pending {
+		p.blank()
+		isFocused := m.contentFocused &&
+			!m.tabFocused
+		isOnButton := isFocused &&
+			m.contentFocus == 1
+		p.line(renderButtons(
+			[]string{"Close Channel"},
+			0, isOnButton, w))
+	}
+
+	return p.render()
 }
 
 // ── Channel open flow panes ──────────────────────────────
@@ -557,30 +459,23 @@ func presetLabel(sats int64) string {
 }
 
 func (m Model) channelOpenPane(w int) string {
-	var lines []string
-
-	lines = append(lines,
-		theme.Header.Render(" Open Channel"))
-	lines = append(lines, "")
+	p := newPane(w)
+	p.title(theme.Header, "Open Channel")
 
 	balText := "unknown"
 	if m.status != nil && m.status.lndBalance != "" {
 		balText = m.status.lndBalance + " sats"
 	}
-	lines = append(lines,
-		" "+theme.Label.Render("On-chain: ")+
-			theme.Value.Render(balText))
-	lines = append(lines, "")
+	p.field("On-chain: ", balText)
+	p.blank()
 
 	if m.cfg.P2PMode == "tor" {
-		lines = append(lines, " "+theme.Dim.Render(
-			"Tor-only — (Tor) peers accept Tor"))
-		lines = append(lines, "")
+		p.dim("Tor-only — (Tor) peers accept Tor")
+		p.blank()
 	}
 
-	lines = append(lines,
-		" "+theme.Header.Render("Select a peer:"))
-	lines = append(lines, "")
+	p.line(" " + theme.Header.Render("Select a peer:"))
+	p.blank()
 
 	isFocused := m.contentFocused && !m.tabFocused
 
@@ -602,7 +497,7 @@ func (m Model) channelOpenPane(w int) string {
 		if peer.Curated {
 			tags += " ★"
 		}
-		lines = append(lines, fmt.Sprintf(" %s %s%s",
+		p.line(fmt.Sprintf(" %s %s%s",
 			prefix, style.Render(name),
 			theme.Dim.Render(tags)))
 	}
@@ -614,62 +509,48 @@ func (m Model) channelOpenPane(w int) string {
 		prefix = "▸"
 		style = theme.Action
 	}
-	lines = append(lines, fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf(" %s %s",
 		prefix, style.Render("[Custom peer]")))
 
-	return strings.Join(lines, "\n")
+	return p.render()
 }
 
 func (m Model) channelCustomPeerPane(w int) string {
-	var lines []string
+	p := newPane(w)
+	p.title(theme.Header, "Custom Peer")
 
-	lines = append(lines,
-		theme.Header.Render(" Custom Peer"))
-	lines = append(lines, "")
-	lines = append(lines,
-		" "+theme.Label.Render("Node Pubkey:"))
-	lines = append(lines,
-		" "+m.chanPubkeyInput.View())
-	lines = append(lines, "")
-	lines = append(lines,
-		" "+theme.Label.Render("Host (host:port):"))
-	lines = append(lines,
-		" "+m.chanHostInput.View())
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Dim.Render(
-		"↑↓ switch fields  Enter continue"))
+	isFocused := m.contentFocused && !m.tabFocused
 
-	if m.chanOpenError != "" {
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Warning.Render(m.chanOpenError))
-	}
+	p.input("Node Pubkey:",
+		m.chanPubkeyInput,
+		isFocused && m.chanPubkeyInput.Focused())
+	p.blank()
+	p.input("Host (host:port):",
+		m.chanHostInput,
+		isFocused && m.chanHostInput.Focused())
 
-	return strings.Join(lines, "\n")
+	p.appendError(m.chanOpenError)
+
+	return p.render()
 }
 
 func (m Model) channelAmountPane(w int) string {
-	var lines []string
+	p := newPane(w)
 
 	peerName := m.chanOpenAlias
 	if peerName == "" && len(m.chanOpenPubkey) > 16 {
 		peerName = m.chanOpenPubkey[:16] + "..."
 	}
-	lines = append(lines,
-		" "+theme.Header.Render(peerName))
-	lines = append(lines, "")
+	p.title(theme.Header, peerName)
 
 	balText := "unknown"
 	if m.status != nil && m.status.lndBalance != "" {
 		balText = m.status.lndBalance + " sats"
 	}
-	lines = append(lines,
-		" "+theme.Label.Render("On-chain: ")+
-			theme.Value.Render(balText))
-	lines = append(lines, "")
-	lines = append(lines,
-		" "+theme.Header.Render("Channel size:"))
-	lines = append(lines, "")
+	p.field("On-chain: ", balText)
+	p.blank()
+	p.line(" " + theme.Header.Render("Channel size:"))
+	p.blank()
 
 	isFocused := m.contentFocused && !m.tabFocused
 
@@ -681,181 +562,467 @@ func (m Model) channelAmountPane(w int) string {
 			style = theme.Action
 		}
 		if amt == 0 && m.chanAmountPreset == i {
-			lines = append(lines,
-				fmt.Sprintf(" %s %s",
-					prefix,
-					style.Render("Custom:")))
+			p.line(fmt.Sprintf(" %s %s",
+				prefix, style.Render("Custom:")))
 			inputW := w - 6
 			if inputW > 20 {
 				inputW = 20
 			}
 			ai := m.chanAmountInput
 			ai.SetWidth(inputW)
-			lines = append(lines,
-				"   "+ai.View())
+			p.line("   " + ai.View())
 			continue
 		}
-		lines = append(lines, fmt.Sprintf(" %s %s",
+		p.line(fmt.Sprintf(" %s %s",
 			prefix, style.Render(presetLabel(amt))))
 	}
 
-	if m.chanOpenError != "" {
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Warning.Render(m.chanOpenError))
-	}
+	p.appendError(m.chanOpenError)
 
-	return strings.Join(lines, "\n")
+	return p.render()
 }
 
 func (m Model) channelConfirmPane(w int) string {
-	var lines []string
+	p := newPane(w)
+	p.title(theme.Warning, "Confirm Channel Open")
 
-	lines = append(lines,
-		theme.Warning.Render(" Confirm Channel Open"))
-	lines = append(lines, "")
-	lines = append(lines,
-		" "+theme.Label.Render("Peer:    ")+
-			theme.Value.Render(m.chanOpenAlias))
-	lines = append(lines,
-		" "+theme.Label.Render("Amount:  ")+
-			theme.Value.Render(
-				formatSats(m.chanOpenAmount)+" sats"))
+	p.field("Peer:    ", m.chanOpenAlias)
+	p.field("Amount:  ",
+		formatSats(m.chanOpenAmount)+" sats")
 
 	priv := "public"
 	if m.chanOpenPrivate {
 		priv = "private"
 	}
-	lines = append(lines,
-		" "+theme.Label.Render("Type:    ")+
-			theme.Value.Render(priv))
-	lines = append(lines, "")
+	p.field("Type:    ", priv)
+	p.blank()
 
 	pk := m.chanOpenPubkey
 	maxPk := w - 4
 	if len(pk) > maxPk {
 		pk = pk[:maxPk-3] + "..."
 	}
-	lines = append(lines,
-		" "+theme.Label.Render("Pubkey:"))
-	lines = append(lines, " "+theme.Mono.Render(pk))
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Warning.Render(
-		"Spend "+formatSats(m.chanOpenAmount)+
-			" sats?"))
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Dim.Render(
-		"y confirm  p toggle private  "+
-			"backspace cancel"))
+	p.labelLine("Pubkey:")
+	p.mono(pk)
+	p.blank()
+	p.warn("Spend " +
+		formatSats(m.chanOpenAmount) + " sats?")
 
-	if m.chanOpenError != "" {
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Warning.Render(m.chanOpenError))
-	}
+	p.appendError(m.chanOpenError)
 
-	return strings.Join(lines, "\n")
+	return p.render()
 }
 
 func (m Model) channelOpeningPane(w int) string {
-	var lines []string
-	lines = append(lines,
-		theme.Header.Render(" Opening Channel..."))
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Value.Render(
+	p := newPane(w)
+	p.title(theme.Header, "Opening Channel...")
+	p.line(" " + theme.Value.Render(
 		"Connecting to peer and broadcasting tx."))
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Dim.Render(
-		"May take up to 2 minutes over Tor."))
-	lines = append(lines, " "+theme.Dim.Render(
-		"Do not close the terminal."))
-	return strings.Join(lines, "\n")
+	p.blank()
+	p.dim("May take up to 2 minutes over Tor.")
+	p.dim("Do not close the terminal.")
+	return p.render()
 }
 
 func (m Model) channelResultPane(w int) string {
-	var lines []string
+	p := newPane(w)
 
 	if m.chanOpenError != "" {
-		lines = append(lines,
-			theme.Warning.Render(
-				" Channel Open Failed"))
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Warning.Render(m.chanOpenError))
+		p.title(theme.Warning, "Channel Open Failed")
+		p.warn(m.chanOpenError)
 	} else {
-		lines = append(lines,
-			theme.Success.Render(" Channel Opening"))
-		lines = append(lines, "")
-		lines = append(lines, " "+theme.Value.Render(
+		p.title(theme.Success, "Channel Opening")
+		p.line(" " + theme.Value.Render(
 			"Funding tx broadcast successfully."))
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Label.Render("Peer:   ")+
-				theme.Value.Render(m.chanOpenAlias))
-		lines = append(lines,
-			" "+theme.Label.Render("Amount: ")+
-				theme.Value.Render(
-					formatSats(m.chanOpenAmount)+
-						" sats"))
+		p.blank()
+		p.field("Peer:   ", m.chanOpenAlias)
+		p.field("Amount: ",
+			formatSats(m.chanOpenAmount)+" sats")
 		if m.chanOpenTxid != "" {
-			lines = append(lines, "")
-			lines = append(lines,
-				" "+theme.Label.Render("TX ID:"))
+			p.blank()
+			p.labelLine("TX ID:")
 			txid := m.chanOpenTxid
-			maxTx := w - 4
-			if len(txid) > maxTx {
-				txid = txid[:maxTx-3] + "..."
+			if len(txid) > w-4 {
+				txid = txid[:w-7] + "..."
 			}
-			lines = append(lines,
-				" "+theme.Mono.Render(txid))
+			p.mono(txid)
 		}
-		lines = append(lines, "")
-		lines = append(lines, " "+theme.Dim.Render(
-			"Channel will appear as pending."))
+		p.blank()
+		p.dim("Channel will appear as pending.")
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Dim.Render(
-		"Enter to return"))
-
-	return strings.Join(lines, "\n")
+	return p.render()
 }
 
 func (m Model) channelFundPane(w int) string {
-	var lines []string
+	p := newPane(w)
+	p.title(theme.Warning, "Fund Your Wallet")
 
-	lines = append(lines,
-		theme.Warning.Render(" Fund Your Wallet"))
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Value.Render(
+	p.line(" " + theme.Value.Render(
 		"On-chain balance is empty."))
-	lines = append(lines, " "+theme.Value.Render(
+	p.line(" " + theme.Value.Render(
 		"Send Bitcoin to this address:"))
-	lines = append(lines, "")
+	p.blank()
 
 	if m.chanFundAddress != "" {
 		addr := m.chanFundAddress
 		if len(addr) > w-3 {
 			addr = addr[:w-6] + "..."
 		}
-		lines = append(lines,
-			" "+theme.Mono.Render(addr))
+		p.mono(addr)
 	} else {
-		lines = append(lines,
-			" "+theme.Dim.Render(
-				"Generating address..."))
+		p.dim("Generating address...")
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Dim.Render(
-		"Wait for 1 confirmation,"))
-	lines = append(lines, " "+theme.Dim.Render(
-		"then return to open a channel."))
-	lines = append(lines, "")
-	lines = append(lines, " "+theme.Dim.Render(
-		"backspace to go back"))
+	p.blank()
+	p.dim("Wait for 1 confirmation,")
+	p.dim("then return to open a channel.")
 
-	return strings.Join(lines, "\n")
+	return p.render()
+}
+
+// ── Channel close flow panes ─────────────────────────────
+
+func (m Model) channelCloseContent(w int) string {
+	switch m.subview {
+	case svCloseType:
+		return m.channelCloseTypePane(w)
+	case svCloseConfirm:
+		return m.channelCloseConfirmPane(w)
+	case svClosing:
+		return m.channelClosingPane(w)
+	case svCloseResult:
+		return m.channelCloseResultPane(w)
+	}
+	return ""
+}
+
+func (m Model) channelCloseTypePane(w int) string {
+	p := newPane(w)
+	p.title(theme.Header, "Close Channel")
+
+	p.field("Peer:     ", m.closePeerAlias)
+	p.field("Capacity: ",
+		formatSats(m.closeCapacity)+" sats")
+	p.field("Local:    ",
+		formatSats(m.closeLocalBal)+" sats")
+	p.blank()
+
+	isFocused := m.contentFocused && !m.tabFocused
+
+	p.line(" " +
+		theme.Header.Render("Close type:"))
+	p.blank()
+
+	coopPrefix := " "
+	coopStyle := theme.Value
+	if isFocused && m.closeBtnIdx == 0 {
+		coopPrefix = "▸"
+		coopStyle = theme.Action
+	}
+	p.line(fmt.Sprintf(" %s %s",
+		coopPrefix,
+		coopStyle.Render("Cooperative close")))
+	p.line("   " + theme.Dim.Render(
+		"Requires peer online. Funds available"+
+			" immediately."))
+	p.blank()
+
+	forcePrefix := " "
+	forceStyle := theme.Value
+	if isFocused && m.closeBtnIdx == 1 {
+		forcePrefix = "▸"
+		forceStyle = theme.Warning
+	}
+	p.line(fmt.Sprintf(" %s %s",
+		forcePrefix,
+		forceStyle.Render("Force close")))
+	p.line("   " + theme.Dim.Render(
+		"Unilateral. Funds locked ~2 weeks."))
+
+	return p.render()
+}
+
+func (m Model) channelCloseConfirmPane(w int) string {
+	p := newPane(w)
+
+	if m.closeForce {
+		p.title(theme.Warning, "⚠ Force Close Channel")
+	} else {
+		p.title(theme.Warning, "Close Channel")
+	}
+
+	p.field("Peer:     ", m.closePeerAlias)
+	p.field("Capacity: ",
+		formatSats(m.closeCapacity)+" sats")
+	p.field("Your bal: ",
+		formatSats(m.closeLocalBal)+" sats")
+	p.blank()
+
+	if m.closeForce {
+		p.warn("⚠ Force close will lock your funds")
+		p.warn("for up to 2,016 blocks (~2 weeks).")
+		p.warn("Use cooperative close when possible.")
+		p.blank()
+	} else {
+		// Fee tier display for cooperative close
+		anyTier := false
+		for _, t := range m.closeFeeTiers {
+			if t.SatPerVB > 0 {
+				anyTier = true
+				break
+			}
+		}
+		if anyTier {
+			p.line(" " + theme.Label.Render(
+				"Fee Rate:"))
+			tierLine := " "
+			isFocused := m.contentFocused &&
+				!m.tabFocused
+			for i, t := range m.closeFeeTiers {
+				isSelected := isFocused &&
+					m.closeFeeIdx == i
+				var label string
+				if t.SatPerVB > 0 {
+					label = fmt.Sprintf("%s %.0f",
+						t.Label, t.SatPerVB)
+				} else {
+					label = t.Label + " n/a"
+				}
+				if isSelected {
+					tierLine += "▸ " +
+						theme.BtnFocused.Render(
+							label) + "  "
+				} else {
+					tierLine += "  " +
+						theme.BtnNormal.Render(
+							label) + "  "
+				}
+			}
+			p.line(tierLine)
+			p.blank()
+		}
+	}
+
+	if m.closeForce {
+		p.warn("Force close this channel?")
+	} else {
+		p.warn("Close this channel cooperatively?")
+	}
+
+	p.blank()
+	p.dim("y confirm    ⌫ back")
+
+	p.appendError(m.closeError)
+
+	return p.render()
+}
+
+func (m Model) channelClosingPane(w int) string {
+	p := newPane(w)
+	if m.closeForce {
+		p.title(theme.Warning,
+			"Force Closing Channel...")
+	} else {
+		p.title(theme.Header,
+			"Closing Channel...")
+	}
+	p.line(" " + theme.Value.Render(
+		"Broadcasting close transaction."))
+	p.blank()
+	p.dim("May take up to 2 minutes over Tor.")
+	p.dim("Do not close the terminal.")
+	return p.render()
+}
+
+func (m Model) channelCloseResultPane(w int) string {
+	p := newPane(w)
+
+	if m.closeError != "" {
+		p.title(theme.Warning, "Channel Close Failed")
+		p.warn(m.closeError)
+	} else {
+		if m.closeForce {
+			p.title(theme.Warning,
+				"Force Close Broadcast")
+			p.line(" " + theme.Value.Render(
+				"Force close transaction broadcast."))
+			p.blank()
+			p.warn("Funds locked for ~2,016 blocks" +
+				" (~2 weeks).")
+		} else {
+			p.title(theme.Success,
+				"Channel Closing")
+			p.line(" " + theme.Value.Render(
+				"Cooperative close broadcast."))
+		}
+		p.blank()
+		p.field("Peer:   ", m.closePeerAlias)
+		if m.closeTxid != "" {
+			p.blank()
+			p.labelLine("Closing TX:")
+			txid := m.closeTxid
+			if len(txid) > w-4 {
+				txid = txid[:w-7] + "..."
+			}
+			p.mono(txid)
+		}
+	}
+
+	return p.render()
+}
+
+// ── Channel history pane ─────────────────────────────────
+
+func (m Model) channelHistoryPane(w, h int) string {
+	var headerLines []string
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines,
+		centerPad(
+			theme.Header.Render("Channel History"),
+			w))
+	headerLines = append(headerLines, "")
+
+	if len(m.chanHistory) == 0 {
+		headerLines = append(headerLines,
+			" "+theme.Dim.Render(
+				"No channel history."))
+		return strings.Join(headerLines, "\n")
+	}
+
+	isFocused := m.contentFocused && !m.tabFocused
+
+	hdrStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Bold(true)
+	sepStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	peerW := 16
+	capW := 10
+	statusW := 14
+	closeW := w - peerW - capW - statusW - 5
+	if closeW < 8 {
+		closeW = 8
+	}
+
+	hdr := " " +
+		hdrStyle.Render(pad("Peer", peerW)) +
+		hdrStyle.Render(
+			fmt.Sprintf("%*s", capW, "Capacity")) +
+		hdrStyle.Render(
+			pad("  Status", statusW)) +
+		hdrStyle.Render(
+			fmt.Sprintf("%*s", closeW, "Close"))
+	headerLines = append(headerLines, hdr)
+	headerLines = append(headerLines,
+		" "+sepStyle.Render(
+			strings.Repeat("─", w-2)))
+
+	header := strings.Join(headerLines, "\n")
+	headerH := len(headerLines)
+
+	// ── Scrollable rows ──────────────────────────
+	var midLines []string
+
+	selStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("220")).
+		Bold(true)
+
+	for i, ch := range m.chanHistory {
+		isSelected := isFocused &&
+			m.chanHistoryCursor == i
+
+		peer := ch.PeerAlias
+		if peer == "" {
+			if len(ch.RemotePubkey) > 12 {
+				peer = ch.RemotePubkey[:12] + ".."
+			} else {
+				peer = ch.RemotePubkey
+			}
+		}
+		if len(peer) > peerW-1 {
+			peer = peer[:peerW-2] + ".."
+		}
+		peerStr := pad(peer, peerW)
+
+		capStr := fmt.Sprintf("%*s", capW,
+			formatSatsCompact(ch.Capacity))
+
+		statusStr := pad("  "+ch.Status, statusW)
+		closeStr := fmt.Sprintf("%*s",
+			closeW, ch.CloseType)
+
+		marker := " "
+		if isSelected {
+			marker = "▸"
+			midLines = append(midLines,
+				marker+
+					selStyle.Render(peerStr)+
+					selStyle.Render(capStr)+
+					selStyle.Render(statusStr)+
+					selStyle.Render(closeStr))
+		} else {
+			var statusRendered string
+			switch ch.Status {
+			case "active":
+				statusRendered =
+					theme.Good.Render(statusStr)
+			case "inactive":
+				statusRendered =
+					theme.Warn.Render(statusStr)
+			case "pending open":
+				statusRendered =
+					theme.Dim.Render(statusStr)
+			case "pending close", "waiting close":
+				statusRendered =
+					theme.Warn.Render(statusStr)
+			case "force close":
+				statusRendered =
+					theme.Warning.Render(statusStr)
+			case "closed":
+				statusRendered =
+					theme.Dim.Render(statusStr)
+			default:
+				statusRendered =
+					theme.Dim.Render(statusStr)
+			}
+
+			var closeRendered string
+			switch ch.CloseType {
+			case "force", "breach":
+				closeRendered =
+					theme.Warning.Render(closeStr)
+			default:
+				closeRendered =
+					theme.Dim.Render(closeStr)
+			}
+
+			midLines = append(midLines,
+				marker+
+					theme.Value.Render(peerStr)+
+					theme.Value.Render(capStr)+
+					statusRendered+
+					closeRendered)
+		}
+	}
+
+	midContent := strings.Join(midLines, "\n")
+
+	// ── Viewport ─────────────────────────────────
+	vpH := h - headerH
+	if vpH < 1 {
+		vpH = 1
+	}
+
+	vpRendered := renderViewport(
+		midContent, w, vpH,
+		m.chanHistoryCursor,
+		len(midLines),
+		isFocused && len(m.chanHistory) > 0)
+
+	// ── Assemble output ──────────────────────────
+	return header + "\n" + vpRendered
 }
 
 // ── Formatting helpers ───────────────────────────────────

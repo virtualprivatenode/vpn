@@ -24,7 +24,6 @@ func renderBindings(
 	sep := theme.HelpSep.Render(" │ ")
 	sepW := lipgloss.Width(sep)
 
-	// Build all parts first
 	type helpPart struct {
 		rendered string
 		width    int
@@ -51,8 +50,6 @@ func renderBindings(
 		return ""
 	}
 
-	// Calculate how many parts fit within maxW
-	// Start with all parts, drop from end if too wide
 	fitCount := len(parts)
 	for fitCount > 0 {
 		totalW := 0
@@ -69,8 +66,6 @@ func renderBindings(
 	}
 
 	if fitCount == 0 {
-		// Even one part doesn't fit, show first
-		// truncated
 		if len(parts) > 0 {
 			return parts[0].rendered
 		}
@@ -88,40 +83,50 @@ func renderBindings(
 func (m Model) currentBindings() []key.Binding {
 	hasTabs := m.hasDetailTabs()
 
-	// ── Fullscreen views ─────────────────────────
+	// Fullscreen views
 	if m.subview == svQR || m.subview == svFullURL ||
 		m.subview == svSyncthingDeviceQR {
 		return newFullscreenBindings().ShortHelp()
 	}
 
-	// ── Confirm dialogs ──────────────────────────
+	// Confirm dialogs
 	if m.svcConfirm != "" || m.sysConfirm != "" ||
 		m.updateConfirm {
 		return newConfirmBindings().ShortHelp()
 	}
 
-	// ── Sidebar focused ──────────────────────────
+	// Sidebar focused
 	if m.nav.Focused {
 		return newSidebarBindings().ShortHelp()
 	}
 
-	// ── Tab bar focused ──────────────────────────
+	// Tab bar focused
 	if m.tabFocused {
 		return newTabBarBindings().ShortHelp()
 	}
 
-	// ── Detail tab content (view-only) ───────────
+	// Detail tab content (view-only)
 	tabs := m.effectiveTabs()
 	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
 		switch tab.Kind {
-		case tabChannel, tabPayment, tabOnChainTx:
+		case tabPayment, tabOnChainTx:
 			return newDetailTabBindings(hasTabs).
+				ShortHelp()
+		case tabChannelHistory:
+			return newChannelHistoryBindings(hasTabs).
+				ShortHelp()
+		case tabChannel:
+			if isCloseSubview(m.subview) {
+				break // fall through to subview switch
+			}
+			return newChannelsHomeBindings(
+				hasTabs, m.contentFocus == 1).
 				ShortHelp()
 		}
 	}
 
-	// ── Content focused — dispatch by subview ────
+	// Content focused — dispatch by subview
 	switch m.subview {
 	case svChannelOpen:
 		return newPeerSelectBindings(hasTabs).
@@ -175,6 +180,15 @@ func (m Model) currentBindings() []key.Binding {
 		return newWaitingBindings().ShortHelp()
 	case svOnChainResult:
 		return newResultBindings().ShortHelp()
+	case svCloseType:
+		return newCloseTypeBindings().ShortHelp()
+	case svCloseConfirm:
+		return newPayConfirmBindings(hasTabs).
+			ShortHelp()
+	case svClosing:
+		return newWaitingBindings().ShortHelp()
+	case svCloseResult:
+		return newResultBindings().ShortHelp()
 	case svSyncthingDetail:
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
@@ -194,7 +208,8 @@ func (m Model) currentBindings() []key.Binding {
 		return newTextInputBindings(hasTabs).
 			ShortHelp()
 	case svLndHubCreateAccount:
-		return newResultBindings().ShortHelp()
+		return newRecvWaitingBindings(hasTabs).
+			ShortHelp()
 	case svLndHubAccountDetail:
 		return newTextInputBindings(hasTabs).
 			ShortHelp()
@@ -203,9 +218,12 @@ func (m Model) currentBindings() []key.Binding {
 	case svWalletPairing, svZeusPairing:
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
+	case svOnChainReceive:
+		return newRecvWaitingBindings(hasTabs).
+			ShortHelp()
 	}
 
-	// ── Section home views ───────────────────────
+	// Section home views
 	sec := m.nav.ActiveSection()
 	switch sec {
 	case secChannels:

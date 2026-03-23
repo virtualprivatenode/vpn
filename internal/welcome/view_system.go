@@ -12,8 +12,7 @@ import (
 )
 
 func (m Model) systemOverview(w, h int) string {
-	var lines []string
-	lines = append(lines, "")
+	isFocused := m.contentFocused && !m.tabFocused
 
 	boxW := w - 4
 	if boxW < 30 {
@@ -26,12 +25,13 @@ func (m Model) systemOverview(w, h int) string {
 		Foreground(lipgloss.Color("15")).
 		Bold(true)
 
-	isFocused := m.contentFocused && !m.tabFocused
+	// ── Fixed header (version + buttons) ─────────
+	var headerLines []string
+	headerLines = append(headerLines, "")
 
-	// ── Version title (centered, no border) ──────
 	verText := "Virtual Private Node v" +
 		installer.GetVersion()
-	lines = append(lines,
+	headerLines = append(headerLines,
 		centerPad(
 			lipgloss.NewStyle().
 				Bold(true).
@@ -42,17 +42,59 @@ func (m Model) systemOverview(w, h int) string {
 		m.latestVersion != installer.GetVersion() {
 		updateText := "Update available: v" +
 			m.latestVersion
-		lines = append(lines,
+		headerLines = append(headerLines,
 			centerPad(
 				lipgloss.NewStyle().
 					Foreground(lipgloss.Color("34")).
 					Render(updateText), w))
 	}
 
-	lines = append(lines, "")
+	headerLines = append(headerLines, "")
 
-	// ── Services card ────────────────────────────
-	lines = append(lines,
+	hasUpdate := m.latestVersion != "" &&
+		m.latestVersion != m.version
+
+	btnLabels := []string{"Update Packages"}
+	if hasUpdate {
+		btnLabels = append(btnLabels, "Update Node")
+	} else {
+		btnLabels = append(btnLabels, "Up to Date")
+	}
+	if m.status != nil && m.status.rebootRequired {
+		btnLabels = append(btnLabels, "Reboot")
+	}
+
+	headerLines = append(headerLines,
+		renderButtonsWithGray(
+			btnLabels, m.btnIdx,
+			isFocused && m.contentFocus == 1, w,
+			1, !hasUpdate))
+	headerLines = append(headerLines, "")
+
+	if m.updateConfirm {
+		headerLines = append(headerLines,
+			" "+theme.Warning.Render(
+				"Update to v"+m.latestVersion+
+					"? [y/n]"))
+		headerLines = append(headerLines, "")
+	}
+
+	if m.sysConfirm != "" {
+		headerLines = append(headerLines,
+			" "+theme.Warning.Render(
+				fmt.Sprintf("%s? [y/n]",
+					m.sysConfirm)))
+		headerLines = append(headerLines, "")
+	}
+
+	header := strings.Join(headerLines, "\n")
+	headerH := len(headerLines)
+
+	// ── Scrollable middle (all cards) ────────────
+	var midLines []string
+
+	// Services card
+	midLines = append(midLines,
 		"  "+border.Render(
 			"┌"+strings.Repeat("─", boxW-2)+"┐"))
 
@@ -61,7 +103,7 @@ func (m Model) systemOverview(w, h int) string {
 	if svcTitlePad < 0 {
 		svcTitlePad = 0
 	}
-	lines = append(lines,
+	midLines = append(midLines,
 		"  "+border.Render("│")+
 			titleStyle.Render(svcTitle)+
 			strings.Repeat(" ", svcTitlePad)+
@@ -103,7 +145,7 @@ func (m Model) systemOverview(w, h int) string {
 		if svcPad < 0 {
 			svcPad = 0
 		}
-		lines = append(lines,
+		midLines = append(midLines,
 			"  "+border.Render("│")+
 				svcLine+
 				strings.Repeat(" ", svcPad)+
@@ -120,21 +162,21 @@ func (m Model) systemOverview(w, h int) string {
 		if confirmPad < 0 {
 			confirmPad = 0
 		}
-		lines = append(lines,
+		midLines = append(midLines,
 			"  "+border.Render("│")+
 				confirmLine+
 				strings.Repeat(" ", confirmPad)+
 				border.Render("│"))
 	}
 
-	lines = append(lines,
+	midLines = append(midLines,
 		"  "+border.Render(
 			"└"+strings.Repeat("─", boxW-2)+"┘"))
 
-	lines = append(lines, "")
+	midLines = append(midLines, "")
 
-	// ── Resources card ───────────────────────────
-	lines = append(lines,
+	// Resources card
+	midLines = append(midLines,
 		"  "+border.Render(
 			"┌"+strings.Repeat("─", boxW-2)+"┐"))
 
@@ -143,14 +185,14 @@ func (m Model) systemOverview(w, h int) string {
 	if resTitlePad < 0 {
 		resTitlePad = 0
 	}
-	lines = append(lines,
+	midLines = append(midLines,
 		"  "+border.Render("│")+
 			titleStyle.Render(resTitle)+
 			strings.Repeat(" ", resTitlePad)+
 			border.Render("│"))
 
 	if m.status != nil {
-		resLines := []string{
+		resRows := []string{
 			" " + theme.Label.Render("Disk: ") +
 				theme.Value.Render(
 					fmt.Sprintf("%s / %s (%s)",
@@ -168,24 +210,24 @@ func (m Model) systemOverview(w, h int) string {
 					m.status.btcSize),
 		}
 		if m.cfg.HasLND() {
-			resLines = append(resLines,
+			resRows = append(resRows,
 				" "+theme.Label.Render("LND:  ")+
 					theme.Value.Render(
 						m.status.lndSize))
 		}
 		if m.status.rebootRequired {
-			resLines = append(resLines,
+			resRows = append(resRows,
 				" "+theme.Warning.Render(
 					"⚠ Reboot required"))
 		}
 
-		for _, rl := range resLines {
+		for _, rl := range resRows {
 			rlVis := lipgloss.Width(rl)
 			rlPad := boxW - 2 - rlVis
 			if rlPad < 0 {
 				rlPad = 0
 			}
-			lines = append(lines,
+			midLines = append(midLines,
 				"  "+border.Render("│")+
 					rl+
 					strings.Repeat(" ", rlPad)+
@@ -199,21 +241,21 @@ func (m Model) systemOverview(w, h int) string {
 		if loadPad < 0 {
 			loadPad = 0
 		}
-		lines = append(lines,
+		midLines = append(midLines,
 			"  "+border.Render("│")+
 				loadLine+
 				strings.Repeat(" ", loadPad)+
 				border.Render("│"))
 	}
 
-	lines = append(lines,
+	midLines = append(midLines,
 		"  "+border.Render(
 			"└"+strings.Repeat("─", boxW-2)+"┘"))
 
-	lines = append(lines, "")
+	midLines = append(midLines, "")
 
-	// ── Bitcoin card ─────────────────────────────
-	lines = append(lines,
+	// Bitcoin card
+	midLines = append(midLines,
 		"  "+border.Render(
 			"┌"+strings.Repeat("─", boxW-2)+"┐"))
 
@@ -223,7 +265,7 @@ func (m Model) systemOverview(w, h int) string {
 	if btcTitlePad < 0 {
 		btcTitlePad = 0
 	}
-	lines = append(lines,
+	midLines = append(midLines,
 		"  "+border.Render("│")+
 			theme.Bitcoin.Render(btcTitle)+
 			strings.Repeat(" ", btcTitlePad)+
@@ -237,7 +279,7 @@ func (m Model) systemOverview(w, h int) string {
 		if btcLoadPad < 0 {
 			btcLoadPad = 0
 		}
-		lines = append(lines,
+		midLines = append(midLines,
 			"  "+border.Render("│")+
 				btcLoad+
 				strings.Repeat(" ", btcLoadPad)+
@@ -250,44 +292,44 @@ func (m Model) systemOverview(w, h int) string {
 		if btcErrPad < 0 {
 			btcErrPad = 0
 		}
-		lines = append(lines,
+		midLines = append(midLines,
 			"  "+border.Render("│")+
 				btcErr+
 				strings.Repeat(" ", btcErrPad)+
 				border.Render("│"))
 	} else {
-		var btcLines []string
+		var btcRows []string
 		syncVal := theme.Good.Render("synced")
 		if !m.status.btcSynced {
 			syncVal = theme.Warn.Render("syncing")
 		}
-		btcLines = append(btcLines,
+		btcRows = append(btcRows,
 			" "+theme.Label.Render("Sync:     ")+
 				syncVal)
-		btcLines = append(btcLines,
+		btcRows = append(btcRows,
 			" "+theme.Label.Render("Height:   ")+
 				theme.Value.Render(
 					fmt.Sprintf("%d / %d",
 						m.status.btcBlocks,
 						m.status.btcHeaders)))
 		if m.status.btcProgress > 0 {
-			btcLines = append(btcLines,
+			btcRows = append(btcRows,
 				" "+theme.Label.Render("Progress: ")+
 					theme.Value.Render(
 						bitcoin.FormatProgress(
 							m.status.btcProgress)))
 		}
-		btcLines = append(btcLines,
+		btcRows = append(btcRows,
 			" "+theme.Label.Render("Network:  ")+
 				theme.Value.Render(m.cfg.Network))
 
-		for _, bl := range btcLines {
+		for _, bl := range btcRows {
 			blVis := lipgloss.Width(bl)
 			blPad := boxW - 2 - blVis
 			if blPad < 0 {
 				blPad = 0
 			}
-			lines = append(lines,
+			midLines = append(midLines,
 				"  "+border.Render("│")+
 					bl+
 					strings.Repeat(" ", blPad)+
@@ -295,89 +337,26 @@ func (m Model) systemOverview(w, h int) string {
 		}
 	}
 
-	lines = append(lines,
+	midLines = append(midLines,
 		"  "+border.Render(
 			"└"+strings.Repeat("─", boxW-2)+"┘"))
 
-	if m.updateConfirm {
-		lines = append(lines, "")
-		lines = append(lines, " "+theme.Warning.Render(
-			"Update to v"+m.latestVersion+"? [y/n]"))
+	midContent := strings.Join(midLines, "\n")
+
+	// ── Viewport ─────────────────────────────────
+	vpH := h - headerH
+	if vpH < 1 {
+		vpH = 1
 	}
 
-	if m.sysConfirm != "" {
-		lines = append(lines, "")
-		lines = append(lines, " "+theme.Warning.Render(
-			fmt.Sprintf("%s? [y/n]", m.sysConfirm)))
-	}
+	// Services start at line 2 (top border + title)
+	cursorLine := 2 + m.svcCursor
 
-	lines = append(lines, "")
-	lines = append(lines, m.systemButtons(w))
+	vpRendered := renderViewport(
+		midContent, w, vpH, cursorLine,
+		len(midLines),
+		m.contentFocus == 0 && len(names) > 0)
 
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) systemButtons(w int) string {
-	isFocused := m.contentFocused && !m.tabFocused &&
-		m.contentFocus == 1
-
-	btnW := w - 2
-	if btnW < 20 {
-		btnW = 20
-	}
-
-	hasUpdate := m.latestVersion != "" &&
-		m.latestVersion != m.version
-
-	labels := []string{"Update Packages"}
-	if hasUpdate {
-		labels = append(labels, "Update Node")
-	} else {
-		labels = append(labels, "Up to Date")
-	}
-	if m.status != nil && m.status.rebootRequired {
-		labels = append(labels, "Reboot")
-	}
-
-	numBtns := len(labels)
-	gaps := numBtns - 1
-	totalGap := gaps * 2
-	perBtn := (btnW - totalGap) / numBtns
-	if perBtn < 10 {
-		perBtn = 10
-	}
-
-	var parts []string
-	for i, label := range labels {
-		isActive := isFocused && m.btnIdx == i
-
-		// Gray out "Up to Date" button
-		if i == 1 && !hasUpdate {
-			parts = append(parts,
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("240")).
-					Width(perBtn).
-					AlignHorizontal(lipgloss.Center).
-					Render(label))
-			continue
-		}
-
-		if isActive {
-			parts = append(parts,
-				theme.BtnFocused.
-					Width(perBtn).
-					AlignHorizontal(
-						lipgloss.Center).
-					Render(label))
-		} else {
-			parts = append(parts,
-				theme.BtnNormal.
-					Width(perBtn).
-					AlignHorizontal(
-						lipgloss.Center).
-					Render(label))
-		}
-	}
-
-	return " " + strings.Join(parts, "  ")
+	// ── Assemble output ──────────────────────────
+	return header + "\n" + vpRendered
 }
