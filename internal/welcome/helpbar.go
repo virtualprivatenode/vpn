@@ -4,13 +4,10 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
-
-// renderHelpBar returns a styled help string for the
-// current state. Uses our own renderer instead of
-// bubbles/help to match the existing visual style.
 
 func (m Model) renderHelpBar(maxW int) string {
 	bindings := m.currentBindings()
@@ -20,39 +17,74 @@ func (m Model) renderHelpBar(maxW int) string {
 func renderBindings(
 	bindings []key.Binding, maxW int,
 ) string {
-	var parts []string
+	if maxW <= 0 {
+		return ""
+	}
+
+	sep := theme.HelpSep.Render(" │ ")
+	sepW := lipgloss.Width(sep)
+
+	// Build all parts first
+	type helpPart struct {
+		rendered string
+		width    int
+	}
+	var parts []helpPart
 	for _, b := range bindings {
 		if !b.Enabled() {
 			continue
 		}
 		h := b.Help()
-		if h.Key == "" && h.Desc == "" {
-			continue
-		}
 		if h.Key == "" {
 			continue
 		}
 		part := theme.HelpKey.Render(h.Key) +
 			" " +
 			theme.HelpDesc.Render(h.Desc)
-		parts = append(parts, part)
+		parts = append(parts, helpPart{
+			rendered: part,
+			width:    lipgloss.Width(part),
+		})
 	}
 
-	sep := theme.HelpSep.Render(" │ ")
-	result := strings.Join(parts, sep)
-
-	// Truncate if too wide
-	if maxW > 0 && len(result) > maxW*2 {
-		// rough truncation — visual width is less
-		// than byte length due to ANSI codes
-		result = result[:maxW*2]
+	if len(parts) == 0 {
+		return ""
 	}
 
-	return result
+	// Calculate how many parts fit within maxW
+	// Start with all parts, drop from end if too wide
+	fitCount := len(parts)
+	for fitCount > 0 {
+		totalW := 0
+		for i := 0; i < fitCount; i++ {
+			totalW += parts[i].width
+			if i < fitCount-1 {
+				totalW += sepW
+			}
+		}
+		if totalW <= maxW {
+			break
+		}
+		fitCount--
+	}
+
+	if fitCount == 0 {
+		// Even one part doesn't fit, show first
+		// truncated
+		if len(parts) > 0 {
+			return parts[0].rendered
+		}
+		return ""
+	}
+
+	var strs []string
+	for i := 0; i < fitCount; i++ {
+		strs = append(strs, parts[i].rendered)
+	}
+
+	return strings.Join(strs, sep)
 }
 
-// currentBindings returns the key bindings appropriate
-// for the current focus state and subview.
 func (m Model) currentBindings() []key.Binding {
 	hasTabs := m.hasDetailTabs()
 
@@ -111,7 +143,7 @@ func (m Model) currentBindings() []key.Binding {
 		return newTextInputBindings(hasTabs).
 			ShortHelp()
 	case svSend:
-		return newTextInputBindings(hasTabs).
+		return newSendInputBindings(hasTabs).
 			ShortHelp()
 	case svSendConfirm:
 		return newPayConfirmBindings(hasTabs).
@@ -121,7 +153,7 @@ func (m Model) currentBindings() []key.Binding {
 	case svSendResult:
 		return newResultBindings().ShortHelp()
 	case svReceive:
-		return newTwoFieldBindings(hasTabs).
+		return newRecvInputBindings(hasTabs).
 			ShortHelp()
 	case svReceiveWaiting:
 		return newRecvWaitingBindings(hasTabs).
@@ -130,9 +162,6 @@ func (m Model) currentBindings() []key.Binding {
 		return newResultBindings().ShortHelp()
 	case svReceiveExpired:
 		return newResultBindings().ShortHelp()
-	case svOnChain:
-		return newOnChainHomeBindings(hasTabs,
-			m.onChainTxFocus).ShortHelp()
 	case svOnChainSendAddr:
 		return newTextInputBindings(hasTabs).
 			ShortHelp()
@@ -187,12 +216,15 @@ func (m Model) currentBindings() []key.Binding {
 		return newWalletHomeBindings(
 			hasTabs,
 			m.contentFocus == 1).ShortHelp()
+	case secOnChain:
+		return newOnChainHomeBindings(hasTabs,
+			m.onChainTxFocus).ShortHelp()
 	case secAddons:
 		return newAddonsHomeBindings(hasTabs).
 			ShortHelp()
 	case secSystem:
-		return newSystemHomeBindings(hasTabs).
-			ShortHelp()
+		return newSystemHomeBindings(hasTabs,
+			m.contentFocus == 0).ShortHelp()
 	}
 
 	return []key.Binding{kQuit}

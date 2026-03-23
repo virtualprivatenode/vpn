@@ -6,13 +6,16 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Section IDs — 4 parents
+// Section IDs — 5 parents
 const (
 	secChannels = 0
 	secWallet   = 1
-	secAddons   = 2
-	secSystem   = 3
+	secOnChain  = 2
+	secAddons   = 3
+	secSystem   = 4
 )
+
+const numSections = 5
 
 type NavItem struct {
 	Label   string
@@ -36,6 +39,10 @@ var (
 			Foreground(lipgloss.Color("220")).
 			Bold(true)
 
+	navCursorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Bold(true)
+
 	navSepStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("239"))
 )
@@ -44,6 +51,7 @@ func NewNavSidebar() NavSidebar {
 	items := []NavItem{
 		{"Channels", secChannels},
 		{"Wallet", secWallet},
+		{"On-Chain", secOnChain},
 		{"Add-ons", secAddons},
 		{"System", secSystem},
 	}
@@ -98,6 +106,11 @@ func (n *NavSidebar) ActiveSection() int {
 	return n.Items[n.ActiveItem].Section
 }
 
+func (n *NavSidebar) CursorSection() int {
+	n.clamp()
+	return n.Items[n.Cursor].Section
+}
+
 func (n *NavSidebar) SetActive(section int) {
 	for i, it := range n.Items {
 		if it.Section == section {
@@ -108,20 +121,16 @@ func (n *NavSidebar) SetActive(section int) {
 	}
 }
 
-// BlockRows returns styled rows for each of the 4 section
-// blocks. Each block is vertically centered text, sized to
-// fill the sidebar evenly. No borders here — the layout
-// frame handles all border drawing.
-//
-// When focused, the active section shows ▸ to the left of
-// the label. The label stays centered — ▸ occupies the
-// margin space that would otherwise be blank.
+// BlockRows returns styled rows for each section block.
+// Active section label is yellow (always visible).
+// Cursor position shows ▸ when sidebar is focused.
+// Cursor-only (not active) shows bright white.
 func (n NavSidebar) BlockRows(
-	w int, blockHeights [4]int,
-) [4][]string {
-	var blocks [4][]string
+	w int, blockHeights [numSections]int,
+) [numSections][]string {
+	var blocks [numSections][]string
 
-	for si := 0; si < 4; si++ {
+	for si := 0; si < numSections; si++ {
 		bh := blockHeights[si]
 		if bh < 1 {
 			bh = 1
@@ -129,15 +138,17 @@ func (n NavSidebar) BlockRows(
 
 		item := n.Items[si]
 		isActive := n.ActiveItem == si
+		isCursor := n.Cursor == si && n.Focused
 
 		style := navItemStyle
-		if isActive && n.Focused {
+		if isActive {
 			style = navActiveStyle
+		} else if isCursor {
+			style = navCursorStyle
 		}
 
 		label := item.Label
 
-		// Center the label within w
 		labelLen := len([]rune(label))
 		totalPad := w - labelLen
 		if totalPad < 0 {
@@ -146,25 +157,16 @@ func (n NavSidebar) BlockRows(
 		leftPad := totalPad / 2
 		rightPad := totalPad - leftPad
 
-		// Build the title row
 		titleRow := bh / 2
 		var rows []string
 		for r := 0; r < bh; r++ {
 			if r == titleRow {
-				// Place ▸ at position 0 when
-				// active+focused. The label is
-				// centered as normal — ▸ replaces
-				// the first padding space.
-				if isActive && n.Focused &&
-					leftPad >= 1 {
-					row := "▸" +
-						strings.Repeat(" ",
-							leftPad-1) +
-						style.Render(label) +
-						strings.Repeat(" ",
-							rightPad)
-					// Render ▸ in the active style
-					row = navActiveStyle.Render(
+				if isCursor && leftPad >= 1 {
+					markerStyle := navActiveStyle
+					if !isActive {
+						markerStyle = navCursorStyle
+					}
+					row := markerStyle.Render(
 						"▸") +
 						strings.Repeat(" ",
 							leftPad-1) +

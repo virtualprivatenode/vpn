@@ -18,6 +18,19 @@ func (m Model) handleReceiveKey(
 	case "left", "h":
 		m.focusSidebar()
 		return m, nil
+	case "right", "l":
+		// Pass to focused input for cursor movement
+		var cmd tea.Cmd
+		if m.recvAmountInput.Focused() {
+			m.recvAmountInput, cmd =
+				m.recvAmountInput.Update(
+					tea.Msg(msg))
+		} else {
+			m.recvMemoInput, cmd =
+				m.recvMemoInput.Update(
+					tea.Msg(msg))
+		}
+		return m, cmd
 	case "backspace":
 		if m.recvAmountInput.Focused() &&
 			m.recvAmountInput.Value() != "" {
@@ -38,16 +51,13 @@ func (m Model) handleReceiveKey(
 		// Step 1, empty inputs — close tab
 		m.resetReceiveState()
 		return m.closeTab(m.activeTab)
-	case "tab", "down":
+	case "down", "j":
 		if m.recvAmountInput.Focused() {
 			m.recvAmountInput.Blur()
 			m.recvMemoInput.Focus()
-		} else {
-			m.recvMemoInput.Blur()
-			m.recvAmountInput.Focus()
 		}
 		return m, nil
-	case "up":
+	case "up", "k":
 		if m.recvMemoInput.Focused() {
 			m.recvMemoInput.Blur()
 			m.recvAmountInput.Focus()
@@ -176,7 +186,25 @@ func (m Model) handleSendKey(
 	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
+		// If input has content, pass left to input
+		// for cursor movement
+		if m.sendInput.Value() != "" {
+			var cmd tea.Cmd
+			m.sendInput, cmd =
+				m.sendInput.Update(tea.Msg(msg))
+			return m, cmd
+		}
 		m.focusSidebar()
+		return m, nil
+	case "right", "l":
+		// If input has content, pass right to input
+		// for cursor movement
+		if m.sendInput.Value() != "" {
+			var cmd tea.Cmd
+			m.sendInput, cmd =
+				m.sendInput.Update(tea.Msg(msg))
+			return m, cmd
+		}
 		return m, nil
 	case "up", "k":
 		if m.hasDetailTabs() {
@@ -349,7 +377,40 @@ func (m Model) handleChannelCustomPeerKey(
 	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
+		// Pass to focused input for cursor movement
+		if m.chanPubkeyInput.Focused() &&
+			m.chanPubkeyInput.Value() != "" {
+			var cmd tea.Cmd
+			m.chanPubkeyInput, cmd =
+				m.chanPubkeyInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		if m.chanHostInput.Focused() &&
+			m.chanHostInput.Value() != "" {
+			var cmd tea.Cmd
+			m.chanHostInput, cmd =
+				m.chanHostInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
 		m.focusSidebar()
+		return m, nil
+	case "right", "l":
+		if m.chanPubkeyInput.Focused() {
+			var cmd tea.Cmd
+			m.chanPubkeyInput, cmd =
+				m.chanPubkeyInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		if m.chanHostInput.Focused() {
+			var cmd tea.Cmd
+			m.chanHostInput, cmd =
+				m.chanHostInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
 		return m, nil
 	case "backspace":
 		if m.chanPubkeyInput.Focused() &&
@@ -372,7 +433,7 @@ func (m Model) handleChannelCustomPeerKey(
 		m.subview = svChannelOpen
 		m.chanOpenError = ""
 		return m, nil
-	case "tab", "down":
+	case "tab", "down", "j":
 		if m.chanPubkeyInput.Focused() {
 			m.chanPubkeyInput.Blur()
 			m.chanHostInput.Focus()
@@ -381,7 +442,7 @@ func (m Model) handleChannelCustomPeerKey(
 			m.chanPubkeyInput.Focus()
 		}
 		return m, nil
-	case "up":
+	case "up", "k":
 		if m.chanHostInput.Focused() {
 			m.chanHostInput.Blur()
 			m.chanPubkeyInput.Focus()
@@ -436,7 +497,23 @@ func (m Model) handleChannelAmountKey(
 	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
+		if isCustom && m.chanAmountInput.Value() != "" {
+			var cmd tea.Cmd
+			m.chanAmountInput, cmd =
+				m.chanAmountInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
 		m.focusSidebar()
+		return m, nil
+	case "right", "l":
+		if isCustom {
+			var cmd tea.Cmd
+			m.chanAmountInput, cmd =
+				m.chanAmountInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
 		return m, nil
 	case "up", "k":
 		if !isCustom && m.chanAmountPreset > 0 {
@@ -633,7 +710,6 @@ func (m Model) handleSyncDetailKey(
 			m.addonBtnIdx = 0
 		}
 	case "backspace":
-		// Step 1 — close tab
 		return m.closeTab(m.activeTab)
 	}
 	return m, nil
@@ -690,6 +766,25 @@ func (m Model) handleSyncthingPairInputKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "left", "h":
+		if m.syncDeviceInput.Value() != "" {
+			var cmd tea.Cmd
+			m.syncDeviceInput, cmd =
+				m.syncDeviceInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		m.focusSidebar()
+		return m, nil
+	case "right", "l":
+		if m.syncDeviceInput.Value() != "" {
+			var cmd tea.Cmd
+			m.syncDeviceInput, cmd =
+				m.syncDeviceInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		return m, nil
 	case "backspace":
 		if m.syncDeviceInput.Value() == "" &&
 			!m.syncPairSuccess {
@@ -792,7 +887,6 @@ func (m Model) handleLndhubManageKey(
 			}
 		}
 	case "backspace":
-		// Step 1 — close tab
 		return m.closeTab(m.activeTab)
 	}
 	return m, nil
@@ -804,6 +898,25 @@ func (m Model) handleLndHubCreateNameKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "left", "h":
+		if m.hubNameInput.Value() != "" {
+			var cmd tea.Cmd
+			m.hubNameInput, cmd =
+				m.hubNameInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		m.focusSidebar()
+		return m, nil
+	case "right", "l":
+		if m.hubNameInput.Value() != "" {
+			var cmd tea.Cmd
+			m.hubNameInput, cmd =
+				m.hubNameInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		return m, nil
 	case "backspace":
 		if m.hubNameInput.Value() == "" {
 			m.subview = svLndHubManage
