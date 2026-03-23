@@ -11,7 +11,7 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
-// ── Wallet overview (Sparrow-style) ──────────────────────
+// ── Wallet overview ──────────────────────────────────────
 
 func (m Model) walletOverview(w, h int) string {
 	var lines []string
@@ -31,12 +31,19 @@ func (m Model) walletOverview(w, h int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	// ── Action buttons row ───────────────────────
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render("Off-Chain Wallet"), w))
+	lines = append(lines, "")
+	balSummary := m.renderBalanceSummary(w)
+	lines = append(lines, balSummary...)
+	lines = append(lines, "")
 	lines = append(lines, "")
 	lines = append(lines, m.walletButtons(w))
 	lines = append(lines, "")
+	lines = append(lines, "")
 
-	// ── Table header ─────────────────────────────
 	tableW := w - 2
 	if tableW < 40 {
 		tableW = 40
@@ -66,41 +73,35 @@ func (m Model) walletOverview(w, h int) string {
 		hdrStyle.Render(
 			fmt.Sprintf("%*s", balW, "Balance"))
 	lines = append(lines, hdr)
+	lines = append(lines,
+		" "+sepStyle.Render(
+			strings.Repeat("─", tableW)))
 
-	sep := " " + sepStyle.Render(
-		strings.Repeat("─", tableW))
-	lines = append(lines, sep)
-
-	// ── Table rows ───────────────────────────────
 	if len(m.payHistory) == 0 {
 		lines = append(lines,
 			" "+theme.Dim.Render("No payments yet."))
 	} else {
-		visH := h - 7
+		usedLines := len(lines)
+		visH := h - usedLines - 1
 		if visH < 3 {
 			visH = 3
 		}
 
 		balances := make([]int64, len(m.payHistory))
-		if len(m.payHistory) > 0 {
-			var runBal int64
-			// Lightning-only: start from sum of
-			// local channel balances
-			var totalLocal int64
-			for _, ch := range m.status.channels {
-				totalLocal += ch.LocalBalance
-			}
-			runBal = totalLocal
-
-			for i := 0; i < len(m.payHistory); i++ {
-				balances[i] = runBal
-				entry := m.payHistory[i]
-				if entry.IsIncoming {
-					runBal -= entry.AmountSats
-				} else {
-					runBal += entry.AmountSats +
-						entry.FeeSats
-				}
+		var runBal int64
+		var totalLocal int64
+		for _, ch := range m.status.channels {
+			totalLocal += ch.LocalBalance
+		}
+		runBal = totalLocal
+		for i := 0; i < len(m.payHistory); i++ {
+			balances[i] = runBal
+			entry := m.payHistory[i]
+			if entry.IsIncoming {
+				runBal -= entry.AmountSats
+			} else {
+				runBal += entry.AmountSats +
+					entry.FeeSats
 			}
 		}
 
@@ -132,7 +133,6 @@ func (m Model) walletOverview(w, h int) string {
 				entry.CreationDate)
 			dateStr := fmt.Sprintf("%-*s",
 				dateW, date)
-
 			memo := entry.Memo
 			if memo == "" {
 				memo = "—"
@@ -145,12 +145,10 @@ func (m Model) walletOverview(w, h int) string {
 
 			var valStr string
 			if entry.IsIncoming {
-				valStr = fmt.Sprintf("%*s",
-					valW,
+				valStr = fmt.Sprintf("%*s", valW,
 					formatSats(entry.AmountSats))
 			} else {
-				valStr = fmt.Sprintf("%*s",
-					valW,
+				valStr = fmt.Sprintf("%*s", valW,
 					"-"+formatSats(entry.AmountSats))
 			}
 
@@ -161,12 +159,11 @@ func (m Model) walletOverview(w, h int) string {
 			marker := " "
 			if isSelected {
 				marker = "▸"
-				row := marker +
-					selBg.Render(dateStr) +
-					selBg.Render(memoStr) +
-					selBg.Render(valStr) +
-					selBg.Render(balStr)
-				lines = append(lines, row)
+				lines = append(lines, marker+
+					selBg.Render(dateStr)+
+					selBg.Render(memoStr)+
+					selBg.Render(valStr)+
+					selBg.Render(balStr))
 			} else {
 				var valRendered string
 				if entry.IsIncoming {
@@ -176,12 +173,11 @@ func (m Model) walletOverview(w, h int) string {
 					valRendered =
 						negStyle.Render(valStr)
 				}
-				row := marker +
-					theme.Value.Render(dateStr) +
-					theme.Dim.Render(memoStr) +
-					valRendered +
-					theme.Value.Render(balStr)
-				lines = append(lines, row)
+				lines = append(lines, marker+
+					theme.Value.Render(dateStr)+
+					theme.Dim.Render(memoStr)+
+					valRendered+
+					theme.Value.Render(balStr))
 			}
 		}
 
@@ -199,26 +195,42 @@ func (m Model) walletOverview(w, h int) string {
 }
 
 func (m Model) walletButtons(w int) string {
-	labels := []string{
-		"Send", "Receive", "On-Chain", "Pairing",
+	labels := []string{"Send", "Receive", "Pairing"}
+
+	isFocused := m.contentFocused &&
+		!m.tabFocused &&
+		m.contentFocus == 1
+
+	btnW := w - 2
+	if btnW < 20 {
+		btnW = 20
+	}
+	numBtns := len(labels)
+	totalGap := (numBtns - 1) * 2
+	perBtn := (btnW - totalGap) / numBtns
+	if perBtn < 8 {
+		perBtn = 8
 	}
 
 	var parts []string
 	for i, label := range labels {
-		isActive := m.contentFocused &&
-			!m.tabFocused &&
-			m.contentFocus == 1 &&
-			m.btnIdx == i
-
+		isActive := isFocused && m.btnIdx == i
 		if isActive {
 			parts = append(parts,
-				"▸ "+theme.BtnFocused.Render(label))
+				theme.BtnFocused.
+					Width(perBtn).
+					AlignHorizontal(
+						lipgloss.Center).
+					Render(label))
 		} else {
 			parts = append(parts,
-				"  "+theme.BtnNormal.Render(label))
+				theme.BtnNormal.
+					Width(perBtn).
+					AlignHorizontal(
+						lipgloss.Center).
+					Render(label))
 		}
 	}
-
 	return " " + strings.Join(parts, "  ")
 }
 
@@ -235,12 +247,15 @@ func (m Model) paymentDetailContent(w int) string {
 
 	entry := m.payHistory[m.payHistoryCursor]
 	if entry.IsIncoming {
+		lines = append(lines, "")
 		lines = append(lines,
-			theme.Success.Render(
-				" ↓ Received Payment"))
+			centerPad(theme.Success.Render(
+				"↓ Received Payment"), w))
 	} else {
+		lines = append(lines, "")
 		lines = append(lines,
-			theme.Warning.Render(" ↑ Sent Payment"))
+			centerPad(theme.Warning.Render(
+				"↑ Sent Payment"), w))
 	}
 	lines = append(lines, "")
 	lines = append(lines,
@@ -289,7 +304,6 @@ func (m Model) paymentDetailContent(w int) string {
 		lines = append(lines,
 			" "+theme.Mono.Render(hash))
 	}
-
 	if len(entry.Hops) > 0 {
 		lines = append(lines, "")
 		lines = append(lines,
@@ -297,16 +311,17 @@ func (m Model) paymentDetailContent(w int) string {
 		lines = append(lines,
 			renderRouteDiagram(entry.Hops, w))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
-// ── Send/Receive panes ───────────────────────────────────
+// ── Send panes ───────────────────────────────────────────
 
 func (m Model) walletSendPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Send Payment"))
+		centerPad(
+			theme.Header.Render("⚡ Send Payment"), w))
 	lines = append(lines, "")
 
 	if !m.cfg.HasLND() || !m.cfg.WalletExists() {
@@ -320,10 +335,6 @@ func (m Model) walletSendPane(w int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	balance := "0"
-	if m.status.lndBalance != "" {
-		balance = m.status.lndBalance
-	}
 	var totalLocal int64
 	if m.status != nil {
 		for _, ch := range m.status.channels {
@@ -331,17 +342,11 @@ func (m Model) walletSendPane(w int) string {
 		}
 	}
 	lines = append(lines,
-		" "+theme.Label.Render("On-chain: ")+
-			theme.Value.Render(
-				formatSats(parseBalance(balance))+
-					" sats"))
-	lines = append(lines,
-		" "+theme.Label.Render("Sendable: ")+
+		" "+theme.Label.Render("Spendable: ")+
 			theme.Value.Render(
 				formatSats(totalLocal)+" sats"))
 	lines = append(lines, "")
 
-	// Yellow label when content focused
 	labelStyle := theme.Label
 	markerStyle := theme.Dim
 	if m.contentFocused {
@@ -357,21 +362,23 @@ func (m Model) walletSendPane(w int) string {
 	lines = append(lines, " "+theme.Dim.Render(
 		"Paste a bolt11 invoice"))
 	lines = append(lines, " "+theme.Dim.Render(
-		"Enter to decode  Backspace to cancel"))
+		"←→ cursor  Enter decode  ⌫ cancel"))
 
 	if m.sendError != "" {
 		lines = append(lines, "")
 		lines = append(lines,
 			" "+theme.Warning.Render(m.sendError))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) walletSendConfirmPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Warning.Render(" Confirm Payment"))
+		centerPad(
+			theme.Warning.Render(
+				"Confirm Payment"), w))
 	lines = append(lines, "")
 	lines = append(lines,
 		" "+theme.Label.Render("Amount:      ")+
@@ -407,8 +414,11 @@ func (m Model) walletSendConfirmPane(w int) string {
 
 func (m Model) walletSendInFlightPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Sending Payment..."))
+		centerPad(
+			theme.Header.Render(
+				"Sending Payment..."), w))
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Value.Render(
 		"Routing "+formatSats(m.sendDecodedAmt)+
@@ -423,14 +433,20 @@ func (m Model) walletSendResultPane(w int) string {
 	var lines []string
 
 	if m.sendError != "" {
+		lines = append(lines, "")
 		lines = append(lines,
-			theme.Warning.Render(" Payment Failed"))
+			centerPad(
+				theme.Warning.Render(
+					"Payment Failed"), w))
 		lines = append(lines, "")
 		lines = append(lines,
 			" "+theme.Warning.Render(m.sendError))
 	} else {
+		lines = append(lines, "")
 		lines = append(lines,
-			theme.Success.Render(" Payment Sent"))
+			centerPad(
+				theme.Success.Render(
+					"Payment Sent"), w))
 		lines = append(lines, "")
 		lines = append(lines,
 			" "+theme.Label.Render("Amount: ")+
@@ -469,10 +485,15 @@ func (m Model) walletSendResultPane(w int) string {
 	return strings.Join(lines, "\n")
 }
 
+// ── Receive panes ────────────────────────────────────────
+
 func (m Model) walletReceivePane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Receive Payment"))
+		centerPad(
+			theme.Header.Render(
+				"⚡ Receive Payment"), w))
 	lines = append(lines, "")
 
 	if !m.cfg.HasLND() || !m.cfg.WalletExists() {
@@ -515,7 +536,7 @@ func (m Model) walletReceivePane(w int) string {
 		memoMarker+" "+m.recvMemoInput.View())
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
-		"Tab to switch fields"))
+		"↑↓ switch fields"))
 	lines = append(lines, " "+theme.Dim.Render(
 		"Enter to create invoice  "+
 			"Backspace to cancel"))
@@ -530,8 +551,11 @@ func (m Model) walletReceivePane(w int) string {
 
 func (m Model) walletReceiveWaitingPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Waiting for Payment"))
+		centerPad(
+			theme.Header.Render(
+				"Waiting for Payment"), w))
 	lines = append(lines, "")
 	lines = append(lines,
 		" "+theme.Label.Render("Amount: ")+
@@ -552,26 +576,42 @@ func (m Model) walletReceiveWaitingPane(w int) string {
 
 		btnFocused := m.contentFocused &&
 			!m.tabFocused
-
-		qrBtn := "Show QR"
-		copyBtn := "Full Invoice"
-		if btnFocused && m.recvButtonIdx == 0 {
-			qrBtn = "▸ " +
-				theme.BtnFocused.Render(qrBtn)
-			copyBtn = "  " +
-				theme.BtnNormal.Render(copyBtn)
-		} else if btnFocused && m.recvButtonIdx == 1 {
-			qrBtn = "  " +
-				theme.BtnNormal.Render(qrBtn)
-			copyBtn = "▸ " +
-				theme.BtnFocused.Render(copyBtn)
-		} else {
-			qrBtn = "  " +
-				theme.BtnNormal.Render(qrBtn)
-			copyBtn = "  " +
-				theme.BtnNormal.Render(copyBtn)
+		btnLabels := []string{
+			"Show QR", "Full Invoice",
 		}
-		lines = append(lines, " "+qrBtn+"  "+copyBtn)
+		btnW := w - 2
+		if btnW < 20 {
+			btnW = 20
+		}
+		numBtns := len(btnLabels)
+		totalGap := (numBtns - 1) * 2
+		perBtn := (btnW - totalGap) / numBtns
+		if perBtn < 10 {
+			perBtn = 10
+		}
+
+		var btnParts []string
+		for i, label := range btnLabels {
+			isActive := btnFocused &&
+				m.recvButtonIdx == i
+			if isActive {
+				btnParts = append(btnParts,
+					theme.BtnFocused.
+						Width(perBtn).
+						AlignHorizontal(
+							lipgloss.Center).
+						Render(label))
+			} else {
+				btnParts = append(btnParts,
+					theme.BtnNormal.
+						Width(perBtn).
+						AlignHorizontal(
+							lipgloss.Center).
+						Render(label))
+			}
+		}
+		lines = append(lines,
+			" "+strings.Join(btnParts, "  "))
 	}
 
 	lines = append(lines, "")
@@ -584,8 +624,11 @@ func (m Model) walletReceiveWaitingPane(w int) string {
 
 func (m Model) walletReceivePaidPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Success.Render(" Payment Received"))
+		centerPad(
+			theme.Success.Render(
+				"Payment Received"), w))
 	lines = append(lines, "")
 	lines = append(lines,
 		" "+theme.Label.Render("Amount: ")+
@@ -599,8 +642,11 @@ func (m Model) walletReceivePaidPane(w int) string {
 
 func (m Model) walletReceiveExpiredPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Warning.Render(" Invoice Expired"))
+		centerPad(
+			theme.Warning.Render(
+				"Invoice Expired"), w))
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
 		"Create a new invoice to try again."))
@@ -610,10 +656,14 @@ func (m Model) walletReceiveExpiredPane(w int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) walletOnChainContent(w int) string {
+// ── On-Chain overview ────────────────────────────────────
+
+func (m Model) onChainOverview(w, h int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" On-Chain Wallet"))
+		centerPad(
+			theme.Header.Render("On-Chain Wallet"), w))
 	lines = append(lines, "")
 
 	if !m.cfg.HasLND() || !m.cfg.WalletExists() {
@@ -627,21 +677,6 @@ func (m Model) walletOnChainContent(w int) string {
 		return strings.Join(lines, "\n")
 	}
 
-	// Route send flow subviews
-	switch m.subview {
-	case svOnChainResult:
-		return m.onChainResultContent(w)
-	case svOnChainSendAddr:
-		return m.onChainSendAddrPane(w)
-	case svOnChainSendAmount:
-		return m.onChainSendAmountPane(w)
-	case svOnChainSendConfirm:
-		return m.onChainSendConfirmPane(w)
-	case svOnChainSendBroadcast:
-		return m.onChainSendBroadcastPane(w)
-	}
-
-	// On-chain overview
 	onchain := "0"
 	if m.status.lndBalance != "" {
 		onchain = m.status.lndBalance
@@ -665,11 +700,21 @@ func (m Model) walletOnChainContent(w int) string {
 	}
 	lines = append(lines, "")
 
-	// Buttons
 	btnFocused := m.contentFocused && !m.tabFocused
 	btnLabels := []string{
-		"New Address", "Refresh", "Send",
+		"Receive", "Send", "Refresh",
 	}
+	btnW := w - 2
+	if btnW < 20 {
+		btnW = 20
+	}
+	numBtns := len(btnLabels)
+	totalGap := (numBtns - 1) * 2
+	perBtn := (btnW - totalGap) / numBtns
+	if perBtn < 8 {
+		perBtn = 8
+	}
+
 	var btnParts []string
 	for i, label := range btnLabels {
 		isActive := btnFocused &&
@@ -677,17 +722,24 @@ func (m Model) walletOnChainContent(w int) string {
 			m.onChainBtnIdx == i
 		if isActive {
 			btnParts = append(btnParts,
-				"▸ "+theme.BtnFocused.Render(label))
+				theme.BtnFocused.
+					Width(perBtn).
+					AlignHorizontal(
+						lipgloss.Center).
+					Render(label))
 		} else {
 			btnParts = append(btnParts,
-				"  "+theme.BtnNormal.Render(label))
+				theme.BtnNormal.
+					Width(perBtn).
+					AlignHorizontal(
+						lipgloss.Center).
+					Render(label))
 		}
 	}
 	lines = append(lines,
 		" "+strings.Join(btnParts, "  "))
 	lines = append(lines, "")
 
-	// ── On-Chain Transactions Table ──────────────
 	lines = append(lines,
 		" "+theme.Header.Render("Transactions"))
 	lines = append(lines, "")
@@ -712,10 +764,8 @@ func (m Model) walletOnChainContent(w int) string {
 		}
 
 		hdr := " " +
-			hdrStyle.Render(
-				pad("Date", dateW)) +
-			hdrStyle.Render(
-				pad("Type", typeW)) +
+			hdrStyle.Render(pad("Date", dateW)) +
+			hdrStyle.Render(pad("Type", typeW)) +
 			hdrStyle.Render(
 				fmt.Sprintf("%*s", amtW, "Amount")) +
 			hdrStyle.Render(
@@ -725,12 +775,10 @@ func (m Model) walletOnChainContent(w int) string {
 			" "+sepStyle.Render(
 				strings.Repeat("─", w-2)))
 
-		// Show max 8 rows in overview
 		maxRows := 8
 		if len(m.onChainTxs) < maxRows {
 			maxRows = len(m.onChainTxs)
 		}
-
 		startIdx := 0
 		if m.onChainTxFocus == 1 &&
 			m.onChainTxCursor >= maxRows {
@@ -750,26 +798,20 @@ func (m Model) walletOnChainContent(w int) string {
 
 			date := formatTimestamp(tx.Timestamp)
 			dateStr := pad(date, dateW)
-
 			txType := tx.Label
 			if len(txType) > typeW-1 {
 				txType = txType[:typeW-2] + ".."
 			}
 			typeStr := pad(txType, typeW)
 
-			// Amount: positive for receive,
-			// negative for send
 			var amtStr string
 			if tx.Amount >= 0 {
-				amtStr = fmt.Sprintf("%*s",
-					amtW,
+				amtStr = fmt.Sprintf("%*s", amtW,
 					"+"+formatSats(tx.Amount))
 			} else {
-				amtStr = fmt.Sprintf("%*s",
-					amtW,
+				amtStr = fmt.Sprintf("%*s", amtW,
 					formatSats(tx.Amount))
 			}
-
 			confStr := fmt.Sprintf("%*d",
 				confW, tx.Confirmations)
 			if tx.Confirmations == 0 {
@@ -784,28 +826,24 @@ func (m Model) walletOnChainContent(w int) string {
 					Foreground(
 						lipgloss.Color("220")).
 					Bold(true)
-				lines = append(lines,
-					marker+
-						selStyle.Render(dateStr)+
-						selStyle.Render(typeStr)+
-						selStyle.Render(amtStr)+
-						selStyle.Render(confStr))
+				lines = append(lines, marker+
+					selStyle.Render(dateStr)+
+					selStyle.Render(typeStr)+
+					selStyle.Render(amtStr)+
+					selStyle.Render(confStr))
 			} else {
 				amtStyle := lipgloss.NewStyle().
-					Foreground(
-						lipgloss.Color("15"))
+					Foreground(lipgloss.Color("15"))
 				if tx.Amount < 0 {
 					amtStyle = lipgloss.NewStyle().
 						Foreground(
 							lipgloss.Color("196"))
 				}
-				lines = append(lines,
-					marker+
-						theme.Dim.Render(dateStr)+
-						theme.Value.Render(
-							typeStr)+
-						amtStyle.Render(amtStr)+
-						theme.Dim.Render(confStr))
+				lines = append(lines, marker+
+					theme.Dim.Render(dateStr)+
+					theme.Value.Render(typeStr)+
+					amtStyle.Render(amtStr)+
+					theme.Dim.Render(confStr))
 			}
 		}
 
@@ -820,8 +858,6 @@ func (m Model) walletOnChainContent(w int) string {
 	}
 
 	lines = append(lines, "")
-
-	// ── UTXOs Table ──────────────────────────────
 	lines = append(lines,
 		" "+theme.Header.Render("UTXOs"))
 	lines = append(lines, "")
@@ -845,8 +881,7 @@ func (m Model) walletOnChainContent(w int) string {
 		}
 
 		hdr := " " +
-			hdrStyle.Render(
-				pad("Txid", txidW)) +
+			hdrStyle.Render(pad("Txid", txidW)) +
 			hdrStyle.Render(
 				fmt.Sprintf("%*s", amtW, "Amount")) +
 			hdrStyle.Render(
@@ -869,13 +904,10 @@ func (m Model) walletOnChainContent(w int) string {
 				txid = txid[:txidW-3] + "..."
 			}
 			txidStr := pad(txid, txidW)
-
 			amtStr := fmt.Sprintf("%*s", amtW,
 				formatSats(u.AmountSats))
-
 			confStr := fmt.Sprintf("%*d", confW,
 				u.Confirmations)
-
 			addr := u.Address
 			if len(addr) > addrW {
 				addr = addr[:addrW-3] + "..."
@@ -890,19 +922,17 @@ func (m Model) walletOnChainContent(w int) string {
 					Foreground(
 						lipgloss.Color("220")).
 					Bold(true)
-				lines = append(lines,
-					marker+
-						selStyle.Render(txidStr)+
-						selStyle.Render(amtStr)+
-						selStyle.Render(confStr)+
-						selStyle.Render(addrStr))
+				lines = append(lines, marker+
+					selStyle.Render(txidStr)+
+					selStyle.Render(amtStr)+
+					selStyle.Render(confStr)+
+					selStyle.Render(addrStr))
 			} else {
-				lines = append(lines,
-					marker+
-						theme.Mono.Render(txidStr)+
-						theme.Value.Render(amtStr)+
-						theme.Dim.Render(confStr)+
-						theme.Dim.Render(addrStr))
+				lines = append(lines, marker+
+					theme.Mono.Render(txidStr)+
+					theme.Value.Render(amtStr)+
+					theme.Dim.Render(confStr)+
+					theme.Dim.Render(addrStr))
 			}
 		}
 	}
@@ -910,151 +940,93 @@ func (m Model) walletOnChainContent(w int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) onChainTxDetailPane(
-	tx lndrpc.OnChainTx, w int,
-) string {
+// ── On-Chain Receive pane ────────────────────────────────
+
+func (m Model) onChainReceivePane(w int) string {
 	var lines []string
-
-	// Header with type icon
-	switch tx.TxType {
-	case "channel_open":
-		lines = append(lines,
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
 			theme.Header.Render(
-				" ⚡ Channel Open"))
-	case "channel_close":
-		lines = append(lines,
-			theme.Warning.Render(
-				" ⚡ Channel Close"))
-	case "send":
-		lines = append(lines,
-			theme.Warning.Render(
-				" ↑ On-Chain Send"))
-	default:
-		lines = append(lines,
-			theme.Success.Render(
-				" ↓ On-Chain Receive"))
-	}
+				"⛓ Receive On-Chain"), w))
 	lines = append(lines, "")
 
-	// Basic info
-	if tx.ChannelPeer != "" {
+	if m.ocRecvAddress == "" {
 		lines = append(lines,
-			" "+theme.Label.Render("Peer:    ")+
-				theme.Value.Render(tx.ChannelPeer))
-	}
-
-	absAmt := tx.Amount
-	if absAmt < 0 {
-		absAmt = -absAmt
-	}
-	lines = append(lines,
-		" "+theme.Label.Render("Amount:  ")+
-			theme.Value.Render(
-				formatSats(absAmt)+" sats"))
-
-	if tx.Fee > 0 {
-		lines = append(lines,
-			" "+theme.Label.Render("Fee:     ")+
-				theme.Value.Render(
-					formatSats(tx.Fee)+" sats"))
-	}
-
-	confStr := fmt.Sprintf("%d", tx.Confirmations)
-	if tx.Confirmations == 0 {
-		confStr = "pending"
-	}
-	lines = append(lines,
-		" "+theme.Label.Render("Confs:   ")+
-			theme.Value.Render(confStr))
-
-	if tx.BlockHeight > 0 {
-		lines = append(lines,
-			" "+theme.Label.Render("Block:   ")+
-				theme.Value.Render(
-					fmt.Sprintf("%d",
-						tx.BlockHeight)))
+			" "+theme.Dim.Render(
+				"Generating address..."))
+		return strings.Join(lines, "\n")
 	}
 
 	lines = append(lines,
-		" "+theme.Label.Render("Date:    ")+
-			theme.Value.Render(
-				formatTimestampFull(tx.Timestamp)))
-
-	// Txid
+		" "+theme.Label.Render("Address:"))
+	addr := m.ocRecvAddress
+	if len(addr) > w-4 {
+		addr = addr[:w-7] + "..."
+	}
+	lines = append(lines,
+		" "+theme.Mono.Render(addr))
 	lines = append(lines, "")
-	lines = append(lines,
-		" "+theme.Label.Render("TX ID:"))
-	txid := tx.Txid
-	if len(txid) > w-4 {
-		txid = txid[:w-7] + "..."
+	lines = append(lines, " "+theme.Dim.Render(
+		"Send Bitcoin to this address."))
+	lines = append(lines, " "+theme.Dim.Render(
+		"Funds appear after 1 confirmation."))
+	lines = append(lines, "")
+
+	btnFocused := m.contentFocused && !m.tabFocused
+	btnLabels := []string{"Show QR", "New Address"}
+	btnW := w - 2
+	if btnW < 20 {
+		btnW = 20
+	}
+	numBtns := len(btnLabels)
+	totalGap := (numBtns - 1) * 2
+	perBtn := (btnW - totalGap) / numBtns
+	if perBtn < 10 {
+		perBtn = 10
+	}
+
+	var btnParts []string
+	for i, label := range btnLabels {
+		isActive := btnFocused &&
+			m.ocRecvBtnIdx == i
+		if isActive {
+			btnParts = append(btnParts,
+				theme.BtnFocused.
+					Width(perBtn).
+					AlignHorizontal(
+						lipgloss.Center).
+					Render(label))
+		} else {
+			btnParts = append(btnParts,
+				theme.BtnNormal.
+					Width(perBtn).
+					AlignHorizontal(
+						lipgloss.Center).
+					Render(label))
+		}
 	}
 	lines = append(lines,
-		" "+theme.Mono.Render(txid))
+		" "+strings.Join(btnParts, "  "))
 
-	// ── Inputs / Outputs diagram ─────────────────
-	if len(tx.Outputs) > 0 {
+	if m.ocRecvError != "" {
 		lines = append(lines, "")
 		lines = append(lines,
-			" "+theme.Label.Render("Outputs"))
-
-		for i, out := range tx.Outputs {
-			addr := out.Address
-			if len(addr) > w-26 {
-				addr = addr[:w-29] + "..."
-			}
-
-			amtStr := formatSats(out.Amount)
-			if out.Amount == 0 {
-				amtStr = "—"
-			}
-
-			labelStr := ""
-			if out.Label != "" {
-				labelStr = " (" + out.Label + ")"
-			}
-
-			isLast := i == len(tx.Outputs)-1
-			connector := "├──"
-			if isLast {
-				connector = "└──"
-			}
-
-			addrStyle := theme.Mono
-			if out.Label == "destination" ||
-				out.Label == "channel" {
-				addrStyle = theme.Value
-			}
-
-			line := fmt.Sprintf("  %s %s  %s%s",
-				connector,
-				addrStyle.Render(addr),
-				theme.Value.Render(amtStr+" sats"),
-				theme.Dim.Render(labelStr))
-			lines = append(lines, line)
-
-			if !isLast {
-				lines = append(lines, "  │")
-			}
-		}
-
-		// Fee line at the bottom
-		if tx.Fee > 0 {
-			lines = append(lines, "")
-			lines = append(lines,
-				"  "+theme.Dim.Render("Fee: ")+
-					theme.Value.Render(
-						formatSats(tx.Fee)+
-							" sats"))
-		}
+			" "+theme.Warning.Render(m.ocRecvError))
 	}
 
 	return strings.Join(lines, "\n")
 }
+
+// ── On-Chain send panes ──────────────────────────────────
 
 func (m Model) onChainSendAddrPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Send On-Chain"))
+		centerPad(
+			theme.Header.Render(
+				"⛓ Send On-Chain"), w))
 	lines = append(lines, "")
 
 	onchain := "0"
@@ -1089,18 +1061,19 @@ func (m Model) onChainSendAddrPane(w int) string {
 			" "+theme.Warning.Render(
 				m.onChainSendError))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) onChainSendAmountPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Send On-Chain"))
+		centerPad(
+			theme.Header.Render(
+				"⛓ Send On-Chain"), w))
 	lines = append(lines, "")
 
 	isFocused := m.contentFocused && !m.tabFocused
-
 	addr := m.ocSendAddrVal
 	if len(addr) > w-14 {
 		addr = addr[:w-17] + "..."
@@ -1117,7 +1090,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 		amtMarker = navActiveStyle.Render("▸")
 		amtLabelStyle = navActiveStyle
 	}
-
 	if m.ocSendAll {
 		lines = append(lines,
 			" "+amtLabelStyle.Render("Amount:"))
@@ -1131,7 +1103,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 		lines = append(lines,
 			amtMarker+" "+m.ocSendAmtInput.View())
 	}
-
 	lines = append(lines, " "+theme.Dim.Render(
 		"Tab to toggle Send All"))
 	lines = append(lines, "")
@@ -1151,7 +1122,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 			break
 		}
 	}
-
 	if !anyTier {
 		lines = append(lines,
 			" "+theme.Dim.Render(
@@ -1162,7 +1132,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 			isSelected := isFocused &&
 				m.ocSendStep == 1 &&
 				m.ocSelectedTier == i
-
 			var label string
 			if t.SatPerVB > 0 {
 				label = fmt.Sprintf("%s %.0f",
@@ -1170,7 +1139,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 			} else {
 				label = t.Label + " n/a"
 			}
-
 			if isSelected {
 				tierLine += "▸ " +
 					theme.BtnFocused.Render(label) +
@@ -1181,7 +1149,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 					"  "
 			}
 		}
-
 		customLabel := "Custom"
 		isCustom := isFocused &&
 			m.ocSendStep == 1 &&
@@ -1193,7 +1160,6 @@ func (m Model) onChainSendAmountPane(w int) string {
 			tierLine += "  " +
 				theme.BtnNormal.Render(customLabel)
 		}
-
 		lines = append(lines, tierLine)
 
 		if m.ocSelectedTier == 4 {
@@ -1226,14 +1192,16 @@ func (m Model) onChainSendAmountPane(w int) string {
 			" "+theme.Warning.Render(
 				m.onChainSendError))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) onChainSendConfirmPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Warning.Render(" Confirm On-Chain Send"))
+		centerPad(
+			theme.Warning.Render(
+				"Confirm On-Chain Send"), w))
 	lines = append(lines, "")
 
 	addr := m.ocSendAddrVal
@@ -1243,7 +1211,6 @@ func (m Model) onChainSendConfirmPane(w int) string {
 	lines = append(lines,
 		" "+theme.Label.Render("To:       ")+
 			theme.Mono.Render(addr))
-
 	if m.ocSendAll {
 		lines = append(lines,
 			" "+theme.Label.Render("Amount:   ")+
@@ -1255,20 +1222,17 @@ func (m Model) onChainSendConfirmPane(w int) string {
 					formatSats(m.ocSendAmtVal)+
 						" sats"))
 	}
-
 	lines = append(lines,
 		" "+theme.Label.Render("Fee Rate: ")+
 			theme.Value.Render(
 				fmt.Sprintf("%d sat/vB",
 					m.ocSendFeeRate)))
-
 	if m.ocSelectedTier < 4 {
 		tier := m.ocFeeTiers[m.ocSelectedTier]
 		lines = append(lines,
 			" "+theme.Label.Render("Target:   ")+
 				theme.Value.Render(tier.Label))
 	}
-
 	if m.ocConfirmFee > 0 {
 		lines = append(lines,
 			" "+theme.Label.Render("Est. Fee: ")+
@@ -1284,9 +1248,7 @@ func (m Model) onChainSendConfirmPane(w int) string {
 							" sats"))
 		}
 	}
-
 	lines = append(lines, "")
-
 	if m.ocSendAll {
 		lines = append(lines, " "+theme.Warning.Render(
 			"Send entire balance?"))
@@ -1295,7 +1257,6 @@ func (m Model) onChainSendConfirmPane(w int) string {
 			"Send "+formatSats(m.ocSendAmtVal)+
 				" sats?"))
 	}
-
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
 		"y confirm  backspace cancel"))
@@ -1306,14 +1267,16 @@ func (m Model) onChainSendConfirmPane(w int) string {
 			" "+theme.Warning.Render(
 				m.onChainSendError))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
 func (m Model) onChainSendBroadcastPane(w int) string {
 	var lines []string
+	lines = append(lines, "")
 	lines = append(lines,
-		theme.Header.Render(" Broadcasting..."))
+		centerPad(
+			theme.Header.Render(
+				"Broadcasting..."), w))
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Value.Render(
 		"Sending transaction to the network."))
@@ -1327,17 +1290,21 @@ func (m Model) onChainResultContent(w int) string {
 	var lines []string
 
 	if m.onChainSendError != "" {
+		lines = append(lines, "")
 		lines = append(lines,
-			theme.Warning.Render(
-				" On-Chain Send Failed"))
+			centerPad(
+				theme.Warning.Render(
+					"On-Chain Send Failed"), w))
 		lines = append(lines, "")
 		lines = append(lines,
 			" "+theme.Warning.Render(
 				m.onChainSendError))
 	} else {
+		lines = append(lines, "")
 		lines = append(lines,
-			theme.Success.Render(
-				" Transaction Broadcast"))
+			centerPad(
+				theme.Success.Render(
+					"Transaction Broadcast"), w))
 		lines = append(lines, "")
 		if m.onChainSendTxid != "" {
 			lines = append(lines,
@@ -1354,6 +1321,132 @@ func (m Model) onChainResultContent(w int) string {
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
 		"Enter to return"))
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) onChainTxDetailPane(
+	tx lndrpc.OnChainTx, w int,
+) string {
+	var lines []string
+
+	switch tx.TxType {
+	case "channel_open":
+		lines = append(lines, "")
+		lines = append(lines,
+			centerPad(theme.Header.Render(
+				"⚡ Channel Open"), w))
+	case "channel_close":
+		lines = append(lines, "")
+		lines = append(lines,
+			centerPad(theme.Warning.Render(
+				"⚡ Channel Close"), w))
+	case "send":
+		lines = append(lines, "")
+		lines = append(lines,
+			centerPad(theme.Warning.Render(
+				"↑ On-Chain Send"), w))
+	default:
+		lines = append(lines, "")
+		lines = append(lines,
+			centerPad(theme.Success.Render(
+				"↓ On-Chain Receive"), w))
+	}
+	lines = append(lines, "")
+
+	if tx.ChannelPeer != "" {
+		lines = append(lines,
+			" "+theme.Label.Render("Peer:    ")+
+				theme.Value.Render(tx.ChannelPeer))
+	}
+	absAmt := tx.Amount
+	if absAmt < 0 {
+		absAmt = -absAmt
+	}
+	lines = append(lines,
+		" "+theme.Label.Render("Amount:  ")+
+			theme.Value.Render(
+				formatSats(absAmt)+" sats"))
+	if tx.Fee > 0 {
+		lines = append(lines,
+			" "+theme.Label.Render("Fee:     ")+
+				theme.Value.Render(
+					formatSats(tx.Fee)+" sats"))
+	}
+	confStr := fmt.Sprintf("%d", tx.Confirmations)
+	if tx.Confirmations == 0 {
+		confStr = "pending"
+	}
+	lines = append(lines,
+		" "+theme.Label.Render("Confs:   ")+
+			theme.Value.Render(confStr))
+	if tx.BlockHeight > 0 {
+		lines = append(lines,
+			" "+theme.Label.Render("Block:   ")+
+				theme.Value.Render(
+					fmt.Sprintf("%d",
+						tx.BlockHeight)))
+	}
+	lines = append(lines,
+		" "+theme.Label.Render("Date:    ")+
+			theme.Value.Render(
+				formatTimestampFull(tx.Timestamp)))
+
+	lines = append(lines, "")
+	lines = append(lines,
+		" "+theme.Label.Render("TX ID:"))
+	txid := tx.Txid
+	if len(txid) > w-4 {
+		txid = txid[:w-7] + "..."
+	}
+	lines = append(lines,
+		" "+theme.Mono.Render(txid))
+
+	if len(tx.Outputs) > 0 {
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Label.Render("Outputs"))
+		for i, out := range tx.Outputs {
+			addr := out.Address
+			if len(addr) > w-26 {
+				addr = addr[:w-29] + "..."
+			}
+			amtStr := formatSats(out.Amount)
+			if out.Amount == 0 {
+				amtStr = "—"
+			}
+			labelStr := ""
+			if out.Label != "" {
+				labelStr = " (" + out.Label + ")"
+			}
+			isLast := i == len(tx.Outputs)-1
+			connector := "├──"
+			if isLast {
+				connector = "└──"
+			}
+			addrStyle := theme.Mono
+			if out.Label == "destination" ||
+				out.Label == "channel" {
+				addrStyle = theme.Value
+			}
+			line := fmt.Sprintf("  %s %s  %s%s",
+				connector,
+				addrStyle.Render(addr),
+				theme.Value.Render(amtStr+" sats"),
+				theme.Dim.Render(labelStr))
+			lines = append(lines, line)
+			if !isLast {
+				lines = append(lines, "  │")
+			}
+		}
+		if tx.Fee > 0 {
+			lines = append(lines, "")
+			lines = append(lines,
+				"  "+theme.Dim.Render("Fee: ")+
+					theme.Value.Render(
+						formatSats(tx.Fee)+
+							" sats"))
+		}
+	}
 
 	return strings.Join(lines, "\n")
 }

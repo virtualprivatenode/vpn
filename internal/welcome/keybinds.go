@@ -227,18 +227,18 @@ func (b walletHomeBindings) FullHelp() [][]key.Binding {
 // ── Addons home bindings ─────────────────────────────────
 
 type addonsHomeBindings struct {
-	LeftRight key.Binding
-	Enter     key.Binding
-	Sidebar   key.Binding
-	TabBar    key.Binding
-	Quit      key.Binding
+	UpDown  key.Binding
+	Enter   key.Binding
+	Sidebar key.Binding
+	TabBar  key.Binding
+	Quit    key.Binding
 }
 
 func newAddonsHomeBindings(hasTabs bool) addonsHomeBindings {
 	b := addonsHomeBindings{
-		LeftRight: key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
+		UpDown: key.NewBinding(
+			key.WithKeys("up", "down"),
+			key.WithHelp("↑↓", "select")),
 		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
@@ -254,7 +254,7 @@ func newAddonsHomeBindings(hasTabs bool) addonsHomeBindings {
 
 func (b addonsHomeBindings) ShortHelp() []key.Binding {
 	binds := []key.Binding{
-		b.LeftRight, b.Enter, b.Sidebar,
+		b.UpDown, b.Enter, b.Sidebar,
 	}
 	if b.TabBar.Enabled() {
 		binds = append(binds, b.TabBar)
@@ -270,27 +270,37 @@ func (b addonsHomeBindings) FullHelp() [][]key.Binding {
 // ── System home bindings ─────────────────────────────────
 
 type systemHomeBindings struct {
-	LeftRight key.Binding
 	UpDown    key.Binding
-	Enter     key.Binding
+	LeftRight key.Binding
 	Restart   key.Binding
+	Stop      key.Binding
+	Start     key.Binding
+	Enter     key.Binding
 	Sidebar   key.Binding
 	TabBar    key.Binding
 	Quit      key.Binding
 }
 
-func newSystemHomeBindings(hasTabs bool) systemHomeBindings {
+func newSystemHomeBindings(
+	hasTabs bool, onServices bool,
+) systemHomeBindings {
 	b := systemHomeBindings{
-		LeftRight: key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
 		UpDown: key.NewBinding(
 			key.WithKeys("up", "down"),
 			key.WithHelp("↑↓", "services")),
-		Enter: kEnter,
+		LeftRight: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←→", "buttons")),
 		Restart: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "restart svc")),
+			key.WithHelp("r", "restart")),
+		Stop: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "stop")),
+		Start: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "start")),
+		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
@@ -300,14 +310,34 @@ func newSystemHomeBindings(hasTabs bool) systemHomeBindings {
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
 	}
+	if !onServices {
+		b.Restart.SetEnabled(false)
+		b.Stop.SetEnabled(false)
+		b.Start.SetEnabled(false)
+		b.UpDown = key.NewBinding(
+			key.WithKeys("up"),
+			key.WithHelp("↑", "services"))
+	} else {
+		b.LeftRight.SetEnabled(false)
+		b.Enter.SetEnabled(false)
+	}
 	return b
 }
 
 func (b systemHomeBindings) ShortHelp() []key.Binding {
-	binds := []key.Binding{
-		b.LeftRight, b.UpDown, b.Enter,
-		b.Restart, b.Sidebar,
+	var binds []key.Binding
+	binds = append(binds, b.UpDown)
+	if b.LeftRight.Enabled() {
+		binds = append(binds, b.LeftRight)
 	}
+	if b.Restart.Enabled() {
+		binds = append(binds, b.Restart,
+			b.Stop, b.Start)
+	}
+	if b.Enter.Enabled() {
+		binds = append(binds, b.Enter)
+	}
+	binds = append(binds, b.Sidebar)
 	if b.TabBar.Enabled() {
 		binds = append(binds, b.TabBar)
 	}
@@ -960,5 +990,107 @@ func (b detailTabBindings) ShortHelp() []key.Binding {
 }
 
 func (b detailTabBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
+// ── Receive input bindings (up/down fields) ──────────────
+
+type recvInputBindings struct {
+	UpDown  key.Binding
+	Enter   key.Binding
+	Back    key.Binding
+	Sidebar key.Binding
+	TabBar  key.Binding
+	Quit    key.Binding
+}
+
+func newRecvInputBindings(
+	hasTabs bool,
+) recvInputBindings {
+	b := recvInputBindings{
+		UpDown: key.NewBinding(
+			key.WithKeys("up", "down"),
+			key.WithHelp("↑↓", "switch field")),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "create invoice")),
+		Back:    kBack,
+		Sidebar: kSidebar,
+		TabBar: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "tab bar")),
+		Quit: key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit")),
+	}
+	if !hasTabs {
+		b.TabBar.SetEnabled(false)
+	}
+	return b
+}
+
+func (b recvInputBindings) ShortHelp() []key.Binding {
+	binds := []key.Binding{
+		b.UpDown, b.Enter, b.Back, b.Sidebar,
+	}
+	if b.TabBar.Enabled() {
+		binds = append(binds, b.TabBar)
+	}
+	binds = append(binds, b.Quit)
+	return binds
+}
+
+func (b recvInputBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
+// ── Send input bindings (with cursor) ────────────────────
+
+type sendInputBindings struct {
+	Cursor  key.Binding
+	Enter   key.Binding
+	Back    key.Binding
+	Sidebar key.Binding
+	TabBar  key.Binding
+	Quit    key.Binding
+}
+
+func newSendInputBindings(
+	hasTabs bool,
+) sendInputBindings {
+	b := sendInputBindings{
+		Cursor: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←→", "cursor")),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "decode")),
+		Back:    kBack,
+		Sidebar: kSidebar,
+		TabBar: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "tab bar")),
+		Quit: key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit")),
+	}
+	if !hasTabs {
+		b.TabBar.SetEnabled(false)
+	}
+	return b
+}
+
+func (b sendInputBindings) ShortHelp() []key.Binding {
+	binds := []key.Binding{
+		b.Cursor, b.Enter, b.Back, b.Sidebar,
+	}
+	if b.TabBar.Enabled() {
+		binds = append(binds, b.TabBar)
+	}
+	binds = append(binds, b.Quit)
+	return binds
+}
+
+func (b sendInputBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }

@@ -10,32 +10,13 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
-// ── Channels overview ────────────────────────────────────
+// ── Balance summary (shared by channels + wallet) ────────
 
-func (m Model) channelsOverview(w, h int) string {
-	if !m.cfg.HasLND() {
-		var lines []string
-		lines = append(lines, "")
-		lines = append(lines, theme.Dim.Render(
-			" LND is not installed."))
-		lines = append(lines, theme.Dim.Render(
-			" Go to System to install."))
-		return strings.Join(lines, "\n")
-	}
-
-	if !m.cfg.WalletExists() {
-		var lines []string
-		lines = append(lines, "")
-		lines = append(lines, theme.Dim.Render(
-			" LND wallet not created."))
-		return strings.Join(lines, "\n")
-	}
-
+func (m Model) renderBalanceSummary(w int) []string {
 	if m.status == nil || !m.status.lndResponding {
-		return theme.Dim.Render(" Waiting for LND...")
+		return nil
 	}
 
-	// Calculate totals
 	var totalCap, totalLocal, totalRemote int64
 	activeCount, inactiveCount := 0, 0
 	for _, ch := range m.status.channels {
@@ -56,28 +37,6 @@ func (m Model) channelsOverview(w, h int) string {
 		onchain = m.status.lndBalance
 	}
 
-	// Is content actually focused (not tab bar,
-	// not sidebar)
-	isFocused := m.contentFocused && !m.tabFocused
-
-	// ── Fixed regions ────────────────────────────
-	var headerLines []string
-	headerLines = append(headerLines, "")
-
-	// Pubkey and P2P
-	if m.status.lndPubkey != "" {
-		pk := truncatePubkey(m.status.lndPubkey, w-14)
-		headerLines = append(headerLines,
-			" "+theme.Label.Render("Pubkey:   ")+
-				theme.Mono.Render(pk))
-	}
-	headerLines = append(headerLines,
-		" "+theme.Label.Render("P2P:      ")+
-			theme.Value.Render(
-				p2pModeLabel(m.cfg.P2PMode)))
-	headerLines = append(headerLines, "")
-
-	// ── Liquidity box ────────────────────────────
 	localPct := 0
 	if totalCap > 0 {
 		localPct = int(
@@ -86,9 +45,9 @@ func (m Model) channelsOverview(w, h int) string {
 	}
 	remotePct := 100 - localPct
 
-	labelW := 12
+	labelW := 11
 	leftColW := labelW + 18
-	boxW := w - leftColW - 3
+	boxW := w - leftColW - 2
 	if boxW < 22 {
 		boxW = 22
 	}
@@ -115,9 +74,9 @@ func (m Model) channelsOverview(w, h int) string {
 	barLine := " " + barLocal + barRemote + " "
 
 	barVis := lipgloss.Width(barLine)
-	barPad := boxW - 2 - barVis
-	if barPad < 0 {
-		barPad = 0
+	barPadR := boxW - 2 - barVis
+	if barPadR < 0 {
+		barPadR = 0
 	}
 
 	chLabel := fmt.Sprintf("%d channels",
@@ -127,23 +86,24 @@ func (m Model) channelsOverview(w, h int) string {
 			activeCount, inactiveCount)
 	}
 
-	boxTop := "┌" + strings.Repeat("─", boxW-2) + "┐"
-	boxLabel := "│" + centerPad(chLabel, boxW-2) + "│"
-	boxBar := "│" + barLine +
-		strings.Repeat(" ", barPad) + "│"
-
-	pctL := fmt.Sprintf(" Out %d%%", localPct)
-	pctR := fmt.Sprintf("In %d%% ", remotePct)
-	pctGap := boxW - 2 - len(pctL) - len(pctR)
-	if pctGap < 0 {
-		pctGap = 0
+	pctInner := fmt.Sprintf("Out %d%%    In %d%%",
+		localPct, remotePct)
+	if len(pctInner) > boxW-2 {
+		pctInner = fmt.Sprintf("Out %d%% In %d%%",
+			localPct, remotePct)
 	}
-	boxPct := "│" + theme.Dim.Render(
-		pctL+strings.Repeat(" ", pctGap)+pctR) + "│"
 
-	capLine := centerPad(
-		formatSats(totalCap)+" sats", boxW-2)
-	boxCap := "│" + theme.Dim.Render(capLine) + "│"
+	capStr := formatSats(totalCap) + " sats"
+
+	boxTop := "┌" + strings.Repeat("─", boxW-2) + "┐"
+	boxLabel := "│" +
+		centerPad(chLabel, boxW-2) + "│"
+	boxBar := "│" + barLine +
+		strings.Repeat(" ", barPadR) + "│"
+	boxPct := "│" + theme.Dim.Render(
+		centerPad(pctInner, boxW-2)) + "│"
+	boxCap := "│" + theme.Dim.Render(
+		centerPad(capStr, boxW-2)) + "│"
 	boxBot := "└" + strings.Repeat("─", boxW-2) + "┘"
 
 	boxLines := []string{
@@ -151,51 +111,107 @@ func (m Model) channelsOverview(w, h int) string {
 		boxPct, boxCap, boxBot,
 	}
 
-	var leftLines []string
-	leftLines = append(leftLines,
-		" "+theme.Label.Render("Outbound: ")+
+	leftLines := []string{
+		" " + theme.Label.Render("Outbound: ") +
 			theme.Value.Render(
-				formatSats(totalLocal)+" sats"))
-	leftLines = append(leftLines,
-		" "+theme.Label.Render("Inbound:  ")+
+				formatSats(totalLocal)+" sats"),
+		"",
+		" " + theme.Label.Render("Inbound:  ") +
 			theme.Value.Render(
-				formatSats(totalRemote)+" sats"))
-	leftLines = append(leftLines,
-		" "+theme.Label.Render("On-chain: ")+
+				formatSats(totalRemote)+" sats"),
+		"",
+		" " + theme.Label.Render("On-chain: ") +
 			theme.Value.Render(
 				formatSats(parseBalance(onchain))+
-					" sats"))
-
-	maxBoxH := len(boxLines)
-	if len(leftLines) > maxBoxH {
-		maxBoxH = len(leftLines)
+					" sats"),
+		"",
 	}
-	for len(leftLines) < maxBoxH {
+
+	maxH := len(boxLines)
+	if len(leftLines) > maxH {
+		maxH = len(leftLines)
+	}
+	for len(leftLines) < maxH {
 		leftLines = append(leftLines, "")
 	}
-	for len(boxLines) < maxBoxH {
+	for len(boxLines) < maxH {
 		boxLines = append(boxLines, "")
 	}
 
-	for i := 0; i < maxBoxH; i++ {
+	var result []string
+	for i := 0; i < maxH; i++ {
 		lft := leftLines[i]
 		lftW := lipgloss.Width(lft)
 		if lftW < leftColW {
-			lft += strings.Repeat(" ", leftColW-lftW)
+			lft += strings.Repeat(" ",
+				leftColW-lftW)
 		}
-		headerLines = append(headerLines,
-			lft+"  "+boxLines[i])
+		result = append(result, lft+" "+boxLines[i])
+	}
+	return result
+}
+
+// ── Channels overview ────────────────────────────────────
+
+func (m Model) channelsOverview(w, h int) string {
+	if !m.cfg.HasLND() {
+		var lines []string
+		lines = append(lines, "")
+		lines = append(lines, theme.Dim.Render(
+			" LND is not installed."))
+		lines = append(lines, theme.Dim.Render(
+			" Go to System to install."))
+		return strings.Join(lines, "\n")
 	}
 
+	if !m.cfg.WalletExists() {
+		var lines []string
+		lines = append(lines, "")
+		lines = append(lines, theme.Dim.Render(
+			" LND wallet not created."))
+		return strings.Join(lines, "\n")
+	}
+
+	if m.status == nil || !m.status.lndResponding {
+		return theme.Dim.Render(" Waiting for LND...")
+	}
+
+	isFocused := m.contentFocused && !m.tabFocused
+
+	// ── Fixed regions ────────────────────────────
+	var headerLines []string
+	headerLines = append(headerLines, "")
+
+	// Pubkey and P2P
+	if m.status.lndPubkey != "" {
+		pk := truncatePubkey(m.status.lndPubkey, w-14)
+		headerLines = append(headerLines,
+			" "+theme.Label.Render("Pubkey:   ")+
+				theme.Mono.Render(pk))
+	}
+	headerLines = append(headerLines,
+		" "+theme.Label.Render("P2P:      ")+
+			theme.Value.Render(
+				p2pModeLabel(m.cfg.P2PMode)))
+
+	// 2-line gap after P2P
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines, "")
+
+	// Balance summary with liquidity box
+	headerLines = append(headerLines,
+		m.renderBalanceSummary(w)...)
+
+	// 3-line gap before channel bars
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines, "")
+
 	headerH := len(headerLines)
-	buttonH := 1
-	buttonGap := 1
-	gapAboveChans := 1
-	gapBelowChans := 1
+	buttonH := 3 // top pad + button + bottom pad
+	gapBelowChans := 0
 
 	// Available rows for channel bars
-	chanWindowH := h - headerH - buttonH -
-		buttonGap - gapAboveChans - gapBelowChans
+	chanWindowH := h - headerH - buttonH - gapBelowChans
 	if chanWindowH < 1 {
 		chanWindowH = 1
 	}
@@ -203,7 +219,6 @@ func (m Model) channelsOverview(w, h int) string {
 	// ── Channel bars ─────────────────────────────
 	chanCount := len(m.status.channels)
 	nameW := 17
-	// Use fixed bar width to avoid overflow
 	barW := w - nameW - 22
 	if barW < 8 {
 		barW = 8
@@ -359,10 +374,6 @@ func (m Model) channelsOverview(w, h int) string {
 
 	lines = append(lines, headerLines...)
 
-	for i := 0; i < gapAboveChans; i++ {
-		lines = append(lines, "")
-	}
-
 	if needsScroll && scrollOffset > 0 {
 		indicator := strings.Repeat(" ", w-4) +
 			theme.Dim.Render(" ▲")
@@ -392,33 +403,31 @@ func (m Model) channelsOverview(w, h int) string {
 		}
 	}
 
-	for i := 0; i < gapBelowChans; i++ {
-		lines = append(lines, "")
-	}
-
-	// ── Open Channel button (anchored bottom-right)
+	// ── Open Channel button (full width, centered)
 	label := "Open Channel"
 	isOnButton := isFocused && m.contentFocus == 1
 
+	btnW := w - 2
+	if btnW < 16 {
+		btnW = 16
+	}
+
 	var btnStr string
 	if isOnButton {
-		btnStr = "▸ " + theme.BtnFocused.Render(label)
+		btnStr = theme.BtnFocused.
+			Width(btnW).
+			AlignHorizontal(lipgloss.Center).
+			Render(label)
 	} else {
-		btnStr = "  " + theme.BtnNormal.Render(label)
+		btnStr = theme.BtnNormal.
+			Width(btnW).
+			AlignHorizontal(lipgloss.Center).
+			Render(label)
 	}
 
-	btnVis := lipgloss.Width(btnStr)
-	btnPadding := w - 1 - btnVis
-	if btnPadding < 0 {
-		btnPadding = 0
-	}
-	lines = append(lines,
-		strings.Repeat(" ", btnPadding)+btnStr)
-
-	// Gap after button (before footer)
-	for i := 0; i < buttonGap; i++ {
-		lines = append(lines, "")
-	}
+	lines = append(lines, "")
+	lines = append(lines, " "+btnStr)
+	lines = append(lines, "")
 
 	return strings.Join(lines, "\n")
 }
@@ -628,7 +637,7 @@ func (m Model) channelCustomPeerPane(w int) string {
 		" "+m.chanHostInput.View())
 	lines = append(lines, "")
 	lines = append(lines, " "+theme.Dim.Render(
-		"Tab switch fields  Enter continue"))
+		"↑↓ switch fields  Enter continue"))
 
 	if m.chanOpenError != "" {
 		lines = append(lines, "")

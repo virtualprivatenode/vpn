@@ -66,23 +66,26 @@ const (
 	svOnChainSendAmount
 	svOnChainSendConfirm
 	svOnChainSendBroadcast
+	// On-chain receive flow
+	svOnChainReceive
 )
 
 // Tab types for the top tab bar
 type tabKind int
 
 const (
-	tabMain    tabKind = iota // Main view for current section
-	tabChannel                // Channel detail
-	tabPayment                // Payment detail
-	tabSend                   // Send payment flow
-	tabReceive                // Receive payment flow
-	tabPairing                // Pairing screen
-	tabOnChain                // On-chain screen
-	tabSyncthing
-	tabLndHub
-	tabOpenChannel // Channel open flow
-	tabOnChainTx   // on-chain transaction detail
+	tabMain        tabKind = iota // Main view for current section
+	tabChannel                    // Channel detail
+	tabPayment                    // Payment detail
+	tabSend                       // ⚡ Send payment flow
+	tabReceive                    // ⚡ Receive payment flow
+	tabPairing                    // Pairing screen
+	tabOnChain                    // ⛓ On-chain send flow
+	tabOCReceive                  // ⛓ On-chain receive flow
+	tabSyncthing                  //
+	tabLndHub                     //
+	tabOpenChannel                // Channel open flow
+	tabOnChainTx                  // on-chain transaction detail
 )
 
 type openTab struct {
@@ -323,6 +326,11 @@ type Model struct {
 	onChainSendError string
 	utxos            []lndrpc.UTXO
 	utxoCursor       int
+
+	// On-chain receive state
+	ocRecvAddress string
+	ocRecvBtnIdx  int
+	ocRecvError   string
 
 	// On-chain send flow
 	ocSendAddrInput  textinput.Model

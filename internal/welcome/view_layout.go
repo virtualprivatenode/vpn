@@ -54,17 +54,11 @@ func (m Model) viewMain() string {
 		sidebarW = insideW - 1 - contentW
 	}
 
-	// Tab bar area is ALWAYS present: 2 rows
-	// (1 for tab content/blank + 1 for separator)
 	tabBarRows := 2
-
 	hasTabContent := m.hasDetailTabs()
-
-	// Rows available for the sidebar+content region
 	bodyH := insideH - tabBarRows
 
 	// ── Sidebar block heights ─────────────────────
-	numSections := 4
 	sepRows := numSections - 1
 	sideUsable := bodyH - sepRows
 
@@ -75,7 +69,7 @@ func (m Model) viewMain() string {
 	blockBase := sideUsable / numSections
 	blockRem := sideUsable % numSections
 
-	var blockHeights [4]int
+	var blockHeights [numSections]int
 	for i := 0; i < numSections; i++ {
 		blockHeights[i] = blockBase
 		if i < blockRem {
@@ -97,7 +91,6 @@ func (m Model) viewMain() string {
 			tabBar = tabBar[:insideW]
 		}
 	} else {
-		// Empty tab bar row
 		tabBar = strings.Repeat(" ", insideW)
 	}
 
@@ -122,17 +115,14 @@ func (m Model) viewMain() string {
 	// ── Build frame ───────────────────────────────
 	var output []string
 
-	// Top border: always full width
 	output = append(output, border.Render(
 		"╭"+strings.Repeat("─", insideW)+"╮"))
 
-	// Tab bar row (always present)
 	output = append(output,
 		border.Render("│")+
 			tabBar+
 			border.Render("│"))
 
-	// Separator: ├──sidebar──┬──content──┤
 	output = append(output, border.Render(
 		"├"+strings.Repeat("─", sidebarW)+
 			"┬"+strings.Repeat("─", contentW)+
@@ -155,13 +145,11 @@ func (m Model) viewMain() string {
 
 	// Build content rows
 	var contentRows []string
-
 	for _, line := range contentLines {
 		contentRows = append(contentRows,
 			clampLine(line, contentW))
 	}
 
-	// Ensure both sides are bodyH rows
 	for len(sideRows) < bodyH {
 		sideRows = append(sideRows,
 			strings.Repeat(" ", sidebarW))
@@ -172,7 +160,6 @@ func (m Model) viewMain() string {
 			strings.Repeat(" ", contentW))
 	}
 
-	// Render each body row
 	for r := 0; r < bodyH; r++ {
 		isSideSep := r < len(sideSeps) && sideSeps[r]
 
@@ -205,14 +192,12 @@ func (m Model) viewMain() string {
 		}
 	}
 
-	// Bottom border
 	output = append(output, border.Render(
 		"╰"+strings.Repeat("─", sidebarW)+
 			"┴"+strings.Repeat("─", contentW)+"╯"))
 
 	frame := strings.Join(output, "\n")
 
-	// ── Help bar (rendered below frame) ──────────
 	helpStr := m.renderHelpBar(totalW)
 	helpLine := centerInWidth(helpStr, totalW)
 
@@ -380,6 +365,8 @@ func (m Model) effectiveTabs() []openTab {
 	switch sec {
 	case secWallet:
 		mainLabel = "Wallet"
+	case secOnChain:
+		mainLabel = "On-Chain"
 	case secAddons:
 		mainLabel = "Add-ons"
 	case secSystem:
@@ -455,7 +442,20 @@ func (m Model) renderActiveTabContent(
 	case tabPairing:
 		return m.pairingContent(w, h)
 	case tabOnChain:
-		return m.walletOnChainContent(w)
+		switch m.subview {
+		case svOnChainSendAddr:
+			return m.onChainSendAddrPane(w)
+		case svOnChainSendAmount:
+			return m.onChainSendAmountPane(w)
+		case svOnChainSendConfirm:
+			return m.onChainSendConfirmPane(w)
+		case svOnChainSendBroadcast:
+			return m.onChainSendBroadcastPane(w)
+		case svOnChainResult:
+			return m.onChainResultContent(w)
+		default:
+			return m.onChainSendAddrPane(w)
+		}
 	case tabOnChainTx:
 		if tab.Index < len(m.onChainTxs) {
 			return m.onChainTxDetailPane(
@@ -463,6 +463,8 @@ func (m Model) renderActiveTabContent(
 		}
 		return theme.Dim.Render(
 			" Transaction not found")
+	case tabOCReceive:
+		return m.onChainReceivePane(w)
 	case tabOpenChannel:
 		return m.channelOpenContent(w)
 	case tabSyncthing:
@@ -481,6 +483,8 @@ func (m Model) renderContent(w, h int) string {
 		return m.renderChannelsContent(w, h)
 	case secWallet:
 		return m.renderWalletContent(w, h)
+	case secOnChain:
+		return m.renderOnChainContent(w, h)
 	case secAddons:
 		return m.renderAddonsContent(w, h)
 	case secSystem:
@@ -513,12 +517,28 @@ func (m Model) renderWalletContent(w, h int) string {
 		return m.walletReceiveExpiredPane(w)
 	case svWalletPairing:
 		return m.pairingContent(w, h)
-	case svOnChain:
-		return m.walletOnChainContent(w)
 	case svPaymentDetail:
 		return m.paymentDetailContent(w)
 	}
 	return m.walletOverview(w, h)
+}
+
+func (m Model) renderOnChainContent(w, h int) string {
+	switch m.subview {
+	case svOnChainReceive:
+		return m.onChainReceivePane(w)
+	case svOnChainResult:
+		return m.onChainResultContent(w)
+	case svOnChainSendAddr:
+		return m.onChainSendAddrPane(w)
+	case svOnChainSendAmount:
+		return m.onChainSendAmountPane(w)
+	case svOnChainSendConfirm:
+		return m.onChainSendConfirmPane(w)
+	case svOnChainSendBroadcast:
+		return m.onChainSendBroadcastPane(w)
+	}
+	return m.onChainOverview(w, h)
 }
 
 func (m Model) renderAddonsContent(w, h int) string {
