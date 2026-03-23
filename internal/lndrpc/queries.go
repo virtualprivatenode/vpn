@@ -33,6 +33,7 @@ type WalletBalance struct {
 
 type Channel struct {
 	ChanID        uint64
+	ChannelPoint  string // "txid:index"
 	RemotePubkey  string
 	Capacity      int64
 	LocalBalance  int64
@@ -55,6 +56,17 @@ type PendingChannel struct {
 	Capacity     int64
 	LocalBalance int64
 	PeerAlias    string
+}
+
+type ClosedChannel struct {
+	ChannelPoint string
+	RemotePubkey string
+	Capacity     int64
+	CloseType    string
+	ClosingTxid  string
+	PeerAlias    string
+	SettledBal   int64
+	CloseHeight  int32
 }
 
 type OnChainAddress struct {
@@ -138,6 +150,7 @@ func (c *Client) ListChannels() ([]Channel, error) {
 	for _, ch := range resp.GetChannels() {
 		channels = append(channels, Channel{
 			ChanID:        ch.GetChanId(),
+			ChannelPoint:  ch.GetChannelPoint(),
 			RemotePubkey:  ch.GetRemotePubkey(),
 			Capacity:      ch.GetCapacity(),
 			LocalBalance:  ch.GetLocalBalance(),
@@ -187,6 +200,69 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 		WaitingClose:        len(resp.GetWaitingCloseChannels()),
 		PendingOpenChannels: pendingChans,
 	}, nil
+}
+
+// ListClosedChannels returns all historically closed
+// channels with close type and peer info.
+func (c *Client) ListClosedChannels() (
+	[]ClosedChannel, error,
+) {
+	rpc := c.rpc()
+	if rpc == nil {
+		return nil, errNotConnected
+	}
+	ctx, cancel := c.callCtx(defaultTimeout)
+	defer cancel()
+
+	resp, err := rpc.ClosedChannels(ctx,
+		&lnrpc.ClosedChannelsRequest{})
+	if err != nil {
+		c.handleError(err)
+		return nil, err
+	}
+
+	var channels []ClosedChannel
+	for _, ch := range resp.GetChannels() {
+		closeType := "unknown"
+		switch ch.GetCloseType() {
+		case lnrpc.ChannelCloseSummary_COOPERATIVE_CLOSE:
+			closeType = "cooperative"
+		case lnrpc.ChannelCloseSummary_LOCAL_FORCE_CLOSE:
+			closeType = "force"
+		case lnrpc.ChannelCloseSummary_REMOTE_FORCE_CLOSE:
+			closeType = "force"
+		case lnrpc.ChannelCloseSummary_BREACH_CLOSE:
+			closeType = "breach"
+		case lnrpc.ChannelCloseSummary_FUNDING_CANCELED:
+			closeType = "canceled"
+		case lnrpc.ChannelCloseSummary_ABANDONED:
+			closeType = "abandoned"
+		}
+
+		alias := c.getPeerAlias(
+			ch.GetRemotePubkey())
+		if alias == "" {
+			pk := ch.GetRemotePubkey()
+			if len(pk) > 12 {
+				alias = pk[:12] + ".."
+			} else {
+				alias = pk
+			}
+		}
+
+		channels = append(channels, ClosedChannel{
+			ChannelPoint: ch.GetChannelPoint(),
+			RemotePubkey: ch.GetRemotePubkey(),
+			Capacity:     ch.GetCapacity(),
+			CloseType:    closeType,
+			ClosingTxid:  ch.GetClosingTxHash(),
+			PeerAlias:    alias,
+			SettledBal:   ch.GetSettledBalance(),
+			CloseHeight:  int32(ch.GetCloseHeight()),
+		})
+	}
+
+	return channels, nil
 }
 
 func (c *Client) GetNewAddress() (*OnChainAddress, error) {

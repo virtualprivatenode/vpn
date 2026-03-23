@@ -68,24 +68,30 @@ const (
 	svOnChainSendBroadcast
 	// On-chain receive flow
 	svOnChainReceive
+	// Channel close flow
+	svCloseType
+	svCloseConfirm
+	svClosing
+	svCloseResult
 )
 
 // Tab types for the top tab bar
 type tabKind int
 
 const (
-	tabMain        tabKind = iota // Main view for current section
-	tabChannel                    // Channel detail
-	tabPayment                    // Payment detail
-	tabSend                       // ⚡ Send payment flow
-	tabReceive                    // ⚡ Receive payment flow
-	tabPairing                    // Pairing screen
-	tabOnChain                    // ⛓ On-chain send flow
-	tabOCReceive                  // ⛓ On-chain receive flow
-	tabSyncthing                  //
-	tabLndHub                     //
-	tabOpenChannel                // Channel open flow
-	tabOnChainTx                  // on-chain transaction detail
+	tabMain           tabKind = iota // Main view for current section
+	tabChannel                       // Channel detail
+	tabPayment                       // Payment detail
+	tabSend                          // ⚡ Send payment flow
+	tabReceive                       // ⚡ Receive payment flow
+	tabPairing                       // Pairing screen
+	tabOnChain                       // ⛓ On-chain send flow
+	tabOCReceive                     // ⛓ On-chain receive flow
+	tabSyncthing                     //
+	tabLndHub                        //
+	tabOpenChannel                   // Channel open flow
+	tabOnChainTx                     // on-chain transaction detail
+	tabChannelHistory                // channel history view
 )
 
 type openTab struct {
@@ -171,6 +177,16 @@ type onChainTxMsg struct {
 	err error
 }
 
+type closeChannelMsg struct {
+	txid string
+	err  error
+}
+
+type closedChannelsMsg struct {
+	channels []lndrpc.ClosedChannel
+	err      error
+}
+
 type paymentType int
 
 const (
@@ -180,6 +196,7 @@ const (
 
 type channelInfo struct {
 	ChanID        uint64
+	ChannelPoint  string
 	PeerAlias     string
 	RemotePubkey  string
 	Capacity      int64
@@ -189,6 +206,19 @@ type channelInfo struct {
 	Private       bool
 	Initiator     bool
 	Pending       bool
+}
+
+type channelHistoryEntry struct {
+	PeerAlias    string
+	RemotePubkey string
+	Capacity     int64
+	LocalBalance int64
+	Status       string // "active", "inactive", "pending open", etc.
+	CloseType    string // "coop", "force", "breach", "—"
+	ClosingTxid  string
+	SettledBal   int64
+	CloseHeight  int32
+	Active       bool
 }
 
 type peerOption struct {
@@ -241,6 +271,7 @@ type Model struct {
 	// Button index for content pane buttons
 	btnIdx      int
 	addonBtnIdx int
+	addonFocus  int // 0=buttons, 1=list (syncthing/lndhub)
 
 	// System
 	svcCursor  int
@@ -266,7 +297,6 @@ type Model struct {
 
 	// Channels
 	chanCursor       int
-	chanScrollOffset int
 	chanOpenPeerIdx  int
 	chanOpenAmount   int64
 	chanOpenPrivate  bool
@@ -279,6 +309,25 @@ type Model struct {
 	chanPeerList     []peerOption
 	chanAmountPreset int
 	chanFundAddress  string
+
+	// Channel close
+	closeForce     bool
+	closeChanPoint string
+	closePeerAlias string
+	closeCapacity  int64
+	closeLocalBal  int64
+	closeRemoteBal int64
+	closeFeeTiers  [4]feeTier
+	closeFeeIdx    int
+	closeEstFee    int64
+	closeTxid      string
+	closeError     string
+	closeBtnIdx    int
+	closeInFlight  bool
+
+	// Channel history
+	chanHistory       []channelHistoryEntry
+	chanHistoryCursor int
 
 	// Navigation
 	nav            NavSidebar
@@ -418,7 +467,9 @@ func newTxTable() table.Model {
 	return t
 }
 
-func NewModel(cfg *config.AppConfig, version string) Model {
+func NewModel(
+	cfg *config.AppConfig, version string,
+) Model {
 	var client *lndrpc.Client
 	if cfg.HasLND() && cfg.WalletExists() {
 		client = lndrpc.New(cfg.Network)
@@ -432,7 +483,10 @@ func NewModel(cfg *config.AppConfig, version string) Model {
 	}
 }
 
-func NewTestModel(cfg *config.AppConfig, version string, store *config.Store) Model {
+func NewTestModel(
+	cfg *config.AppConfig, version string,
+	store *config.Store,
+) Model {
 	m := Model{
 		cfg: cfg, version: version,
 		subview: svNone, fetchInFlight: true,
@@ -463,11 +517,14 @@ func serviceNames(cfg *config.AppConfig) []string {
 
 func (m Model) saveCfg() {
 	if err := config.SaveTo(m.cfgStore, m.cfg); err != nil {
-		logger.TUI("ERROR: failed to save config: %v", err)
+		logger.TUI(
+			"ERROR: failed to save config: %v", err)
 	}
 }
 
-func (m Model) svcCount() int { return len(serviceNames(m.cfg)) }
+func (m Model) svcCount() int {
+	return len(serviceNames(m.cfg))
+}
 
 func (m Model) svcName(i int) string {
 	names := serviceNames(m.cfg)
@@ -481,7 +538,8 @@ func (m Model) pollInterval() time.Duration {
 	if m.status == nil {
 		return 3 * time.Second
 	}
-	if !m.status.lndResponding && m.cfg.HasLND() && m.cfg.WalletExists() {
+	if !m.status.lndResponding && m.cfg.HasLND() &&
+		m.cfg.WalletExists() {
 		return 5 * time.Second
 	}
 	if !m.status.btcSynced {
@@ -519,8 +577,11 @@ func Show(cfg *config.AppConfig, version string) {
 			if u, e := config.Load(); e == nil {
 				cfg = u
 			}
-			if err := installer.AppendLNCLIToShell(cfg); err != nil {
-				logger.TUI("Warning: lncli wrapper: %v", err)
+			if err := installer.AppendLNCLIToShell(
+				cfg); err != nil {
+				logger.TUI(
+					"Warning: lncli wrapper: %v",
+					err)
 			}
 			continue
 		case svSyncthingInstall:
@@ -530,7 +591,8 @@ func Show(cfg *config.AppConfig, version string) {
 			}
 			continue
 		case svSelfUpdate:
-			installer.RunSelfUpdate(cfg, final.latestVersion)
+			installer.RunSelfUpdate(
+				cfg, final.latestVersion)
 			continue
 		case svP2PUpgrade:
 			installer.RunP2PModeUpgrade(cfg)
@@ -552,62 +614,123 @@ func (m Model) Init() tea.Cmd {
 }
 
 func tickEvery(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
+	return tea.Tick(d, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
 }
 
 func fetchLatestVersion() tea.Cmd {
 	return func() tea.Msg {
-		return latestVersionMsg(installer.CheckLatestVersion())
+		return latestVersionMsg(
+			installer.CheckLatestVersion())
 	}
 }
 
-func createLndHubAccountCmd(adminToken string) tea.Cmd {
+func createLndHubAccountCmd(
+	adminToken string,
+) tea.Cmd {
 	return func() tea.Msg {
-		account, err := installer.CreateLndHubAccount(adminToken)
-		return lndhubAccountCreatedMsg{account: account, err: err}
+		account, err := installer.CreateLndHubAccount(
+			adminToken)
+		return lndhubAccountCreatedMsg{
+			account: account, err: err}
 	}
 }
 
-func deactivateLndHubAccountCmd(login string) tea.Cmd {
+func deactivateLndHubAccountCmd(
+	login string,
+) tea.Cmd {
 	return func() tea.Msg {
 		balance, _ := installer.GetUserBalance(login)
 		err := installer.DeactivateUser(login)
-		return lndhubDeactivatedMsg{balance: balance, err: err}
+		return lndhubDeactivatedMsg{
+			balance: balance, err: err}
 	}
 }
 
-func pairSyncthingDeviceCmd(deviceID string) tea.Cmd {
+func pairSyncthingDeviceCmd(
+	deviceID string,
+) tea.Cmd {
 	return func() tea.Msg {
 		err := installer.PairSyncthingDevice(deviceID)
 		return syncthingPairedMsg{err: err}
 	}
 }
 
-func openChannelCmd(client *lndrpc.Client, pubkey, host string, amount int64, private bool) tea.Cmd {
+func openChannelCmd(
+	client *lndrpc.Client, pubkey, host string,
+	amount int64, private bool,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return channelOpenResultMsg{err: fmt.Errorf("LND not connected")}
+			return channelOpenResultMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		if host != "" {
-			if err := client.ConnectPeer(pubkey, host); err != nil {
-				logger.TUI("Peer connect warning: %v", err)
+			if err := client.ConnectPeer(
+				pubkey, host); err != nil {
+				logger.TUI(
+					"Peer connect warning: %v", err)
 			}
 		}
-		if err := client.WaitForPeer(pubkey, 60*time.Second); err != nil {
-			return channelOpenResultMsg{err: fmt.Errorf("could not connect: %v", err)}
+		if err := client.WaitForPeer(
+			pubkey, 60*time.Second); err != nil {
+			return channelOpenResultMsg{
+				err: fmt.Errorf(
+					"could not connect: %v", err)}
 		}
-		result, err := client.OpenChannel(pubkey, amount, private)
+		result, err := client.OpenChannel(
+			pubkey, amount, private)
 		if err != nil {
 			return channelOpenResultMsg{err: err}
 		}
-		return channelOpenResultMsg{txid: result.FundingTxID}
+		return channelOpenResultMsg{
+			txid: result.FundingTxID}
 	}
 }
 
-func getNewAddressCmd(client *lndrpc.Client) tea.Cmd {
+func closeChannelCmd(
+	client *lndrpc.Client,
+	chanPoint string,
+	force bool,
+	satPerVbyte uint64,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return newAddressMsg{err: fmt.Errorf("LND not connected")}
+			return closeChannelMsg{
+				err: fmt.Errorf("LND not connected")}
+		}
+		result, err := client.CloseChannel(
+			chanPoint, force, satPerVbyte)
+		if err != nil {
+			return closeChannelMsg{err: err}
+		}
+		return closeChannelMsg{
+			txid: result.ClosingTxid}
+	}
+}
+
+func fetchClosedChannelsCmd(
+	client *lndrpc.Client,
+) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return closedChannelsMsg{
+				err: fmt.Errorf("LND not connected")}
+		}
+		channels, err := client.ListClosedChannels()
+		return closedChannelsMsg{
+			channels: channels, err: err}
+	}
+}
+
+func getNewAddressCmd(
+	client *lndrpc.Client,
+) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return newAddressMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		addr, err := client.GetNewAddress()
 		if err != nil {
@@ -617,42 +740,57 @@ func getNewAddressCmd(client *lndrpc.Client) tea.Cmd {
 	}
 }
 
-func createInvoiceCmd(client *lndrpc.Client, amount int64, memo string) tea.Cmd {
+func createInvoiceCmd(
+	client *lndrpc.Client, amount int64, memo string,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return invoiceCreatedMsg{err: fmt.Errorf("LND not connected")}
+			return invoiceCreatedMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		inv, err := client.AddInvoice(amount, memo)
 		if err != nil {
 			return invoiceCreatedMsg{err: err}
 		}
 		return invoiceCreatedMsg{
-			payReq: inv.PaymentRequest, paymentHash: inv.PaymentHash,
-			amountSats: inv.AmountSats}
+			payReq:      inv.PaymentRequest,
+			paymentHash: inv.PaymentHash,
+			amountSats:  inv.AmountSats,
+		}
 	}
 }
 
-func waitForInvoiceCmd(client *lndrpc.Client, paymentHash string) tea.Cmd {
+func waitForInvoiceCmd(
+	client *lndrpc.Client, paymentHash string,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return invoiceSettledMsg{err: fmt.Errorf("LND not connected")}
+			return invoiceSettledMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		hashBytes, err := hexDecodeBytes(paymentHash)
 		if err != nil {
 			return invoiceSettledMsg{err: err}
 		}
-		inv, err := client.WaitForInvoiceSettlement(hashBytes, 3600*time.Second)
+		inv, err := client.WaitForInvoiceSettlement(
+			hashBytes, 3600*time.Second)
 		if err != nil {
 			return invoiceSettledMsg{err: err}
 		}
-		return invoiceSettledMsg{settled: inv.Settled, expired: inv.IsExpired}
+		return invoiceSettledMsg{
+			settled: inv.Settled,
+			expired: inv.IsExpired,
+		}
 	}
 }
 
-func decodePayReqCmd(client *lndrpc.Client, payReq string) tea.Cmd {
+func decodePayReqCmd(
+	client *lndrpc.Client, payReq string,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return payReqDecodedMsg{err: fmt.Errorf("LND not connected")}
+			return payReqDecodedMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		decoded, err := client.DecodePayReq(payReq)
 		if err != nil {
@@ -662,10 +800,13 @@ func decodePayReqCmd(client *lndrpc.Client, payReq string) tea.Cmd {
 	}
 }
 
-func sendPaymentCmd(client *lndrpc.Client, payReq string) tea.Cmd {
+func sendPaymentCmd(
+	client *lndrpc.Client, payReq string,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return sendPaymentResultMsg{err: fmt.Errorf("LND not connected")}
+			return sendPaymentResultMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		result, err := client.SendPayment(payReq)
 		if err != nil {
@@ -675,10 +816,13 @@ func sendPaymentCmd(client *lndrpc.Client, payReq string) tea.Cmd {
 	}
 }
 
-func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
+func fetchPaymentHistoryCmd(
+	client *lndrpc.Client,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
-			return paymentHistoryMsg{err: fmt.Errorf("LND not connected")}
+			return paymentHistoryMsg{
+				err: fmt.Errorf("LND not connected")}
 		}
 		invoices, _ := client.ListInvoices(50)
 		payments, _ := client.ListPayments(50)
@@ -687,7 +831,8 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 		all = append(all, payments...)
 		for i := 0; i < len(all); i++ {
 			for j := i + 1; j < len(all); j++ {
-				if all[j].CreationDate > all[i].CreationDate {
+				if all[j].CreationDate >
+					all[i].CreationDate {
 					all[i], all[j] = all[j], all[i]
 				}
 			}
@@ -696,7 +841,9 @@ func fetchPaymentHistoryCmd(client *lndrpc.Client) tea.Cmd {
 	}
 }
 
-func listUnspentCmd(client *lndrpc.Client) tea.Cmd {
+func listUnspentCmd(
+	client *lndrpc.Client,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
 			return utxoListMsg{err: fmt.Errorf(
@@ -725,7 +872,9 @@ func sendCoinsCmd(
 	}
 }
 
-func fetchFeeTiersCmd(cfg *config.AppConfig) tea.Cmd {
+func fetchFeeTiersCmd(
+	cfg *config.AppConfig,
+) tea.Cmd {
 	return func() tea.Msg {
 		return fetchFeeTiers(cfg)
 	}
@@ -749,7 +898,9 @@ func estimateTxFeeCmd(
 	}
 }
 
-func fetchOnChainTxCmd(client *lndrpc.Client) tea.Cmd {
+func fetchOnChainTxCmd(
+	client *lndrpc.Client,
+) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
 			return onChainTxMsg{err: fmt.Errorf(
@@ -769,7 +920,8 @@ func hexDecodeBytes(s string) ([]byte, error) {
 		high := hexVal(s[i*2])
 		low := hexVal(s[i*2+1])
 		if high < 0 || low < 0 {
-			return nil, fmt.Errorf("invalid hex at %d", i*2)
+			return nil, fmt.Errorf(
+				"invalid hex at %d", i*2)
 		}
 		b[i] = byte(high<<4 | low)
 	}
@@ -824,7 +976,8 @@ func (m *Model) rebuildTxTable() {
 			dot = "✗"
 		} else if entry.Status == "EXPIRED" {
 			dot = "○"
-		} else if entry.Status == "IN_FLIGHT" || entry.Status == "OPEN" {
+		} else if entry.Status == "IN_FLIGHT" ||
+			entry.Status == "OPEN" {
 			dot = "◌"
 		}
 		dir := "↑ sent"
@@ -840,7 +993,8 @@ func (m *Model) rebuildTxTable() {
 			memo = "—"
 		}
 		ts := formatTimestamp(entry.CreationDate)
-		rows = append(rows, table.Row{dot, dir, amt, memo, ts})
+		rows = append(rows, table.Row{
+			dot, dir, amt, memo, ts})
 	}
 	m.txTable.SetRows(rows)
 }

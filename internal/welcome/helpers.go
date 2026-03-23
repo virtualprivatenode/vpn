@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
 func readOnion(path string) string {
@@ -152,4 +154,58 @@ func isValidOnChainAddr(addr string, network string) bool {
 			strings.HasPrefix(addr, "sb1")
 	}
 	return true // unknown network, let LND validate
+}
+
+// renderViewport creates a local viewport, sets content,
+// auto-scrolls to keep cursorLine visible, and returns the
+// rendered view with scroll indicators overlaid.
+//
+// Parameters:
+//
+//	content    - fully rendered string of all lines
+//	w          - viewport width
+//	vpH        - viewport height (visible lines)
+//	cursorLine - which line the cursor is on (0-based)
+//	totalLines - total number of lines in content
+//	active     - whether auto-scroll should be applied
+func renderViewport(
+	content string, w, vpH, cursorLine int,
+	totalLines int, active bool,
+) string {
+	vp := viewport.New(
+		viewport.WithWidth(w),
+		viewport.WithHeight(vpH),
+	)
+	vp.FillHeight = true
+	vp.SetContent(content)
+
+	// Auto-scroll to keep cursor visible
+	if active && totalLines > vpH {
+		offset := vp.YOffset()
+		if cursorLine < offset {
+			vp.SetYOffset(cursorLine)
+		}
+		if cursorLine >= offset+vpH {
+			vp.SetYOffset(cursorLine - vpH + 1)
+		}
+	}
+
+	vpView := vp.View()
+	vpLines := strings.Split(vpView, "\n")
+
+	hasAbove := vp.YOffset() > 0
+	hasBelow := vp.YOffset()+vpH < totalLines
+
+	if hasAbove && len(vpLines) > 0 {
+		indicator := strings.Repeat(" ", w-4) +
+			theme.Dim.Render(" ▲")
+		vpLines[0] = indicator
+	}
+	if hasBelow && len(vpLines) > 0 {
+		indicator := strings.Repeat(" ", w-4) +
+			theme.Dim.Render(" ▼")
+		vpLines[len(vpLines)-1] = indicator
+	}
+
+	return strings.Join(vpLines, "\n")
 }

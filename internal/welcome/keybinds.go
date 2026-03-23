@@ -120,11 +120,12 @@ func (b tabBarBindings) FullHelp() [][]key.Binding {
 // ── Channels home bindings ───────────────────────────────
 
 type channelsHomeBindings struct {
-	UpDown  key.Binding
-	Enter   key.Binding
-	Sidebar key.Binding
-	TabBar  key.Binding
-	Quit    key.Binding
+	UpDown    key.Binding
+	LeftRight key.Binding
+	Enter     key.Binding
+	Sidebar   key.Binding
+	TabBar    key.Binding
+	Quit      key.Binding
 }
 
 func newChannelsHomeBindings(
@@ -134,6 +135,9 @@ func newChannelsHomeBindings(
 		UpDown: key.NewBinding(
 			key.WithKeys("up", "down"),
 			key.WithHelp("↑↓", "channels")),
+		LeftRight: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←→", "buttons")),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "details")),
@@ -149,16 +153,23 @@ func newChannelsHomeBindings(
 	if onButton {
 		b.Enter = key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "open channel"))
+			key.WithHelp("enter", "select"))
 		b.UpDown = key.NewBinding(
 			key.WithKeys("up"),
 			key.WithHelp("↑", "channels"))
+	} else {
+		b.LeftRight.SetEnabled(false)
 	}
 	return b
 }
 
 func (b channelsHomeBindings) ShortHelp() []key.Binding {
-	binds := []key.Binding{b.UpDown, b.Enter, b.Sidebar}
+	var binds []key.Binding
+	binds = append(binds, b.UpDown)
+	if b.LeftRight.Enabled() {
+		binds = append(binds, b.LeftRight)
+	}
+	binds = append(binds, b.Enter, b.Sidebar)
 	if b.TabBar.Enabled() {
 		binds = append(binds, b.TabBar)
 	}
@@ -1092,5 +1103,85 @@ func (b sendInputBindings) ShortHelp() []key.Binding {
 }
 
 func (b sendInputBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
+// ── Close type select bindings ───────────────────────────
+
+type closeTypeBindings struct {
+	UpDown  key.Binding
+	Enter   key.Binding
+	Back    key.Binding
+	Sidebar key.Binding
+	Quit    key.Binding
+}
+
+func newCloseTypeBindings() closeTypeBindings {
+	return closeTypeBindings{
+		UpDown: key.NewBinding(
+			key.WithKeys("up", "down"),
+			key.WithHelp("↑↓", "close type")),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select")),
+		Back:    kBack,
+		Sidebar: kSidebar,
+		Quit:    kQuit,
+	}
+}
+
+func (b closeTypeBindings) ShortHelp() []key.Binding {
+	return []key.Binding{
+		b.UpDown, b.Enter, b.Back,
+		b.Sidebar, b.Quit,
+	}
+}
+
+func (b closeTypeBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
+// ── Channel history bindings ─────────────────────────────
+
+type channelHistoryBindings struct {
+	UpDown  key.Binding
+	Back    key.Binding
+	Sidebar key.Binding
+	TabBar  key.Binding
+	Quit    key.Binding
+}
+
+func newChannelHistoryBindings(
+	hasTabs bool,
+) channelHistoryBindings {
+	b := channelHistoryBindings{
+		UpDown: key.NewBinding(
+			key.WithKeys("up", "down"),
+			key.WithHelp("↑↓", "channels")),
+		Back: key.NewBinding(
+			key.WithKeys("backspace"),
+			key.WithHelp("⌫", "close tab")),
+		Sidebar: kSidebar,
+		TabBar: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "tab bar")),
+		Quit: kQuit,
+	}
+	if !hasTabs {
+		b.TabBar.SetEnabled(false)
+	}
+	return b
+}
+
+func (b channelHistoryBindings) ShortHelp() []key.Binding {
+	binds := []key.Binding{b.UpDown, b.Back, b.Sidebar}
+	if b.TabBar.Enabled() {
+		binds = append(binds, b.TabBar)
+	}
+	binds = append(binds, b.Quit)
+	return binds
+}
+
+func (b channelHistoryBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }

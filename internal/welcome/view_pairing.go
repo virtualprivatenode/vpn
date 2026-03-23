@@ -17,140 +17,102 @@ import (
 
 func (m Model) pairingContent(w, h int) string {
 	if !m.cfg.HasLND() || !m.cfg.WalletExists() {
-		var lines []string
-		lines = append(lines,
-			theme.Lightning.Render(" ⚡ Zeus Wallet"))
-		lines = append(lines, "")
+		p := newPane(w)
+		p.title(theme.Lightning, "⚡ Zeus Wallet")
 		if m.cfg.HasLND() {
-			lines = append(lines, " "+theme.Dim.Render(
-				"Create LND wallet first"))
+			p.dim("Create LND wallet first")
 		} else {
-			lines = append(lines, " "+theme.Dim.Render(
-				"Install LND first"))
+			p.dim("Install LND first")
 		}
-		return strings.Join(lines, "\n")
+		return p.render()
 	}
 
 	if m.status == nil || !m.status.lndResponding {
-		var lines []string
-		lines = append(lines,
-			theme.Lightning.Render(" ⚡ Zeus Wallet"))
-		lines = append(lines, "")
-		lines = append(lines, " "+theme.Dim.Render(
-			"Waiting for LND..."))
-		return strings.Join(lines, "\n")
+		p := newPane(w)
+		p.title(theme.Lightning, "⚡ Zeus Wallet")
+		p.dim("Waiting for LND...")
+		return p.render()
 	}
 
 	isFocused := m.contentFocused && !m.tabFocused
 
-	var lines []string
-	lines = append(lines,
-		theme.Lightning.Render(" ⚡ Zeus — LND REST"))
-	lines = append(lines, "")
+	p := newPane(w)
+	p.title(theme.Lightning, "⚡ Zeus — LND REST")
 
 	restOnion := readOnion(paths.TorLNDRESTHostname)
 
 	if m.cfg.P2PMode == "hybrid" {
-		lines = append(lines,
-			" "+theme.Header.Render("🛜 Clearnet"))
-		if m.status != nil && m.status.publicIP != "" {
-			lines = append(lines,
-				" "+theme.Label.Render("Server: ")+
-					theme.Mono.Render(
-						m.status.publicIP))
-			lines = append(lines,
-				" "+theme.Label.Render("Port:   ")+
-					theme.Mono.Render("8080"))
+		p.line(" " + theme.Header.Render(
+			"🛜 Clearnet"))
+		if m.status != nil &&
+			m.status.publicIP != "" {
+			p.monoField("Server: ",
+				m.status.publicIP)
+			p.monoField("Port:   ", "8080")
 		}
-		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Header.Render("🧅 Tor"))
+		p.blank()
+		p.line(" " + theme.Header.Render("🧅 Tor"))
 	}
 
 	if restOnion == "" {
-		lines = append(lines,
-			" "+theme.Warn.Render("Tor not available"))
+		p.warn("Tor not available")
 	} else {
 		server := restOnion
 		if len(server) > w-14 {
 			server = server[:w-17] + "..."
 		}
-		lines = append(lines,
-			" "+theme.Label.Render("Server: ")+
-				theme.Mono.Render(server))
-		lines = append(lines,
-			" "+theme.Label.Render("Port:   ")+
-				theme.Mono.Render("8080"))
+		p.monoField("Server: ", server)
+		p.monoField("Port:   ", "8080")
 	}
 
 	mac := readMacaroonHex(m.cfg)
 	if mac != "" {
-		lines = append(lines, "")
+		p.blank()
 		preview := mac[:min(24, len(mac))] + "..."
-		lines = append(lines,
-			" "+theme.Label.Render("Macaroon: ")+
-				theme.Mono.Render(preview))
+		p.monoField("Macaroon: ", preview)
 	}
 
-	lines = append(lines, "")
-
-	// Buttons
-	maxBtn := 1
-	if m.cfg.P2PMode == "hybrid" {
-		maxBtn = 2
-	}
+	p.blank()
 
 	btnLabels := []string{"QR (Tor)", "Macaroon"}
 	if m.cfg.P2PMode == "hybrid" {
 		btnLabels = append(btnLabels, "QR (Clearnet)")
 	}
+	p.buttons(btnLabels, m.pairingButtonIdx, isFocused)
 
-	var btnParts []string
-	for i, label := range btnLabels {
-		isActive := isFocused &&
-			m.pairingButtonIdx == i
-		if isActive {
-			btnParts = append(btnParts,
-				"▸ "+theme.BtnFocused.Render(label))
-		} else {
-			btnParts = append(btnParts,
-				"  "+theme.BtnNormal.Render(label))
-		}
-	}
-	_ = maxBtn
-	lines = append(lines,
-		" "+strings.Join(btnParts, "  "))
-
-	return strings.Join(lines, "\n")
+	return p.render()
 }
 
-// handlePairingEnter processes enter on pairing buttons.
-func (m Model) handlePairingEnter() (tea.Model, tea.Cmd) {
+func (m Model) handlePairingEnter() (
+	tea.Model, tea.Cmd,
+) {
 	switch m.pairingButtonIdx {
-	case 0: // QR (Tor)
-		restOnion := readOnion(paths.TorLNDRESTHostname)
+	case 0:
+		restOnion := readOnion(
+			paths.TorLNDRESTHostname)
 		mac := readMacaroonHex(m.cfg)
 		if restOnion != "" && mac != "" {
 			m.urlTarget = fmt.Sprintf(
 				"lndconnect://%s:8080?macaroon=%s",
 				restOnion, hexToBase64URL(mac))
 			m.qrLabel = "Tor QR — " +
-				restOnion[:min(20, len(restOnion))] +
-				"..."
+				restOnion[:min(20,
+					len(restOnion))] + "..."
 			m.qrMode = "tor"
 			m.urlReturnTo = svWalletPairing
 			m.subview = svQR
 		}
-	case 1: // Macaroon
+	case 1:
 		return m, showMacaroonCmd(m.cfg)
-	case 2: // QR (Clearnet)
+	case 2:
 		if m.cfg.P2PMode == "hybrid" &&
 			m.status != nil &&
 			m.status.publicIP != "" {
 			mac := readMacaroonHex(m.cfg)
 			if mac != "" {
 				m.urlTarget = fmt.Sprintf(
-					"lndconnect://%s:8080?macaroon=%s",
+					"lndconnect://%s:8080"+
+						"?macaroon=%s",
 					m.status.publicIP,
 					hexToBase64URL(mac))
 				m.qrLabel = "Clearnet QR — " +
@@ -172,10 +134,12 @@ func (m Model) viewQR() string {
 		uri = m.urlTarget
 		label = m.qrLabel
 	} else {
-		restOnion := readOnion(paths.TorLNDRESTHostname)
+		restOnion := readOnion(
+			paths.TorLNDRESTHostname)
 		mac := readMacaroonHex(m.cfg)
 
-		if m.qrMode == "clearnet" && m.status != nil &&
+		if m.qrMode == "clearnet" &&
+			m.status != nil &&
 			m.status.publicIP != "" {
 			uri = fmt.Sprintf(
 				"lndconnect://%s:8080?macaroon=%s",
