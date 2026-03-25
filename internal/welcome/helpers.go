@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/paths"
@@ -196,15 +197,48 @@ func renderViewport(
 	hasAbove := vp.YOffset() > 0
 	hasBelow := vp.YOffset()+vpH < totalLines
 
+	// Overlay scroll indicators on the right edge
+	// of the first/last line. We truncate the line
+	// to make room so total width stays within bounds.
 	if hasAbove && len(vpLines) > 0 {
-		indicator := strings.Repeat(" ", w-4) +
-			theme.Dim.Render(" ▲")
-		vpLines[0] = indicator
+		line := vpLines[0]
+		lineW := lipgloss.Width(line)
+		arrow := theme.Dim.Render(" ▲")
+		if lineW > w-2 {
+			// Truncate line to make room
+			r := []rune(line)
+			for lipgloss.Width(string(r)) > w-2 && len(r) > 0 {
+				r = r[:len(r)-1]
+			}
+			line = string(r)
+			lineW = lipgloss.Width(line)
+		}
+		pad := w - 2 - lineW
+		if pad < 0 {
+			pad = 0
+		}
+		vpLines[0] = line +
+			strings.Repeat(" ", pad) + arrow
 	}
 	if hasBelow && len(vpLines) > 0 {
-		indicator := strings.Repeat(" ", w-4) +
-			theme.Dim.Render(" ▼")
-		vpLines[len(vpLines)-1] = indicator
+		idx := len(vpLines) - 1
+		line := vpLines[idx]
+		lineW := lipgloss.Width(line)
+		arrow := theme.Dim.Render(" ▼")
+		if lineW > w-2 {
+			r := []rune(line)
+			for lipgloss.Width(string(r)) > w-2 && len(r) > 0 {
+				r = r[:len(r)-1]
+			}
+			line = string(r)
+			lineW = lipgloss.Width(line)
+		}
+		pad := w - 2 - lineW
+		if pad < 0 {
+			pad = 0
+		}
+		vpLines[idx] = line +
+			strings.Repeat(" ", pad) + arrow
 	}
 
 	return strings.Join(vpLines, "\n")

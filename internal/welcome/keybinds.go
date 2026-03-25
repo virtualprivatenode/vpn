@@ -695,19 +695,22 @@ func newOnChainHomeBindings(
 	if focus == 0 {
 		b.UpDown = key.NewBinding(
 			key.WithKeys("down"),
-			key.WithHelp("↓", "transactions"))
+			key.WithHelp("↓", "UTXOs"))
 	} else if focus == 1 {
+		b.UpDown = key.NewBinding(
+			key.WithKeys("up", "down"),
+			key.WithHelp("↑↓", "UTXOs"))
+		b.Enter = key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "details"))
+		b.LeftRight.SetEnabled(false)
+	} else {
 		b.UpDown = key.NewBinding(
 			key.WithKeys("up", "down"),
 			key.WithHelp("↑↓", "transactions"))
 		b.Enter = key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "tx details"))
-		b.LeftRight.SetEnabled(false)
-	} else {
-		b.UpDown = key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "UTXOs"))
 		b.LeftRight.SetEnabled(false)
 	}
 	return b

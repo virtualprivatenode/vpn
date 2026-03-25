@@ -1,7 +1,10 @@
 package lndrpc
 
 import (
+	"encoding/hex"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -46,9 +49,11 @@ type OnChainTx struct {
 }
 
 type TxInput struct {
+	Outpoint string // "txid:vout" format
 	PrevTxid string
 	PrevVout uint32
-	Amount   int64 // populated if we can determine it
+	IsOurs   bool
+	Amount   int64
 }
 
 type TxOutput struct {
@@ -217,14 +222,55 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 		amount := t.GetAmount()
 		fee := t.GetTotalFees()
 
-		// Parse outputs from dest addresses
+		// Parse inputs from previous outpoints
+		var inputs []TxInput
+		for _, po := range t.GetPreviousOutpoints() {
+			outpoint := po.GetOutpoint()
+			prevTxid := ""
+			var prevVout uint32
+			if idx := strings.LastIndex(
+				outpoint, ":"); idx >= 0 {
+				prevTxid = outpoint[:idx]
+				for _, c := range outpoint[idx+1:] {
+					if c >= '0' && c <= '9' {
+						prevVout = prevVout*10 +
+							uint32(c-'0')
+					}
+				}
+			}
+			inputs = append(inputs, TxInput{
+				Outpoint: outpoint,
+				PrevTxid: prevTxid,
+				PrevVout: prevVout,
+				IsOurs:   po.GetIsOurOutput(),
+			})
+		}
+
+		// Parse outputs from output details
 		var outputs []TxOutput
-		for _, addr := range t.GetDestAddresses() {
-			isLocal := walletAddrs[addr]
+		for _, od := range t.GetOutputDetails() {
+			addr := od.GetAddress()
+			if addr == "" {
+				// Skip unparseable outputs
+				continue
+			}
 			outputs = append(outputs, TxOutput{
 				Address: addr,
-				IsLocal: isLocal,
+				Amount:  od.GetAmount(),
+				IsLocal: od.GetIsOurAddress(),
 			})
+		}
+
+		// Fallback: if no output details, use
+		// dest addresses (older LND versions)
+		if len(outputs) == 0 {
+			for _, addr := range t.GetDestAddresses() {
+				isLocal := walletAddrs[addr]
+				outputs = append(outputs, TxOutput{
+					Address: addr,
+					IsLocal: isLocal,
+				})
+			}
 		}
 
 		// Determine transaction type
@@ -301,6 +347,7 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 			RawTxHex:      t.GetRawTxHex(),
 			TxType:        txType,
 			ChannelPeer:   channelPeer,
+			Inputs:        inputs,
 			Outputs:       outputs,
 		}
 
@@ -308,15 +355,53 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 	}
 
 	// Sort by timestamp descending (newest first)
-	for i := 0; i < len(txs); i++ {
-		for j := i + 1; j < len(txs); j++ {
-			if txs[j].Timestamp > txs[i].Timestamp {
-				txs[i], txs[j] = txs[j], txs[i]
-			}
+	sort.Slice(txs, func(i, j int) bool {
+		return txs[i].Timestamp > txs[j].Timestamp
+	})
+
+	return txs, nil
+}
+
+// ── Label transaction ───────────────────────────────────
+
+func (c *Client) LabelTransaction(
+	txid string, label string, overwrite bool,
+) error {
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return errNotConnected
+	}
+
+	// Convert hex txid to reversed bytes
+	// (LND expects internal byte order)
+	txidBytes, err := hex.DecodeString(txid)
+	if err != nil {
+		return fmt.Errorf("invalid txid: %w", err)
+	}
+	if len(txidBytes) == 32 {
+		for i, j := 0, 31; i < j; i, j = i+1, j-1 {
+			txidBytes[i], txidBytes[j] =
+				txidBytes[j], txidBytes[i]
 		}
 	}
 
-	return txs, nil
+	walletClient := walletrpc.NewWalletKitClient(conn)
+	ctx, cancel := c.callCtx(defaultTimeout)
+	defer cancel()
+
+	_, err = walletClient.LabelTransaction(ctx,
+		&walletrpc.LabelTransactionRequest{
+			Txid:      txidBytes,
+			Label:     label,
+			Overwrite: overwrite,
+		})
+	if err != nil {
+		c.handleError(err)
+		return err
+	}
+	return nil
 }
 
 // ── Helpers for transaction labeling ─────────────────────
