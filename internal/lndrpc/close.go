@@ -1,6 +1,7 @@
 package lndrpc
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func (c *Client) CloseChannel(
 
 	// Convert txid hex to reversed bytes
 	// (LND expects internal byte order)
-	txidBytes, err := hexDecodeString(txidHex)
+	txidBytes, err := hex.DecodeString(txidHex)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"invalid txid hex: %w", err)

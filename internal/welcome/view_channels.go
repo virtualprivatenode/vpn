@@ -950,8 +950,15 @@ func (m Model) channelHistoryPane(w, h int) string {
 			formatSatsCompact(ch.Capacity))
 
 		statusStr := pad("  "+ch.Status, statusW)
+		closeLabel := ch.CloseType
+		if ch.Status == "waiting close" {
+			closeLabel = "unconfirmed"
+		} else if ch.BlocksRemaining > 0 {
+			closeLabel = fmt.Sprintf("~%d blks",
+				ch.BlocksRemaining)
+		}
 		closeStr := fmt.Sprintf("%*s",
-			closeW, ch.CloseType)
+			closeW, closeLabel)
 
 		marker := " "
 		if isSelected {
