@@ -110,7 +110,7 @@ func (m Model) currentBindings() []key.Binding {
 	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
 		switch tab.Kind {
-		case tabPayment, tabOnChainTx:
+		case tabPayment, tabOnChainTx, tabUtxoDetail:
 			return newDetailTabBindings(hasTabs).
 				ShortHelp()
 		case tabChannelHistory:

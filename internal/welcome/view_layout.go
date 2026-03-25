@@ -466,6 +466,16 @@ func (m Model) renderActiveTabContent(
 		}
 		return theme.Dim.Render(
 			" Transaction not found")
+	case tabUtxoDetail:
+		if tab.Index < len(m.utxos) {
+			saved := m.utxoCursor
+			m.utxoCursor = tab.Index
+			result := m.utxoDetailPane(w)
+			m.utxoCursor = saved
+			return result
+		}
+		return theme.Dim.Render(
+			" UTXO not found")
 	case tabOCReceive:
 		return m.onChainReceivePane(w)
 	case tabOpenChannel:

@@ -241,6 +241,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.buildChannelHistory(msg.channels)
 		}
 		return m, nil
+	case labelTxMsg:
+		m.utxoLabelEditing = false
+		if msg.err == nil {
+			return m, fetchOnChainTxCmd(m.lndClient)
+		}
+		return m, nil
 	case feeTiersMsg:
 		if msg.err == nil {
 			m.ocFeeTiers = msg.tiers
@@ -336,6 +342,8 @@ func (m Model) handleTabContentKey(
 		return m.handlePaymentDetailKey(key)
 	case tabOnChainTx:
 		return m.handleOnChainTxDetailKey(key)
+	case tabUtxoDetail:
+		return m.handleUtxoDetailKey(key, msg)
 	case tabOpenChannel:
 		return m.handleOpenChannelTabKey(key, msg)
 	case tabSend:
@@ -631,6 +639,91 @@ func (m Model) handleOnChainTxDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	return m.handleViewOnlyKey(key, svNone)
+}
+
+func (m Model) handleUtxoDetailKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	if m.utxoLabelEditing {
+		switch key {
+		case "enter":
+			if m.utxoCursor < len(m.utxos) {
+				txid :=
+					m.utxos[m.utxoCursor].Txid
+				label := m.utxoLabelInput.Value()
+				m.utxoLabelEditing = false
+				return m, labelTxCmd(
+					m.lndClient, txid, label)
+			}
+			m.utxoLabelEditing = false
+			return m, nil
+		case "escape":
+			m.utxoLabelEditing = false
+			return m, nil
+		case "q":
+			// Don't quit while editing
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.utxoLabelInput, cmd =
+				m.utxoLabelInput.Update(msg)
+			return m, cmd
+		}
+	}
+
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.contentFocus == 1 {
+			m.contentFocus = 0
+			return m, nil
+		}
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+	case "down", "j":
+		if m.contentFocus == 0 {
+			m.contentFocus = 1
+			return m, nil
+		}
+	case "enter":
+		if m.contentFocus == 1 {
+			// Start label editing
+			current := ""
+			if m.utxoCursor < len(m.utxos) {
+				current = m.utxoTxLabel(
+					m.utxos[m.utxoCursor].Txid)
+			}
+			m.utxoLabelInput =
+				newUtxoLabelInput(current)
+			m.utxoLabelEditing = true
+			return m, nil
+		}
+	case "backspace":
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
+func labelTxCmd(
+	client *lndrpc.Client, txid, label string,
+) tea.Cmd {
+	return func() tea.Msg {
+		if client == nil {
+			return labelTxMsg{
+				err: fmt.Errorf("LND not connected")}
+		}
+		err := client.LabelTransaction(
+			txid, label, true)
+		return labelTxMsg{err: err}
+	}
 }
 
 // ── Flow tab handlers ────────────────────────────────────
@@ -1266,18 +1359,18 @@ func (m Model) handleOnChainHomeKey(
 	case "up", "k":
 		switch m.onChainTxFocus {
 		case 2:
-			if m.utxoCursor > 0 {
-				m.utxoCursor--
+			if m.onChainTxCursor > 0 {
+				m.onChainTxCursor--
 			} else {
 				m.onChainTxFocus = 1
-				if len(m.onChainTxs) > 0 {
-					m.onChainTxCursor =
-						len(m.onChainTxs) - 1
+				if len(m.utxos) > 0 {
+					m.utxoCursor =
+						len(m.utxos) - 1
 				}
 			}
 		case 1:
-			if m.onChainTxCursor > 0 {
-				m.onChainTxCursor--
+			if m.utxoCursor > 0 {
+				m.utxoCursor--
 			} else {
 				m.onChainTxFocus = 0
 				m.onChainBtnIdx = 0
@@ -1293,24 +1386,23 @@ func (m Model) handleOnChainHomeKey(
 	case "down", "j":
 		switch m.onChainTxFocus {
 		case 0:
-			if len(m.onChainTxs) > 0 {
+			if len(m.utxos) > 0 {
 				m.onChainTxFocus = 1
-				m.onChainTxCursor = 0
-			} else if len(m.utxos) > 0 {
-				m.onChainTxFocus = 2
 				m.utxoCursor = 0
+			} else if len(m.onChainTxs) > 0 {
+				m.onChainTxFocus = 2
+				m.onChainTxCursor = 0
 			}
 		case 1:
-			if m.onChainTxCursor <
-				len(m.onChainTxs)-1 {
-				m.onChainTxCursor++
-			} else if len(m.utxos) > 0 {
-				m.onChainTxFocus = 2
-				m.utxoCursor = 0
-			}
-		case 2:
 			if m.utxoCursor < len(m.utxos)-1 {
 				m.utxoCursor++
+			} else if len(m.onChainTxs) > 0 {
+				m.onChainTxFocus = 2
+				m.onChainTxCursor = 0
+			}
+		case 2:
+			if m.onChainTxCursor < len(m.onChainTxs)-1 {
+				m.onChainTxCursor++
 			}
 		}
 	case "right", "l":
@@ -1342,8 +1434,18 @@ func (m Model) handleOnChainHomeKey(
 					fetchOnChainTxCmd(m.lndClient))
 			}
 		} else if m.onChainTxFocus == 1 &&
-			m.onChainTxCursor <
-				len(m.onChainTxs) {
+			m.utxoCursor < len(m.utxos) {
+			u := m.utxos[m.utxoCursor]
+			label := u.Address
+			if len(label) > 14 {
+				label = label[:12] + ".."
+			}
+			m.utxoLabelEditing = false
+			m.contentFocus = 0
+			m.findOrOpenTab(tabUtxoDetail, label,
+				m.utxoCursor, secOnChain)
+		} else if m.onChainTxFocus == 2 &&
+			m.onChainTxCursor < len(m.onChainTxs) {
 			tx := m.onChainTxs[m.onChainTxCursor]
 			label := tx.Label
 			if len(label) > 14 {
@@ -1540,18 +1642,18 @@ func (m Model) handleOnChainKey(
 	case "up", "k":
 		switch m.onChainTxFocus {
 		case 2:
-			if m.utxoCursor > 0 {
-				m.utxoCursor--
+			if m.onChainTxCursor > 0 {
+				m.onChainTxCursor--
 			} else {
 				m.onChainTxFocus = 1
-				if len(m.onChainTxs) > 0 {
-					m.onChainTxCursor =
-						len(m.onChainTxs) - 1
+				if len(m.utxos) > 0 {
+					m.utxoCursor =
+						len(m.utxos) - 1
 				}
 			}
 		case 1:
-			if m.onChainTxCursor > 0 {
-				m.onChainTxCursor--
+			if m.utxoCursor > 0 {
+				m.utxoCursor--
 			} else {
 				m.onChainTxFocus = 0
 				m.onChainBtnIdx = 0
@@ -1567,24 +1669,23 @@ func (m Model) handleOnChainKey(
 	case "down", "j":
 		switch m.onChainTxFocus {
 		case 0:
-			if len(m.onChainTxs) > 0 {
+			if len(m.utxos) > 0 {
 				m.onChainTxFocus = 1
-				m.onChainTxCursor = 0
-			} else if len(m.utxos) > 0 {
-				m.onChainTxFocus = 2
 				m.utxoCursor = 0
+			} else if len(m.onChainTxs) > 0 {
+				m.onChainTxFocus = 2
+				m.onChainTxCursor = 0
 			}
 		case 1:
-			if m.onChainTxCursor <
-				len(m.onChainTxs)-1 {
-				m.onChainTxCursor++
-			} else if len(m.utxos) > 0 {
-				m.onChainTxFocus = 2
-				m.utxoCursor = 0
-			}
-		case 2:
 			if m.utxoCursor < len(m.utxos)-1 {
 				m.utxoCursor++
+			} else if len(m.onChainTxs) > 0 {
+				m.onChainTxFocus = 2
+				m.onChainTxCursor = 0
+			}
+		case 2:
+			if m.onChainTxCursor < len(m.onChainTxs)-1 {
+				m.onChainTxCursor++
 			}
 		}
 	case "right", "l":
@@ -1614,8 +1715,18 @@ func (m Model) handleOnChainKey(
 					fetchOnChainTxCmd(m.lndClient))
 			}
 		} else if m.onChainTxFocus == 1 &&
-			m.onChainTxCursor <
-				len(m.onChainTxs) {
+			m.utxoCursor < len(m.utxos) {
+			u := m.utxos[m.utxoCursor]
+			label := u.Address
+			if len(label) > 14 {
+				label = label[:12] + ".."
+			}
+			m.utxoLabelEditing = false
+			m.contentFocus = 0
+			m.findOrOpenTab(tabUtxoDetail, label,
+				m.utxoCursor, secOnChain)
+		} else if m.onChainTxFocus == 2 &&
+			m.onChainTxCursor < len(m.onChainTxs) {
 			tx := m.onChainTxs[m.onChainTxCursor]
 			label := tx.Label
 			if len(label) > 14 {
@@ -1949,6 +2060,9 @@ func (m Model) closeTab(
 		m.chanOpenInFlight = false
 	case tabChannelHistory:
 		m.subview = svNone
+	case tabUtxoDetail:
+		m.subview = svNone
+		m.utxoLabelEditing = false
 	case tabSend:
 		m.resetSendState()
 		m.subview = svNone

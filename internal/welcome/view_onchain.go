@@ -92,7 +92,7 @@ func (m Model) onChainOverview(w, h int) string {
 
 	txHdr := " " +
 		hdrStyle.Render(pad("Date", dateW)) +
-		hdrStyle.Render(pad("Type", typeW)) +
+		hdrStyle.Render(pad("Label", typeW)) +
 		hdrStyle.Render(
 			fmt.Sprintf("%*s", amtW, "Amount")) +
 		hdrStyle.Render(
@@ -115,7 +115,7 @@ func (m Model) onChainOverview(w, h int) string {
 	} else {
 		for i, tx := range m.onChainTxs {
 			isSelected := isFocused &&
-				m.onChainTxFocus == 1 &&
+				m.onChainTxFocus == 2 &&
 				m.onChainTxCursor == i
 
 			date := formatTimestamp(tx.Timestamp)
@@ -215,7 +215,7 @@ func (m Model) onChainOverview(w, h int) string {
 	} else {
 		for i, u := range m.utxos {
 			isSelected := isFocused &&
-				m.onChainTxFocus == 2 &&
+				m.onChainTxFocus == 1 &&
 				m.utxoCursor == i
 
 			txid := u.Txid
@@ -276,28 +276,28 @@ func (m Model) onChainOverview(w, h int) string {
 		utxoVPH = 1
 	}
 
-	// ── TX viewport ──────────────────────────────
-	txVPRendered := renderViewport(
-		txMidContent, w, txVPH,
-		m.onChainTxCursor,
-		len(txMidLines),
-		len(m.onChainTxs) > 0 &&
-			m.onChainTxFocus == 1)
-
 	// ── UTXO viewport ────────────────────────────
 	utxoVPRendered := renderViewport(
 		utxoMidContent, w, utxoVPH,
 		m.utxoCursor,
 		len(utxoMidLines),
 		len(m.utxos) > 0 &&
+			m.onChainTxFocus == 1)
+
+	// ── TX viewport ──────────────────────────────
+	txVPRendered := renderViewport(
+		txMidContent, w, txVPH,
+		m.onChainTxCursor,
+		len(txMidLines),
+		len(m.onChainTxs) > 0 &&
 			m.onChainTxFocus == 2)
 
-	// ── Assemble output ──────────────────────────
+	/// ── Assemble output ──────────────────────────
 	return header + "\n" +
-		txHeader + "\n" +
-		txVPRendered + "\n" +
 		utxoHeader + "\n" +
-		utxoVPRendered
+		utxoVPRendered + "\n" +
+		txHeader + "\n" +
+		txVPRendered
 }
 
 // ── On-Chain Receive pane ────────────────────────────────
@@ -575,14 +575,43 @@ func (m Model) onChainTxDetailPane(
 	}
 	p.mono(txid)
 
+	if len(tx.Inputs) > 0 {
+		p.blank()
+		p.labelLine("Inputs")
+		for i, inp := range tx.Inputs {
+			isLast := i == len(tx.Inputs)-1
+			connector := "├──"
+			if isLast {
+				connector = "└──"
+			}
+			ownership := ""
+			if inp.IsOurs {
+				ownership = " (ours)"
+			}
+			// 8 = "  ├── " prefix + trailing space
+			maxOP := w - 8 - len(ownership)
+			if maxOP < 16 {
+				maxOP = 16
+			}
+			outpoint := inp.Outpoint
+			if len(outpoint) > maxOP {
+				outpoint = outpoint[:maxOP-3] + "..."
+			}
+			line := fmt.Sprintf("  %s %s%s",
+				connector,
+				theme.Mono.Render(outpoint),
+				theme.Dim.Render(ownership))
+			p.line(line)
+			if !isLast {
+				p.line("  │")
+			}
+		}
+	}
+
 	if len(tx.Outputs) > 0 {
 		p.blank()
 		p.labelLine("Outputs")
 		for i, out := range tx.Outputs {
-			addr := out.Address
-			if len(addr) > w-26 {
-				addr = addr[:w-29] + "..."
-			}
 			amtStr := formatSats(out.Amount)
 			if out.Amount == 0 {
 				amtStr = "—"
@@ -590,6 +619,17 @@ func (m Model) onChainTxDetailPane(
 			labelStr := ""
 			if out.Label != "" {
 				labelStr = " (" + out.Label + ")"
+			}
+			// 13 = "  ├── " + "  " + " sats"
+			fixedW := 13 + len(amtStr) +
+				len(labelStr)
+			addrMax := w - fixedW
+			if addrMax < 12 {
+				addrMax = 12
+			}
+			addr := out.Address
+			if len(addr) > addrMax {
+				addr = addr[:addrMax-3] + "..."
 			}
 			isLast := i == len(tx.Outputs)-1
 			connector := "├──"
@@ -611,13 +651,89 @@ func (m Model) onChainTxDetailPane(
 				p.line("  │")
 			}
 		}
-		if tx.Fee > 0 {
+	}
+
+	if tx.Fee > 0 {
+		p.blank()
+		p.field("Fee:     ",
+			formatSats(tx.Fee)+" sats")
+	}
+	return p.render()
+}
+
+// ── UTXO detail pane ────────────────────────────────────
+
+func (m Model) utxoDetailPane(w int) string {
+	if m.utxoCursor >= len(m.utxos) {
+		return theme.Dim.Render(" UTXO not found")
+	}
+	u := m.utxos[m.utxoCursor]
+
+	p := newPane(w)
+	p.title(theme.Header, "UTXO Detail")
+
+	p.field("Amount:  ",
+		formatSats(u.AmountSats)+" sats")
+	confStr := fmt.Sprintf("%d", u.Confirmations)
+	if u.Confirmations == 0 {
+		confStr = "pending"
+	}
+	p.field("Confs:   ", confStr)
+	p.blank()
+
+	p.labelLine("Address:")
+	addr := u.Address
+	if len(addr) > w-4 {
+		addr = addr[:w-7] + "..."
+	}
+	p.mono(addr)
+	p.blank()
+
+	p.labelLine("Outpoint:")
+	outpoint := fmt.Sprintf("%s:%d", u.Txid, u.Vout)
+	if len(outpoint) > w-4 {
+		outpoint = outpoint[:w-7] + "..."
+	}
+	p.mono(outpoint)
+	p.blank()
+
+	// Label (from matching transaction)
+	txLabel := m.utxoTxLabel(u.Txid)
+	if m.utxoLabelEditing {
+		p.labelLine("Label:")
+		p.line("  " + m.utxoLabelInput.View())
+	} else {
+		if txLabel != "" {
+			p.field("Label:   ", txLabel)
+		} else {
+			p.field("Label:   ",
+				theme.Dim.Render("none"))
+		}
+		isFocused := m.contentFocused &&
+			!m.tabFocused
+		if isFocused && m.contentFocus == 1 {
 			p.blank()
-			p.line("  " + theme.Dim.Render("Fee: ") +
-				theme.Value.Render(
-					formatSats(tx.Fee)+" sats"))
+			p.line(renderButtons(
+				[]string{"Edit Label"},
+				0, true, w))
+		} else {
+			p.blank()
+			p.line(renderButtons(
+				[]string{"Edit Label"},
+				0, false, w))
 		}
 	}
 
 	return p.render()
+}
+
+// utxoTxLabel looks up the transaction label for
+// a UTXO's parent transaction.
+func (m Model) utxoTxLabel(txid string) string {
+	for _, tx := range m.onChainTxs {
+		if tx.Txid == txid {
+			return tx.Label
+		}
+	}
+	return ""
 }

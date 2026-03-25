@@ -93,6 +93,7 @@ const (
 	tabLndHub                        //
 	tabOpenChannel                   // Channel open flow
 	tabOnChainTx                     // on-chain transaction detail
+	tabUtxoDetail                    // UTXO detail with label edit
 	tabChannelHistory                // channel history view
 )
 
@@ -187,6 +188,10 @@ type closeChannelMsg struct {
 type closedChannelsMsg struct {
 	channels []lndrpc.ClosedChannel
 	err      error
+}
+
+type labelTxMsg struct {
+	err error
 }
 
 type paymentType int
@@ -381,6 +386,8 @@ type Model struct {
 	onChainSendError string
 	utxos            []lndrpc.UTXO
 	utxoCursor       int
+	utxoLabelInput   textinput.Model
+	utxoLabelEditing bool
 
 	// On-chain receive state
 	ocRecvAddress string
@@ -403,7 +410,7 @@ type Model struct {
 	// On-chain transaction history
 	onChainTxs      []lndrpc.OnChainTx
 	onChainTxCursor int
-	onChainTxFocus  int // 0=buttons, 1=tx table, 2=utxo table
+	onChainTxFocus  int // 0=buttons, 1=utxo table, 2=tx table
 
 	// Send state
 	sendDecodedValid bool

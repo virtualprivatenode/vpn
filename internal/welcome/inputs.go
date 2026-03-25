@@ -259,6 +259,18 @@ func validateOnChainAddr(s string) error {
 	return nil
 }
 
+func newUtxoLabelInput(current string) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "Enter label..."
+	ti.CharLimit = 64
+	ti.SetWidth(40)
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.SetValue(current)
+	ti.Focus()
+	return ti
+}
+
 // ── Helpers ──────────────────────────────────────────────
 
 // syncthingIDValue returns the uppercased value of the syncthing input.
