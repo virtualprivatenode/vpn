@@ -3,6 +3,7 @@
 package lndrpc
 
 import (
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -45,16 +46,41 @@ type Channel struct {
 }
 
 type PendingChannelInfo struct {
-	PendingOpen         int
-	ForceClose          int
-	WaitingClose        int
-	PendingOpenChannels []PendingChannel
+	PendingOpen               int
+	ForceClose                int
+	WaitingClose              int
+	PendingOpenChannels       []PendingChannel
+	PendingForceCloseChannels []PendingForceCloseChannel
+	WaitingCloseChannels      []WaitingCloseChannel
 }
 
 type PendingChannel struct {
 	RemotePubkey string
 	Capacity     int64
 	LocalBalance int64
+	PeerAlias    string
+}
+
+type PendingForceCloseChannel struct {
+	RemotePubkey     string
+	ChannelPoint     string
+	Capacity         int64
+	LocalBalance     int64
+	LimboBalance     int64
+	RecoveredBalance int64
+	ClosingTxid      string
+	MaturityHeight   int32
+	BlocksRemaining  int32
+	PeerAlias        string
+}
+
+type WaitingCloseChannel struct {
+	RemotePubkey string
+	ChannelPoint string
+	Capacity     int64
+	LocalBalance int64
+	LimboBalance int64
+	ClosingTxid  string
 	PeerAlias    string
 }
 
@@ -194,11 +220,55 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 		}
 	}
 
+	var forceCloseChans []PendingForceCloseChannel
+	for _, fc := range resp.GetPendingForceClosingChannels() {
+		ch := fc.GetChannel()
+		if ch != nil {
+			alias := c.getPeerAlias(
+				ch.GetRemoteNodePub())
+			forceCloseChans = append(forceCloseChans,
+				PendingForceCloseChannel{
+					RemotePubkey:     ch.GetRemoteNodePub(),
+					ChannelPoint:     ch.GetChannelPoint(),
+					Capacity:         ch.GetCapacity(),
+					LocalBalance:     ch.GetLocalBalance(),
+					LimboBalance:     fc.GetLimboBalance(),
+					RecoveredBalance: fc.GetRecoveredBalance(),
+					ClosingTxid:      fc.GetClosingTxid(),
+					MaturityHeight:   int32(fc.GetMaturityHeight()),
+					BlocksRemaining:  fc.GetBlocksTilMaturity(),
+					PeerAlias:        alias,
+				})
+		}
+	}
+
+	var waitingCloseChans []WaitingCloseChannel
+	for _, wc := range resp.GetWaitingCloseChannels() {
+		ch := wc.GetChannel()
+		if ch != nil {
+			alias := c.getPeerAlias(
+				ch.GetRemoteNodePub())
+			waitingCloseChans = append(
+				waitingCloseChans,
+				WaitingCloseChannel{
+					RemotePubkey: ch.GetRemoteNodePub(),
+					ChannelPoint: ch.GetChannelPoint(),
+					Capacity:     ch.GetCapacity(),
+					LocalBalance: ch.GetLocalBalance(),
+					LimboBalance: wc.GetLimboBalance(),
+					ClosingTxid:  wc.GetClosingTxid(),
+					PeerAlias:    alias,
+				})
+		}
+	}
+
 	return &PendingChannelInfo{
-		PendingOpen:         len(resp.GetPendingOpenChannels()),
-		ForceClose:          len(resp.GetPendingForceClosingChannels()),
-		WaitingClose:        len(resp.GetWaitingCloseChannels()),
-		PendingOpenChannels: pendingChans,
+		PendingOpen:               len(resp.GetPendingOpenChannels()),
+		ForceClose:                len(resp.GetPendingForceClosingChannels()),
+		WaitingClose:              len(resp.GetWaitingCloseChannels()),
+		PendingOpenChannels:       pendingChans,
+		PendingForceCloseChannels: forceCloseChans,
+		WaitingCloseChannels:      waitingCloseChans,
 	}, nil
 }
 
@@ -366,7 +436,7 @@ func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool) (*C
 		return nil, errNotConnected
 	}
 
-	pubkeyBytes, err := hexDecodeString(pubkey)
+	pubkeyBytes, err := hex.DecodeString(pubkey)
 	if err != nil {
 		return nil, fmt.Errorf("invalid pubkey: %w", err)
 	}
@@ -450,35 +520,6 @@ func searchString(s, substr string) bool {
 
 func satStr(sats int64) string {
 	return fmt.Sprintf("%d", sats)
-}
-
-func hexDecodeString(s string) ([]byte, error) {
-	if len(s)%2 != 0 {
-		return nil, fmt.Errorf("odd length hex string")
-	}
-	b := make([]byte, len(s)/2)
-	for i := 0; i < len(b); i++ {
-		high := hexVal(s[i*2])
-		low := hexVal(s[i*2+1])
-		if high < 0 || low < 0 {
-			return nil, fmt.Errorf("invalid hex char at %d", i*2)
-		}
-		b[i] = byte(high<<4 | low)
-	}
-	return b, nil
-}
-
-func hexVal(c byte) int {
-	switch {
-	case c >= '0' && c <= '9':
-		return int(c - '0')
-	case c >= 'a' && c <= 'f':
-		return int(c - 'a' + 10)
-	case c >= 'A' && c <= 'F':
-		return int(c - 'A' + 10)
-	default:
-		return -1
-	}
 }
 
 var errNotConnected = fmt.Errorf("LND gRPC not connected")

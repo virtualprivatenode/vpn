@@ -1,7 +1,9 @@
 package welcome
 
 import (
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"time"
 
 	"charm.land/bubbles/v2/table"
@@ -209,16 +211,18 @@ type channelInfo struct {
 }
 
 type channelHistoryEntry struct {
-	PeerAlias    string
-	RemotePubkey string
-	Capacity     int64
-	LocalBalance int64
-	Status       string // "active", "inactive", "pending open", etc.
-	CloseType    string // "coop", "force", "breach", "—"
-	ClosingTxid  string
-	SettledBal   int64
-	CloseHeight  int32
-	Active       bool
+	PeerAlias       string
+	RemotePubkey    string
+	Capacity        int64
+	LocalBalance    int64
+	Status          string // "active", "inactive", "pending open", etc.
+	CloseType       string // "coop", "force", "breach", "—"
+	ClosingTxid     string
+	SettledBal      int64
+	CloseHeight     int32
+	BlocksRemaining int32
+	LimboBalance    int64
+	Active          bool
 }
 
 type peerOption struct {
@@ -251,6 +255,8 @@ type statusMsg struct {
 	channels                     []channelInfo
 	pendingOpen                  int
 	pendingForceClose            int
+	pendingForceCloseChannels    []lndrpc.PendingForceCloseChannel
+	waitingCloseChannels         []lndrpc.WaitingCloseChannel
 }
 
 type Model struct {
@@ -768,7 +774,7 @@ func waitForInvoiceCmd(
 			return invoiceSettledMsg{
 				err: fmt.Errorf("LND not connected")}
 		}
-		hashBytes, err := hexDecodeBytes(paymentHash)
+		hashBytes, err := hex.DecodeString(paymentHash)
 		if err != nil {
 			return invoiceSettledMsg{err: err}
 		}
@@ -829,14 +835,10 @@ func fetchPaymentHistoryCmd(
 		var all []lndrpc.PaymentEntry
 		all = append(all, invoices...)
 		all = append(all, payments...)
-		for i := 0; i < len(all); i++ {
-			for j := i + 1; j < len(all); j++ {
-				if all[j].CreationDate >
-					all[i].CreationDate {
-					all[i], all[j] = all[j], all[i]
-				}
-			}
-		}
+		sort.Slice(all, func(i, j int) bool {
+			return all[i].CreationDate >
+				all[j].CreationDate
+		})
 		return paymentHistoryMsg{entries: all}
 	}
 }
@@ -908,36 +910,6 @@ func fetchOnChainTxCmd(
 		}
 		txs, err := client.GetTransactions()
 		return onChainTxMsg{txs: txs, err: err}
-	}
-}
-
-func hexDecodeBytes(s string) ([]byte, error) {
-	if len(s)%2 != 0 {
-		return nil, fmt.Errorf("odd length hex")
-	}
-	b := make([]byte, len(s)/2)
-	for i := 0; i < len(b); i++ {
-		high := hexVal(s[i*2])
-		low := hexVal(s[i*2+1])
-		if high < 0 || low < 0 {
-			return nil, fmt.Errorf(
-				"invalid hex at %d", i*2)
-		}
-		b[i] = byte(high<<4 | low)
-	}
-	return b, nil
-}
-
-func hexVal(c byte) int {
-	switch {
-	case c >= '0' && c <= '9':
-		return int(c - '0')
-	case c >= 'a' && c <= 'f':
-		return int(c - 'a' + 10)
-	case c >= 'A' && c <= 'F':
-		return int(c - 'A' + 10)
-	default:
-		return -1
 	}
 }
 

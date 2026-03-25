@@ -624,43 +624,13 @@ func (m Model) handleCloseResultKey(
 func (m Model) handlePaymentDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return m, nil
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
+	return m.handleViewOnlyKey(key, svNone)
 }
 
 func (m Model) handleOnChainTxDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return m, nil
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
+	return m.handleViewOnlyKey(key, svNone)
 }
 
 // ── Flow tab handlers ────────────────────────────────────
@@ -824,23 +794,7 @@ func (m Model) handleSyncthingTabKey(
 func (m Model) handleSyncDeviceDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "backspace":
-		m.subview = svSyncthingDetail
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	}
-	return m, nil
+	return m.handleViewOnlyKey(key, svSyncthingDetail)
 }
 
 func (m Model) handleLndHubTabKey(
@@ -928,23 +882,7 @@ func (m Model) handleLndHubCreatedKey(
 func (m Model) handleLndHubAccountDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "backspace":
-		m.subview = svLndHubManage
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	}
-	return m, nil
+	return m.handleViewOnlyKey(key, svLndHubManage)
 }
 
 func (m Model) handleLndHubDeactivateKey(
@@ -1056,29 +994,8 @@ func (m Model) handleChannelsHomeKey(
 				if len(label) > 17 {
 					label = label[:17] + "..."
 				}
-				newTab := openTab{
-					Kind:    tabChannel,
-					Label:   label,
-					Index:   m.chanCursor,
-					Section: secChannels,
-				}
-				found := false
-				tabs := m.effectiveTabs()
-				for i, t := range tabs {
-					if t.Kind == tabChannel &&
-						t.Index == m.chanCursor {
-						m.activeTab = i
-						found = true
-						break
-					}
-				}
-				if !found {
-					m.tabs = append(m.tabs, newTab)
-					m.activeTab =
-						len(m.effectiveTabs()) - 1
-				}
-				m.focusTabBar()
-				m.tabCursorX = 0
+				m.findOrOpenTab(tabChannel, label,
+					m.chanCursor, secChannels)
 			}
 		} else if m.contentFocus == 1 {
 			switch m.btnIdx {
@@ -1162,29 +1079,8 @@ func (m Model) handleWalletHomeKey(
 			if len(label) > 14 {
 				label = label[:12] + ".."
 			}
-			newTab := openTab{
-				Kind:    tabPayment,
-				Label:   label,
-				Index:   m.payHistoryCursor,
-				Section: secWallet,
-			}
-			found := false
-			tabs := m.effectiveTabs()
-			for i, t := range tabs {
-				if t.Kind == tabPayment &&
-					t.Index == m.payHistoryCursor {
-					m.activeTab = i
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.tabs = append(m.tabs, newTab)
-				m.activeTab =
-					len(m.effectiveTabs()) - 1
-			}
-			m.focusTabBar()
-			m.tabCursorX = 0
+			m.findOrOpenTab(tabPayment, label,
+				m.payHistoryCursor, secWallet)
 		} else if m.contentFocus == 1 {
 			switch m.btnIdx {
 			case 0:
@@ -1262,14 +1158,38 @@ func (m *Model) buildChannelHistory(
 				})
 		}
 
-		// Pending force close / waiting close
-		if m.status.pendingForceClose > 0 {
-			// These come from PendingChannels
-			// which we already fetch in status.go
-			// but don't surface individually.
-			// For now we show a count-based entry.
-			// TODO: surface individual pending
-			// close channels from status.go
+		// Waiting close channels (close tx broadcast,
+		// not yet confirmed)
+		for _, wc := range m.status.waitingCloseChannels {
+			entries = append(entries,
+				channelHistoryEntry{
+					PeerAlias:    wc.PeerAlias,
+					RemotePubkey: wc.RemotePubkey,
+					Capacity:     wc.Capacity,
+					LocalBalance: wc.LocalBalance,
+					LimboBalance: wc.LimboBalance,
+					Status:       "waiting close",
+					CloseType:    "closing",
+					ClosingTxid:  wc.ClosingTxid,
+					Active:       false,
+				})
+		}
+
+		// Pending force close channels
+		for _, fc := range m.status.pendingForceCloseChannels {
+			entries = append(entries,
+				channelHistoryEntry{
+					PeerAlias:       fc.PeerAlias,
+					RemotePubkey:    fc.RemotePubkey,
+					Capacity:        fc.Capacity,
+					LocalBalance:    fc.LocalBalance,
+					LimboBalance:    fc.LimboBalance,
+					Status:          "force close",
+					CloseType:       "force",
+					ClosingTxid:     fc.ClosingTxid,
+					BlocksRemaining: fc.BlocksRemaining,
+					Active:          false,
+				})
 		}
 	}
 
@@ -1429,29 +1349,8 @@ func (m Model) handleOnChainHomeKey(
 			if len(label) > 14 {
 				label = label[:12] + ".."
 			}
-			newTab := openTab{
-				Kind:    tabOnChainTx,
-				Label:   label,
-				Index:   m.onChainTxCursor,
-				Section: secOnChain,
-			}
-			found := false
-			tabs := m.effectiveTabs()
-			for i, t := range tabs {
-				if t.Kind == tabOnChainTx &&
-					t.Index == m.onChainTxCursor {
-					m.activeTab = i
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.tabs = append(m.tabs, newTab)
-				m.activeTab =
-					len(m.effectiveTabs()) - 1
-			}
-			m.focusTabBar()
-			m.tabCursorX = 0
+			m.findOrOpenTab(tabOnChainTx, label,
+				m.onChainTxCursor, secOnChain)
 		}
 	}
 	return m, nil
@@ -1722,29 +1621,8 @@ func (m Model) handleOnChainKey(
 			if len(label) > 14 {
 				label = label[:12] + ".."
 			}
-			newTab := openTab{
-				Kind:    tabOnChainTx,
-				Label:   label,
-				Index:   m.onChainTxCursor,
-				Section: secOnChain,
-			}
-			found := false
-			tabs := m.effectiveTabs()
-			for i, t := range tabs {
-				if t.Kind == tabOnChainTx &&
-					t.Index == m.onChainTxCursor {
-					m.activeTab = i
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.tabs = append(m.tabs, newTab)
-				m.activeTab =
-					len(m.effectiveTabs()) - 1
-			}
-			m.focusTabBar()
-			m.tabCursorX = 0
+			m.findOrOpenTab(tabOnChainTx, label,
+				m.onChainTxCursor, secOnChain)
 		}
 	}
 	return m, nil
@@ -2188,6 +2066,58 @@ func (m Model) handleGenericSubviewKey(
 		return m, nil
 	}
 	return m, nil
+}
+
+// ── View-only tab handler (shared) ──────────────────────
+
+func (m Model) handleViewOnlyKey(
+	key string, backSubview wSubview,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "left", "h":
+		m.focusSidebar()
+		return m, nil
+	case "up", "k":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+	case "backspace":
+		if backSubview != svNone {
+			m.subview = backSubview
+			return m, nil
+		}
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
+// ── findOrOpenTab (shared) ──────────────────────────────
+
+func (m *Model) findOrOpenTab(
+	kind tabKind, label string,
+	index, section int,
+) {
+	tabs := m.effectiveTabs()
+	for i, t := range tabs {
+		if t.Kind == kind && t.Index == index {
+			m.activeTab = i
+			m.focusTabBar()
+			m.tabCursorX = 0
+			return
+		}
+	}
+	m.tabs = append(m.tabs, openTab{
+		Kind: kind, Label: label,
+		Index: index, Section: section,
+	})
+	m.activeTab = len(m.effectiveTabs()) - 1
+	m.focusTabBar()
+	m.tabCursorX = 0
 }
 
 // ── Channel open entry ───────────────────────────────────

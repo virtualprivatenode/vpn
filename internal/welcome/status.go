@@ -140,6 +140,10 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 				if errPend == nil {
 					s.pendingOpen = pending.PendingOpen
 					s.pendingForceClose = pending.ForceClose
+					s.pendingForceCloseChannels =
+						pending.PendingForceCloseChannels
+					s.waitingCloseChannels =
+						pending.WaitingCloseChannels
 				}
 				mu.Unlock()
 			}()
