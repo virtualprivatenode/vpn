@@ -63,11 +63,10 @@ const (
 	svOnChainResult
 	svSelfUpdate
 	svP2PUpgrade
-	// On-chain send flow
-	svOnChainSendAddr
-	svOnChainSendAmount
-	svOnChainSendConfirm
-	svOnChainSendBroadcast
+	// On-chain send flow (single screen)
+	svOnChainSend
+	svOCSendConfirm
+	svOCSendBroadcast
 	// On-chain receive flow
 	svOnChainReceive
 	// Channel close flow
@@ -379,6 +378,7 @@ type Model struct {
 	onChainAddress   string
 	onChainBtnIdx    int
 	onChainFocus     int // 0=buttons, 1=utxo table
+	ocSendBtnIdx     int // 0=Clear, 1=Create Transaction
 	onChainSendAddr  string
 	onChainSendAmt   string
 	onChainSendFee   int64
@@ -388,6 +388,10 @@ type Model struct {
 	utxoCursor       int
 	utxoLabelInput   textinput.Model
 	utxoLabelEditing bool
+	// Coin control: UTXO selection
+	utxoSelected      map[int]bool // keyed by UTXO index
+	utxoSelectedTotal int64        // running sat total
+	utxoOutpoints     []string     // "txid:vout" for SendCoins
 
 	// On-chain receive state
 	ocRecvAddress string
@@ -399,10 +403,11 @@ type Model struct {
 	ocSendAmtInput   textinput.Model
 	ocCustomFeeInput textinput.Model
 	ocSendAll        bool
-	ocSendStep       int // 0=amount field, 1=fee tiers
+	ocSendStep       int // 0=addr, 1=amount, 2=max btn, 3=fee tiers, 4=custom fee, 5=buttons
 	ocFeeTiers       [4]feeTier
-	ocSelectedTier   int   // 0-3, or 4=custom
+	ocSelectedTier   int   // 0=1sat, 1=2sat, 2=3sat, 3=Custom
 	ocConfirmFee     int64 // precise fee from LND
+	ocConfirmBtnIdx  int   // 0=Go Back, 1=Confirm & Broadcast
 	ocSendAddrVal    string
 	ocSendAmtVal     int64
 	ocSendFeeRate    int64
@@ -493,6 +498,7 @@ func NewModel(
 		nav:          NewNavSidebar(),
 		channelTable: newChannelTable(),
 		txTable:      newTxTable(),
+		utxoSelected: make(map[int]bool),
 	}
 }
 
@@ -508,6 +514,7 @@ func NewTestModel(
 		txTable:      newTxTable(),
 	}
 	m.cfgStore = store
+	m.utxoSelected = make(map[int]bool)
 	return m
 }
 
@@ -866,6 +873,7 @@ func listUnspentCmd(
 func sendCoinsCmd(
 	client *lndrpc.Client, addr string,
 	amount int64, feeRate int64, sendAll bool,
+	outpoints []string,
 ) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
@@ -873,7 +881,7 @@ func sendCoinsCmd(
 				"LND not connected")}
 		}
 		result, err := client.SendCoins(
-			addr, amount, feeRate, sendAll)
+			addr, amount, feeRate, sendAll, outpoints)
 		if err != nil {
 			return sendCoinsResultMsg{err: err}
 		}
@@ -950,14 +958,16 @@ func (m *Model) rebuildChannelTable() {
 func (m *Model) rebuildTxTable() {
 	var rows []table.Row
 	for _, entry := range m.payHistory {
-		dot := "●"
-		if entry.Status == "FAILED" {
+		var dot string
+		switch entry.Status {
+		case "FAILED":
 			dot = "✗"
-		} else if entry.Status == "EXPIRED" {
+		case "EXPIRED":
 			dot = "○"
-		} else if entry.Status == "IN_FLIGHT" ||
-			entry.Status == "OPEN" {
+		case "IN_FLIGHT", "OPEN":
 			dot = "◌"
+		default:
+			dot = "●"
 		}
 		dir := "↑ sent"
 		if entry.IsIncoming {

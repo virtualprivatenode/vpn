@@ -130,6 +130,7 @@ func (c *Client) ListUnspent(
 func (c *Client) SendCoins(
 	address string, amountSats int64,
 	satPerVbyte int64, sendAll bool,
+	outpoints []string,
 ) (*SendCoinsResult, error) {
 	rpc := c.rpc()
 	if rpc == nil {
@@ -143,6 +144,26 @@ func (c *Client) SendCoins(
 		Amount:      amountSats,
 		SatPerVbyte: uint64(satPerVbyte),
 		SendAll:     sendAll,
+	}
+
+	// Coin control: restrict inputs to selected UTXOs
+	for _, op := range outpoints {
+		parts := strings.SplitN(op, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		txid := parts[0]
+		var idx uint32
+		for _, c := range parts[1] {
+			if c >= '0' && c <= '9' {
+				idx = idx*10 + uint32(c-'0')
+			}
+		}
+		req.Outpoints = append(req.Outpoints,
+			&lnrpc.OutPoint{
+				TxidStr:     txid,
+				OutputIndex: idx,
+			})
 	}
 
 	resp, err := rpc.SendCoins(ctx, req)
