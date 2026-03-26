@@ -857,76 +857,48 @@ func (m Model) handleLndHubCreateNameKey(
 	}
 }
 
-// ── On-chain send flow keys ──────────────────────────────
+// ── On-chain send flow keys (single screen) ─────────────
+//
+// Steps:
+//   0 = Address input
+//   1 = Amount input
+//   2 = Max / Send All button
+//   3 = Fee tier selector
+//   4 = Custom fee input (only when Custom selected)
+//   5 = Buttons (Clear / Create Transaction)
 
-func (m Model) handleOCSendAddrKey(
+func (m Model) handleOCSendKey(
 	key string, msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-		return m, nil
-	case "backspace":
-		if m.ocSendAddrInput.Value() != "" {
-			var cmd tea.Cmd
-			m.ocSendAddrInput, cmd =
-				m.ocSendAddrInput.Update(
-					tea.Msg(msg))
-			return m, cmd
-		}
-		return m.closeTab(m.activeTab)
-	case "enter":
-		addr := strings.TrimSpace(
-			m.ocSendAddrInput.Value())
-		if addr == "" {
-			m.onChainSendError = "Enter an address"
-			return m, nil
-		}
-		if !isValidOnChainAddr(
-			addr, m.cfg.Network) {
-			m.onChainSendError = "Invalid address"
-			return m, nil
-		}
-		m.ocSendAddrVal = addr
-		m.onChainSendError = ""
-		m.subview = svOnChainSendAmount
-		m.ocSendStep = 0
-		m.ocSendAll = false
-		return m, fetchFeeTiersCmd(m.cfg)
-	default:
-		var cmd tea.Cmd
-		m.ocSendAddrInput, cmd =
-			m.ocSendAddrInput.Update(tea.Msg(msg))
-		return m, cmd
-	}
-}
 
-func (m Model) handleOCSendAmountKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
 	case "left", "h":
-		if m.ocSendStep == 1 &&
+		// Fee tier: move left
+		if m.ocSendStep == 3 &&
 			m.ocSelectedTier > 0 {
 			m.ocSelectedTier--
 			return m, nil
 		}
-		m.focusSidebar()
-		return m, nil
-	case "backspace":
-		if m.ocSendStep == 0 && !m.ocSendAll {
+		// Buttons: move left
+		if m.ocSendStep == 5 &&
+			m.ocSendBtnIdx > 0 {
+			m.ocSendBtnIdx--
+			return m, nil
+		}
+		// Addr input: pass through for cursor
+		if m.ocSendStep == 0 {
+			if m.ocSendAddrInput.Value() != "" {
+				var cmd tea.Cmd
+				m.ocSendAddrInput, cmd =
+					m.ocSendAddrInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		}
+		// Amount input: pass through for cursor
+		if m.ocSendStep == 1 && !m.ocSendAll {
 			if m.ocSendAmtInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocSendAmtInput, cmd =
@@ -935,7 +907,8 @@ func (m Model) handleOCSendAmountKey(
 				return m, cmd
 			}
 		}
-		if m.ocSendStep == 2 {
+		// Custom fee: pass through for cursor
+		if m.ocSendStep == 4 {
 			if m.ocCustomFeeInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocCustomFeeInput, cmd =
@@ -944,154 +917,359 @@ func (m Model) handleOCSendAmountKey(
 				return m, cmd
 			}
 		}
-		m.subview = svOnChainSendAddr
-		m.onChainSendError = ""
+		m.focusSidebar()
 		return m, nil
-	case "tab":
-		m.ocSendAll = !m.ocSendAll
-		if m.ocSendAll {
-			m.ocSendAmtInput.Blur()
-		} else {
-			m.ocSendAmtInput.Focus()
-		}
-		return m, nil
-	case "up", "k":
-		if m.ocSendStep == 1 {
-			m.ocSendStep = 0
-			if !m.ocSendAll {
-				m.ocSendAmtInput.Focus()
-			}
-		} else if m.ocSendStep == 2 {
-			m.ocSendStep = 1
-			m.ocCustomFeeInput.Blur()
-		} else if m.ocSendStep == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		}
-		return m, nil
-	case "down", "j":
-		if m.ocSendStep == 0 {
-			m.ocSendStep = 1
-			m.ocSendAmtInput.Blur()
-		} else if m.ocSendStep == 1 &&
-			m.ocSelectedTier == 4 {
-			m.ocSendStep = 2
-			m.ocCustomFeeInput.Focus()
-		}
-		return m, nil
+
 	case "right", "l":
-		if m.ocSendStep == 1 &&
-			m.ocSelectedTier < 4 {
+		// Fee tier: move right
+		if m.ocSendStep == 3 &&
+			m.ocSelectedTier < 3 {
 			m.ocSelectedTier++
+			return m, nil
 		}
-		return m, nil
-	case "enter":
-		var amountSats int64
-		if m.ocSendAll {
-			amountSats = 0
-		} else {
-			val := strings.TrimSpace(
-				m.ocSendAmtInput.Value())
-			val = strings.ReplaceAll(val, ",", "")
-			if val == "" {
-				m.onChainSendError =
-					"Enter an amount"
-				return m, nil
-			}
-			for _, c := range val {
-				if c < '0' || c > '9' {
-					m.onChainSendError =
-						"Invalid number"
-					return m, nil
-				}
-			}
-			var n int64
-			for _, c := range val {
-				n = n*10 + int64(c-'0')
-			}
-			if n < 546 {
-				m.onChainSendError =
-					"Minimum 546 sats (dust limit)"
-				return m, nil
-			}
-			amountSats = n
+		// Buttons: move right
+		if m.ocSendStep == 5 &&
+			m.ocSendBtnIdx < 1 {
+			m.ocSendBtnIdx++
+			return m, nil
 		}
-
-		var feeRate int64
-		if m.ocSelectedTier < 4 {
-			tier := m.ocFeeTiers[m.ocSelectedTier]
-			if tier.SatPerVB <= 0 {
-				m.onChainSendError =
-					"Fee estimate not available"
-				return m, nil
-			}
-			feeRate = int64(tier.SatPerVB)
-			if feeRate < 1 {
-				feeRate = 1
-			}
-		} else {
-			feeVal := strings.TrimSpace(
-				m.ocCustomFeeInput.Value())
-			if feeVal == "" {
-				m.onChainSendError =
-					"Enter a custom fee rate"
-				return m, nil
-			}
-			var n int64
-			for _, c := range feeVal {
-				if c < '0' || c > '9' {
-					m.onChainSendError =
-						"Invalid fee rate"
-					return m, nil
-				}
-				n = n*10 + int64(c-'0')
-			}
-			if n < 1 {
-				m.onChainSendError =
-					"Minimum 1 sat/vB"
-				return m, nil
-			}
-			feeRate = n
+		// Addr input: pass through for cursor
+		if m.ocSendStep == 0 {
+			var cmd tea.Cmd
+			m.ocSendAddrInput, cmd =
+				m.ocSendAddrInput.Update(
+					tea.Msg(msg))
+			return m, cmd
 		}
-
-		m.ocSendAmtVal = amountSats
-		m.ocSendFeeRate = feeRate
-		m.onChainSendError = ""
-		m.ocConfirmFee = 0
-		m.subview = svOnChainSendConfirm
-
-		if !m.ocSendAll &&
-			m.ocSendAddrVal != "" {
-			target := int32(1)
-			if m.ocSelectedTier < 4 {
-				target = int32(
-					m.ocFeeTiers[m.ocSelectedTier].
-						Target)
-			}
-			return m, estimateTxFeeCmd(
-				m.lndClient, m.ocSendAddrVal,
-				amountSats, target)
-		}
-		return m, nil
-	default:
-		if m.ocSendStep == 0 && !m.ocSendAll {
+		// Amount input: pass through for cursor
+		if m.ocSendStep == 1 && !m.ocSendAll {
 			var cmd tea.Cmd
 			m.ocSendAmtInput, cmd =
 				m.ocSendAmtInput.Update(
 					tea.Msg(msg))
 			return m, cmd
 		}
-		if m.ocSendStep == 2 {
+		// Custom fee: pass through for cursor
+		if m.ocSendStep == 4 {
 			var cmd tea.Cmd
 			m.ocCustomFeeInput, cmd =
 				m.ocCustomFeeInput.Update(
 					tea.Msg(msg))
 			return m, cmd
 		}
+		return m, nil
+
+	case "backspace":
+		// In text inputs: delete char if non-empty
+		if m.ocSendStep == 0 {
+			if m.ocSendAddrInput.Value() != "" {
+				var cmd tea.Cmd
+				m.ocSendAddrInput, cmd =
+					m.ocSendAddrInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+			// Empty addr input: close tab
+			return m.closeTab(m.activeTab)
+		}
+		if m.ocSendStep == 1 && m.ocSendAll {
+			m.ocSendAll = false
+			m.ocSendAmtInput.SetValue("")
+			m.ocSendAmtInput.Focus()
+			return m, nil
+		}
+		if m.ocSendStep == 1 && !m.ocSendAll {
+			if m.ocSendAmtInput.Value() != "" {
+				var cmd tea.Cmd
+				m.ocSendAmtInput, cmd =
+					m.ocSendAmtInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		}
+		if m.ocSendStep == 4 {
+			if m.ocCustomFeeInput.Value() != "" {
+				var cmd tea.Cmd
+				m.ocCustomFeeInput, cmd =
+					m.ocCustomFeeInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		}
+		// Move up one step on backspace with
+		// empty input
+		if m.ocSendStep > 0 {
+			prev := m.ocSendStep - 1
+			// Skip custom fee step when going back
+			// if not on custom tier
+			if prev == 4 && m.ocSelectedTier != 3 {
+				prev = 3
+			}
+			m.ocSendStep = prev
+			m.onChainSendError = ""
+			m.focusSendStep()
+			return m, nil
+		}
+		return m.closeTab(m.activeTab)
+
+	case "up", "k":
+		if m.ocSendStep > 0 {
+			prev := m.ocSendStep - 1
+			// Skip step 4 (custom fee) when moving
+			// up if not on custom tier
+			if prev == 4 && m.ocSelectedTier != 3 {
+				prev = 3
+			}
+			m.ocSendStep = prev
+			m.focusSendStep()
+		} else if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+		return m, nil
+
+	case "down", "j":
+		next := m.ocSendStep + 1
+		// Skip step 4 (custom fee) unless on custom
+		if next == 4 && m.ocSelectedTier != 3 {
+			next = 5
+		}
+		next = min(next, 5)
+		m.ocSendStep = next
+		m.focusSendStep()
+		return m, nil
+
+	case "enter":
+		// Max button: toggle send all
+		if m.ocSendStep == 2 {
+			if m.ocSendAll {
+				// Clear max
+				m.ocSendAll = false
+				m.ocSendAmtInput.SetValue("")
+				m.ocSendAmtInput.Focus()
+			} else if len(m.utxoSelected) > 0 {
+				// Coin control: fill with selected
+				// total minus estimated fee
+				feeRate := getSendFeeRate(m)
+				numInputs := max(
+					len(m.utxoOutpoints), 1)
+				estFee := estimateSimpleFee(
+					numInputs, 1, feeRate)
+				maxAmt := m.utxoSelectedTotal - estFee
+				if maxAmt < 0 {
+					maxAmt = 0
+				}
+				m.ocSendAll = true
+				m.ocSendAmtInput.SetValue(
+					fmt.Sprintf("%d", maxAmt))
+				m.ocSendAmtInput.Blur()
+			} else {
+				// No coin control: compute from
+				// on-chain balance minus est fee
+				// using actual UTXO count
+				m.ocSendAll = true
+				if m.status != nil &&
+					m.status.lndBalance != "" {
+					bal := parseBalance(
+						m.status.lndBalance)
+					feeRate := getSendFeeRate(m)
+					numInputs := max(
+						len(m.utxos), 1)
+					estFee := estimateSimpleFee(
+						numInputs, 1, feeRate)
+					maxAmt := bal - estFee
+					if maxAmt < 0 {
+						maxAmt = 0
+					}
+					m.ocSendAmtInput.SetValue(
+						fmt.Sprintf("%d", maxAmt))
+				}
+				m.ocSendAmtInput.Blur()
+			}
+			return m, nil
+		}
+		// Bottom buttons
+		if m.ocSendStep == 5 {
+			switch m.ocSendBtnIdx {
+			case 0: // Clear
+				m.resetOnChainSendState()
+				m.clearUtxoSelection()
+				return m, nil
+			case 1: // Create Transaction
+				return m.validateAndConfirmSend()
+			}
+		}
+		// Enter on any other step: advance to next
+		next := m.ocSendStep + 1
+		if next == 4 && m.ocSelectedTier != 3 {
+			next = 5
+		}
+		next = min(next, 5)
+		m.ocSendStep = next
+		m.focusSendStep()
+		return m, nil
+
+	default:
+		// Pass through to active text input
+		switch m.ocSendStep {
+		case 0:
+			var cmd tea.Cmd
+			m.ocSendAddrInput, cmd =
+				m.ocSendAddrInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		case 1:
+			if !m.ocSendAll {
+				var cmd tea.Cmd
+				m.ocSendAmtInput, cmd =
+					m.ocSendAmtInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		case 4:
+			var cmd tea.Cmd
+			m.ocCustomFeeInput, cmd =
+				m.ocCustomFeeInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+// focusSendStep manages text input focus for the
+// current ocSendStep.
+func (m *Model) focusSendStep() {
+	m.ocSendAddrInput.Blur()
+	m.ocSendAmtInput.Blur()
+	m.ocCustomFeeInput.Blur()
+	switch m.ocSendStep {
+	case 0:
+		m.ocSendAddrInput.Focus()
+	case 1:
+		if !m.ocSendAll {
+			m.ocSendAmtInput.Focus()
+		}
+	case 4:
+		m.ocCustomFeeInput.Focus()
+	}
+}
+
+// validateAndConfirmSend validates all fields and
+// transitions to the confirm screen.
+func (m Model) validateAndConfirmSend() (
+	tea.Model, tea.Cmd,
+) {
+	// Validate address
+	addr := strings.TrimSpace(
+		m.ocSendAddrInput.Value())
+	if addr == "" {
+		m.onChainSendError = "Enter an address"
+		m.ocSendStep = 0
+		m.focusSendStep()
+		return m, nil
+	}
+	if !isValidOnChainAddr(addr, m.cfg.Network) {
+		m.onChainSendError = "Invalid address"
+		m.ocSendStep = 0
+		m.focusSendStep()
+		return m, nil
+	}
+
+	// Validate amount
+	var amountSats int64
+	if m.ocSendAll {
+		// LND handles the sweep — amount=0 in RPC
+		amountSats = 0
+		// Store the display value from the input
+		// for the confirm screen
+		displayVal := parseSendAmount(
+			m.ocSendAmtInput.Value())
+		if displayVal > 0 {
+			m.ocSendAmtVal = displayVal
+		}
+	} else {
+		val := strings.TrimSpace(
+			m.ocSendAmtInput.Value())
+		val = strings.ReplaceAll(val, ",", "")
+		if val == "" {
+			m.onChainSendError = "Enter an amount"
+			m.ocSendStep = 1
+			m.focusSendStep()
+			return m, nil
+		}
+		for _, c := range val {
+			if c < '0' || c > '9' {
+				m.onChainSendError = "Invalid number"
+				m.ocSendStep = 1
+				m.focusSendStep()
+				return m, nil
+			}
+		}
+		var n int64
+		for _, c := range val {
+			n = n*10 + int64(c-'0')
+		}
+		if n < 546 {
+			m.onChainSendError =
+				"Minimum 546 sats (dust limit)"
+			m.ocSendStep = 1
+			m.focusSendStep()
+			return m, nil
+		}
+		amountSats = n
+	}
+
+	// Validate fee rate
+	var feeRate int64
+	if m.ocSelectedTier < 3 {
+		// Fixed tiers: 0=1sat, 1=2sat, 2=3sat
+		feeRate = int64(m.ocSelectedTier + 1)
+	} else {
+		feeVal := strings.TrimSpace(
+			m.ocCustomFeeInput.Value())
+		if feeVal == "" {
+			m.onChainSendError =
+				"Enter a custom fee rate"
+			m.ocSendStep = 4
+			m.focusSendStep()
+			return m, nil
+		}
+		var n int64
+		for _, c := range feeVal {
+			if c < '0' || c > '9' {
+				m.onChainSendError =
+					"Invalid fee rate"
+				m.ocSendStep = 4
+				m.focusSendStep()
+				return m, nil
+			}
+			n = n*10 + int64(c-'0')
+		}
+		if n < 1 {
+			m.onChainSendError = "Minimum 1 sat/vB"
+			m.ocSendStep = 4
+			m.focusSendStep()
+			return m, nil
+		}
+		feeRate = n
+	}
+
+	m.ocSendAddrVal = addr
+	m.ocSendAmtVal = amountSats
+	m.ocSendFeeRate = feeRate
+	m.onChainSendError = ""
+	m.ocConfirmFee = 0
+	m.ocConfirmBtnIdx = 0
+	m.subview = svOCSendConfirm
+
+	if !m.ocSendAll && addr != "" {
+		target := int32(1)
+		return m, estimateTxFeeCmd(
+			m.lndClient, addr,
+			amountSats, target)
 	}
 	return m, nil
 }
@@ -1103,7 +1281,16 @@ func (m Model) handleOCSendConfirmKey(
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
-		m.focusSidebar()
+		if m.ocConfirmBtnIdx > 0 {
+			m.ocConfirmBtnIdx--
+		} else {
+			m.focusSidebar()
+		}
+		return m, nil
+	case "right", "l":
+		if m.ocConfirmBtnIdx < 1 {
+			m.ocConfirmBtnIdx++
+		}
 		return m, nil
 	case "up", "k":
 		if m.hasDetailTabs() {
@@ -1114,18 +1301,26 @@ func (m Model) handleOCSendConfirmKey(
 		}
 		return m, nil
 	case "backspace":
-		m.subview = svOnChainSendAmount
+		m.subview = svOnChainSend
 		m.onChainSendError = ""
 		return m, nil
-	case "y":
-		m.onChainSendError = ""
-		m.subview = svOnChainSendBroadcast
-		return m, sendCoinsCmd(
-			m.lndClient,
-			m.ocSendAddrVal,
-			m.ocSendAmtVal,
-			m.ocSendFeeRate,
-			m.ocSendAll)
+	case "enter":
+		switch m.ocConfirmBtnIdx {
+		case 0: // Go Back
+			m.subview = svOnChainSend
+			m.onChainSendError = ""
+			return m, nil
+		case 1: // Confirm & Broadcast
+			m.onChainSendError = ""
+			m.subview = svOCSendBroadcast
+			return m, sendCoinsCmd(
+				m.lndClient,
+				m.ocSendAddrVal,
+				m.ocSendAmtVal,
+				m.ocSendFeeRate,
+				m.ocSendAll,
+				m.utxoOutpoints)
+		}
 	}
 	return m, nil
 }
@@ -1139,6 +1334,7 @@ func (m *Model) resetOnChainSendState() {
 	m.ocFeeTiers = [4]feeTier{}
 	m.ocSelectedTier = 0
 	m.ocConfirmFee = 0
+	m.ocConfirmBtnIdx = 0
 	m.ocSendAddrVal = ""
 	m.ocSendAmtVal = 0
 	m.ocSendFeeRate = 0

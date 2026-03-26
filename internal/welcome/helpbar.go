@@ -167,16 +167,13 @@ func (m Model) currentBindings() []key.Binding {
 		return newResultBindings().ShortHelp()
 	case svReceiveExpired:
 		return newResultBindings().ShortHelp()
-	case svOnChainSendAddr:
-		return newTextInputBindings(hasTabs).
-			ShortHelp()
-	case svOnChainSendAmount:
+	case svOnChainSend:
 		return newOCSendAmountBindings(hasTabs).
 			ShortHelp()
-	case svOnChainSendConfirm:
-		return newPayConfirmBindings(hasTabs).
+	case svOCSendConfirm:
+		return newOCSendAmountBindings(hasTabs).
 			ShortHelp()
-	case svOnChainSendBroadcast:
+	case svOCSendBroadcast:
 		return newWaitingBindings().ShortHelp()
 	case svOnChainResult:
 		return newResultBindings().ShortHelp()

@@ -446,18 +446,16 @@ func (m Model) renderActiveTabContent(
 		return m.pairingContent(w, h)
 	case tabOnChain:
 		switch m.subview {
-		case svOnChainSendAddr:
-			return m.onChainSendAddrPane(w)
-		case svOnChainSendAmount:
-			return m.onChainSendAmountPane(w)
-		case svOnChainSendConfirm:
-			return m.onChainSendConfirmPane(w)
-		case svOnChainSendBroadcast:
+		case svOnChainSend:
+			return m.onChainSendPane(w, h)
+		case svOCSendConfirm:
+			return m.onChainSendConfirmPane(w, h)
+		case svOCSendBroadcast:
 			return m.onChainSendBroadcastPane(w)
 		case svOnChainResult:
 			return m.onChainResultContent(w)
 		default:
-			return m.onChainSendAddrPane(w)
+			return m.onChainSendPane(w, h)
 		}
 	case tabOnChainTx:
 		if tab.Index < len(m.onChainTxs) {
@@ -540,13 +538,11 @@ func (m Model) renderOnChainContent(w, h int) string {
 		return m.onChainReceivePane(w)
 	case svOnChainResult:
 		return m.onChainResultContent(w)
-	case svOnChainSendAddr:
-		return m.onChainSendAddrPane(w)
-	case svOnChainSendAmount:
-		return m.onChainSendAmountPane(w)
-	case svOnChainSendConfirm:
-		return m.onChainSendConfirmPane(w)
-	case svOnChainSendBroadcast:
+	case svOnChainSend:
+		return m.onChainSendPane(w, h)
+	case svOCSendConfirm:
+		return m.onChainSendConfirmPane(w, h)
+	case svOCSendBroadcast:
 		return m.onChainSendBroadcastPane(w)
 	}
 	return m.onChainOverview(w, h)

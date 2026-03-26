@@ -210,6 +210,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case utxoListMsg:
 		if msg.err == nil {
 			m.utxos = msg.utxos
+			// Prune selections beyond new UTXO range
+			for idx := range m.utxoSelected {
+				if idx >= len(m.utxos) {
+					delete(m.utxoSelected, idx)
+				}
+			}
+			m.recalcSelectedTotal()
 		}
 		return m, nil
 	case onChainTxMsg:
@@ -223,6 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.onChainSendTxid = msg.txid
 			m.onChainSendError = ""
+			m.clearUtxoSelection()
 		}
 		m.subview = svOnChainResult
 		return m, nil
@@ -726,6 +734,42 @@ func labelTxCmd(
 	}
 }
 
+// ── Coin control helpers ─────────────────────────────────
+
+func (m *Model) toggleUtxoSelection(idx int) {
+	if idx < 0 || idx >= len(m.utxos) {
+		return
+	}
+	if m.utxoSelected[idx] {
+		delete(m.utxoSelected, idx)
+	} else {
+		m.utxoSelected[idx] = true
+	}
+	m.recalcSelectedTotal()
+}
+
+func (m *Model) recalcSelectedTotal() {
+	m.utxoSelectedTotal = 0
+	m.utxoOutpoints = nil
+	for idx := range m.utxoSelected {
+		if idx < len(m.utxos) {
+			m.utxoSelectedTotal +=
+				m.utxos[idx].AmountSats
+			m.utxoOutpoints = append(
+				m.utxoOutpoints,
+				fmt.Sprintf("%s:%d",
+					m.utxos[idx].Txid,
+					m.utxos[idx].Vout))
+		}
+	}
+}
+
+func (m *Model) clearUtxoSelection() {
+	m.utxoSelected = make(map[int]bool)
+	m.utxoSelectedTotal = 0
+	m.utxoOutpoints = nil
+}
+
 // ── Flow tab handlers ────────────────────────────────────
 
 func (m Model) handleOpenChannelTabKey(
@@ -793,13 +837,11 @@ func (m Model) handleOnChainTabKey(
 		return m.handleOnChainKey(key)
 	case svOnChainResult:
 		return m.handleOnChainKey(key)
-	case svOnChainSendAddr:
-		return m.handleOCSendAddrKey(key, msg)
-	case svOnChainSendAmount:
-		return m.handleOCSendAmountKey(key, msg)
-	case svOnChainSendConfirm:
+	case svOnChainSend:
+		return m.handleOCSendKey(key, msg)
+	case svOCSendConfirm:
 		return m.handleOCSendConfirmKey(key)
-	case svOnChainSendBroadcast:
+	case svOCSendBroadcast:
 		if key == "q" || key == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -1407,9 +1449,15 @@ func (m Model) handleOnChainHomeKey(
 		}
 	case "right", "l":
 		if m.onChainTxFocus == 0 &&
-			m.onChainBtnIdx < 2 {
+			m.onChainBtnIdx < 1 {
 			m.onChainBtnIdx++
 		}
+	case "space":
+		if m.onChainTxFocus == 1 &&
+			m.utxoCursor < len(m.utxos) {
+			m.toggleUtxoSelection(m.utxoCursor)
+		}
+		return m, nil
 	case "enter":
 		if m.onChainTxFocus == 0 {
 			switch m.onChainBtnIdx {
@@ -1424,14 +1472,15 @@ func (m Model) handleOnChainHomeKey(
 					getNewAddressCmd(m.lndClient)
 			case 1:
 				m.resetOnChainSendState()
-				m.subview = svOnChainSendAddr
+				if len(m.utxoSelected) > 0 {
+					m.ocSendAmtInput.SetValue(
+						fmt.Sprintf("%d",
+							m.utxoSelectedTotal))
+				}
+				m.subview = svOnChainSend
 				m.openFlowTab(tabOnChain,
 					"⛓ Send", secOnChain)
 				return m, nil
-			case 2:
-				return m, tea.Batch(
-					listUnspentCmd(m.lndClient),
-					fetchOnChainTxCmd(m.lndClient))
 			}
 		} else if m.onChainTxFocus == 1 &&
 			m.utxoCursor < len(m.utxos) {
@@ -1460,8 +1509,8 @@ func (m Model) handleOnChainHomeKey(
 
 func isOnChainSendSubview(sv wSubview) bool {
 	switch sv {
-	case svOnChainSendAddr, svOnChainSendAmount,
-		svOnChainSendConfirm, svOnChainSendBroadcast:
+	case svOnChainSend, svOCSendConfirm,
+		svOCSendBroadcast:
 		return true
 	}
 	return false
@@ -1690,9 +1739,15 @@ func (m Model) handleOnChainKey(
 		}
 	case "right", "l":
 		if m.onChainTxFocus == 0 &&
-			m.onChainBtnIdx < 2 {
+			m.onChainBtnIdx < 1 {
 			m.onChainBtnIdx++
 		}
+	case "space":
+		if m.onChainTxFocus == 1 &&
+			m.utxoCursor < len(m.utxos) {
+			m.toggleUtxoSelection(m.utxoCursor)
+		}
+		return m, nil
 	case "enter":
 		if m.onChainTxFocus == 0 {
 			switch m.onChainBtnIdx {
@@ -1707,12 +1762,13 @@ func (m Model) handleOnChainKey(
 					getNewAddressCmd(m.lndClient)
 			case 1:
 				m.resetOnChainSendState()
-				m.subview = svOnChainSendAddr
+				if len(m.utxoSelected) > 0 {
+					m.ocSendAmtInput.SetValue(
+						fmt.Sprintf("%d",
+							m.utxoSelectedTotal))
+				}
+				m.subview = svOnChainSend
 				return m, nil
-			case 2:
-				return m, tea.Batch(
-					listUnspentCmd(m.lndClient),
-					fetchOnChainTxCmd(m.lndClient))
 			}
 		} else if m.onChainTxFocus == 1 &&
 			m.utxoCursor < len(m.utxos) {
@@ -2349,8 +2405,8 @@ func isCloseSubview(sv wSubview) bool {
 func isOnChainSubview(sv wSubview) bool {
 	switch sv {
 	case svOnChain, svOnChainResult,
-		svOnChainSendAddr, svOnChainSendAmount,
-		svOnChainSendConfirm, svOnChainSendBroadcast,
+		svOnChainSend, svOCSendConfirm,
+		svOCSendBroadcast,
 		svOnChainReceive:
 		return true
 	}
@@ -2464,10 +2520,18 @@ func (m Model) handlePaste(
 		m.syncDeviceInput, cmd =
 			m.syncDeviceInput.Update(msg)
 		return m, cmd
-	case svOnChainSendAddr:
+	case svOnChainSend:
 		var cmd tea.Cmd
-		m.ocSendAddrInput, cmd =
-			m.ocSendAddrInput.Update(msg)
+		if m.ocSendStep == 0 {
+			m.ocSendAddrInput, cmd =
+				m.ocSendAddrInput.Update(msg)
+		} else if m.ocSendStep == 1 && !m.ocSendAll {
+			m.ocSendAmtInput, cmd =
+				m.ocSendAmtInput.Update(msg)
+		} else if m.ocSendStep == 4 {
+			m.ocCustomFeeInput, cmd =
+				m.ocCustomFeeInput.Update(msg)
+		}
 		return m, cmd
 	}
 	return m, nil

@@ -664,6 +664,7 @@ func (b recvWaitingBindings) FullHelp() [][]key.Binding {
 type onChainHomeBindings struct {
 	LeftRight key.Binding
 	UpDown    key.Binding
+	Space     key.Binding
 	Enter     key.Binding
 	Back      key.Binding
 	Sidebar   key.Binding
@@ -681,6 +682,9 @@ func newOnChainHomeBindings(
 		UpDown: key.NewBinding(
 			key.WithKeys("up", "down"),
 			key.WithHelp("↑↓", "navigate")),
+		Space: key.NewBinding(
+			key.WithKeys("space"),
+			key.WithHelp("space", "select")),
 		Enter:   kEnter,
 		Back:    kBack,
 		Sidebar: kSidebar,
@@ -692,6 +696,7 @@ func newOnChainHomeBindings(
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
 	}
+	b.Space.SetEnabled(false)
 	if focus == 0 {
 		b.UpDown = key.NewBinding(
 			key.WithKeys("down"),
@@ -704,6 +709,7 @@ func newOnChainHomeBindings(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "details"))
 		b.LeftRight.SetEnabled(false)
+		b.Space.SetEnabled(true)
 	} else {
 		b.UpDown = key.NewBinding(
 			key.WithKeys("up", "down"),
@@ -721,7 +727,11 @@ func (b onChainHomeBindings) ShortHelp() []key.Binding {
 	if b.LeftRight.Enabled() {
 		binds = append(binds, b.LeftRight)
 	}
-	binds = append(binds, b.UpDown, b.Enter,
+	binds = append(binds, b.UpDown)
+	if b.Space.Enabled() {
+		binds = append(binds, b.Space)
+	}
+	binds = append(binds, b.Enter,
 		b.Back, b.Sidebar)
 	if b.TabBar.Enabled() {
 		binds = append(binds, b.TabBar)
@@ -759,7 +769,7 @@ func newOCSendAmountBindings(
 			key.WithHelp("←→", "fee tier")),
 		TabToggle: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "send all")),
+			key.WithHelp("tab", "")),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "continue")),
@@ -772,6 +782,7 @@ func newOCSendAmountBindings(
 			key.WithKeys("ctrl+c"),
 			key.WithHelp("ctrl+c", "quit")),
 	}
+	b.TabToggle.SetEnabled(false)
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
 	}
