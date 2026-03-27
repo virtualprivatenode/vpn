@@ -1117,12 +1117,6 @@ func formatSats(sats int64) string {
 	return string(result)
 }
 
-func isHexChar(c byte) bool {
-	return (c >= '0' && c <= '9') ||
-		(c >= 'a' && c <= 'f') ||
-		(c >= 'A' && c <= 'F')
-}
-
 func parseCustomAmount(s string) (int64, error) {
 	s = strings.ReplaceAll(s, ",", "")
 	s = strings.TrimSpace(s)

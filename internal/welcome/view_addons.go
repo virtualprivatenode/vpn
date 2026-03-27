@@ -200,10 +200,6 @@ func (m Model) addonsOverview(w, h int) string {
 	return "\n" + vpRendered
 }
 
-func (m Model) addonsButtons() string {
-	return ""
-}
-
 // ── Syncthing detail ─────────────────────────────────────
 
 func (m Model) syncthingDetailContent(
@@ -437,10 +433,6 @@ func (m Model) syncthingDeviceDetailContent(
 	p.field("Paired: ", dev.PairedAt)
 
 	return p.render()
-}
-
-func (m Model) syncthingPairedCount() int {
-	return len(m.cfg.SyncthingDevices)
 }
 
 // ── LndHub flows ─────────────────────────────────────────

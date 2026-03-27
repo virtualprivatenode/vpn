@@ -37,8 +37,8 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewMain() string {
-	totalW := 82
-	totalH := 34
+	totalW := tuiWidth
+	totalH := tuiHeight
 
 	insideW := totalW - 2
 	insideH := totalH - 2
@@ -664,16 +664,6 @@ func centerInWidth(s string, w int) string {
 	right := w - vis - left
 	return strings.Repeat(" ", left) + s +
 		strings.Repeat(" ", right)
-}
-
-func padLines(lines []string, target int) string {
-	for len(lines) < target {
-		lines = append(lines, "")
-	}
-	if len(lines) > target {
-		lines = lines[:target]
-	}
-	return strings.Join(lines, "\n")
 }
 
 func parseBalance(s string) int64 {

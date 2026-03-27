@@ -40,13 +40,6 @@ func (p *paneBuilder) line(s string) *paneBuilder {
 	return p
 }
 
-func (p *paneBuilder) addLines(
-	ls []string,
-) *paneBuilder {
-	p.lines = append(p.lines, ls...)
-	return p
-}
-
 func (p *paneBuilder) field(
 	label, value string,
 ) *paneBuilder {
@@ -120,17 +113,6 @@ func (p *paneBuilder) buttons(
 ) *paneBuilder {
 	p.lines = append(p.lines,
 		renderButtons(labels, activeIdx, focused, p.w))
-	return p
-}
-
-func (p *paneBuilder) buttonsWithGray(
-	labels []string, activeIdx int, focused bool,
-	grayIdx int, grayCondition bool,
-) *paneBuilder {
-	p.lines = append(p.lines,
-		renderButtonsWithGray(
-			labels, activeIdx, focused, p.w,
-			grayIdx, grayCondition))
 	return p
 }
 

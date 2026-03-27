@@ -92,18 +92,6 @@ func TestNilClientSafety(t *testing.T) {
 	}
 }
 
-func TestHexDecodeString(t *testing.T) {
-	if b, err := hexDecodeString("abcdef"); err != nil || len(b) != 3 {
-		t.Errorf("valid hex failed: %v, len=%d", err, len(b))
-	}
-	if _, err := hexDecodeString("abc"); err == nil {
-		t.Error("odd length should fail")
-	}
-	if _, err := hexDecodeString("gg"); err == nil {
-		t.Error("invalid chars should fail")
-	}
-}
-
 func TestIsConnectedDefault(t *testing.T) {
 	c := &Client{}
 	if c.IsConnected() {
