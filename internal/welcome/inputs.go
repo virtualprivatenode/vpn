@@ -252,18 +252,6 @@ func validateOnChainAddr(s string) error {
 	return nil
 }
 
-func newUtxoLabelInput(current string) textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "Enter label..."
-	ti.CharLimit = 64
-	ti.SetWidth(40)
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.SetValue(current)
-	ti.Focus()
-	return ti
-}
-
 // newDetailField creates a textinput for displaying a
 // value in a detail pane. The field is full-width and
 // scrollable. All fields start blurred.

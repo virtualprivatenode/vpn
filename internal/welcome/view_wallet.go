@@ -238,20 +238,12 @@ func (m Model) paymentDetailContent(w int) string {
 	if entry.Preimage != "" {
 		p.blank()
 		p.labelLine("Preimage:")
-		pre := entry.Preimage
-		if len(pre) > w-4 {
-			pre = pre[:w-7] + "..."
-		}
-		p.mono(pre)
+		p.monoWrap(entry.Preimage)
 	}
 	if entry.PaymentHash != "" {
 		p.blank()
 		p.labelLine("Payment Hash:")
-		hash := entry.PaymentHash
-		if len(hash) > w-4 {
-			hash = hash[:w-7] + "..."
-		}
-		p.mono(hash)
+		p.monoWrap(entry.PaymentHash)
 	}
 	if len(entry.Hops) > 0 {
 		p.blank()
@@ -305,12 +297,7 @@ func (m Model) walletSendConfirmPane(w int) string {
 		p.field("Description: ", m.sendDecodedDesc)
 	}
 	p.labelLine("Destination:")
-	dest := m.sendDecodedDest
-	maxDest := w - 4
-	if len(dest) > maxDest {
-		dest = dest[:maxDest-3] + "..."
-	}
-	p.mono(dest)
+	p.monoWrap(m.sendDecodedDest)
 	p.blank()
 	p.warn("Send " +
 		formatSats(m.sendDecodedAmt) + " sats?")
@@ -345,11 +332,7 @@ func (m Model) walletSendResultPane(w int) string {
 		if m.sendPreimage != "" {
 			p.blank()
 			p.labelLine("Preimage:")
-			pre := m.sendPreimage
-			if len(pre) > w-4 {
-				pre = pre[:w-7] + "..."
-			}
-			p.mono(pre)
+			p.monoWrap(m.sendPreimage)
 		}
 		if len(m.sendRouteHops) > 0 {
 			p.blank()
@@ -404,11 +387,7 @@ func (m Model) walletReceiveWaitingPane(
 
 	if m.recvPayReq != "" {
 		p.labelLine("Invoice:")
-		display := m.recvPayReq
-		if len(display) > w-4 {
-			display = display[:w-7] + "..."
-		}
-		p.mono(display)
+		p.monoWrap(m.recvPayReq)
 		p.blank()
 
 		btnFocused := m.contentFocused &&

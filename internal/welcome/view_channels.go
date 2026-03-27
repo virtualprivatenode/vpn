@@ -395,12 +395,7 @@ func (m Model) channelDetailPane(w int) string {
 
 	p.blank()
 	p.labelLine("Pubkey:")
-	pk := ch.RemotePubkey
-	maxPk := w - 4
-	if len(pk) > maxPk {
-		pk = pk[:maxPk-3] + "..."
-	}
-	p.mono(pk)
+	p.monoWrap(ch.RemotePubkey)
 
 	if ch.ChanID > 0 {
 		p.blank()
@@ -597,13 +592,8 @@ func (m Model) channelConfirmPane(w int) string {
 	p.field("Type:    ", priv)
 	p.blank()
 
-	pk := m.chanOpenPubkey
-	maxPk := w - 4
-	if len(pk) > maxPk {
-		pk = pk[:maxPk-3] + "..."
-	}
 	p.labelLine("Pubkey:")
-	p.mono(pk)
+	p.monoWrap(m.chanOpenPubkey)
 	p.blank()
 	p.warn("Spend " +
 		formatSats(m.chanOpenAmount) + " sats?")
@@ -641,11 +631,7 @@ func (m Model) channelResultPane(w int) string {
 		if m.chanOpenTxid != "" {
 			p.blank()
 			p.labelLine("TX ID:")
-			txid := m.chanOpenTxid
-			if len(txid) > w-4 {
-				txid = txid[:w-7] + "..."
-			}
-			p.mono(txid)
+			p.monoWrap(m.chanOpenTxid)
 		}
 		p.blank()
 		p.dim("Channel will appear as pending.")
@@ -665,11 +651,7 @@ func (m Model) channelFundPane(w int) string {
 	p.blank()
 
 	if m.chanFundAddress != "" {
-		addr := m.chanFundAddress
-		if len(addr) > w-3 {
-			addr = addr[:w-6] + "..."
-		}
-		p.mono(addr)
+		p.monoWrap(m.chanFundAddress)
 	} else {
 		p.dim("Generating address...")
 	}
@@ -861,11 +843,7 @@ func (m Model) channelCloseResultPane(w int) string {
 		if m.closeTxid != "" {
 			p.blank()
 			p.labelLine("Closing TX:")
-			txid := m.closeTxid
-			if len(txid) > w-4 {
-				txid = txid[:w-7] + "..."
-			}
-			p.mono(txid)
+			p.monoWrap(m.closeTxid)
 		}
 	}
 

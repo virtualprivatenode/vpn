@@ -184,6 +184,16 @@ func (m Model) onChainOverview(w, h int) string {
 				Bold(true)
 
 			switch {
+			case isSelected && m.utxoPencilFocused &&
+				!m.utxoLabelEditing:
+				// Pencil focused: only label+pencil
+				// are yellow, rest stays dim
+				utxoMidLines = append(utxoMidLines,
+					marker+
+						theme.Dim.Render(dateStr)+
+						labelCell+
+						theme.Dim.Render(uAddrStr)+
+						theme.Value.Render(uValStr))
 			case isSelected:
 				utxoMidLines = append(utxoMidLines,
 					marker+
@@ -499,28 +509,15 @@ func (m Model) utxoDetailPane(w int) string {
 	p.field("Date:      ", dateStr)
 	p.blank()
 
-	// Outpoint on two lines for full visibility
+	// Outpoint on multiple lines for full visibility
 	p.labelLine("Outpoint:")
 	outpoint := fmt.Sprintf("%s:%d", u.Txid, u.Vout)
-	lineW := w - 4
-	if len(outpoint) <= lineW {
-		p.mono(outpoint)
-	} else {
-		// Split across two lines
-		p.mono(outpoint[:lineW])
-		p.mono(outpoint[lineW:])
-	}
+	p.monoWrap(outpoint)
 	p.blank()
 
-	// Address on two lines if needed
+	// Address on multiple lines if needed
 	p.labelLine("Address:")
-	addr := u.Address
-	if len(addr) <= lineW {
-		p.mono(addr)
-	} else {
-		p.mono(addr[:lineW])
-		p.mono(addr[lineW:])
-	}
+	p.monoWrap(u.Address)
 	p.blank()
 
 	txLabel := m.utxoTxLabel(u.Txid)
@@ -535,18 +532,6 @@ func (m Model) utxoDetailPane(w int) string {
 }
 
 // ── Helpers ─────────────────────────────────────────────
-
-// centerInCol centers a string within a fixed-width column.
-func centerInCol(s string, w int) string {
-	r := []rune(s)
-	if len(r) >= w {
-		return string(r[:w])
-	}
-	left := (w - len(r)) / 2
-	right := w - len(r) - left
-	return strings.Repeat(" ", left) + s +
-		strings.Repeat(" ", right)
-}
 
 // utxoDate returns the YYYY-MM-DD date for a UTXO by
 // looking up its transaction timestamp.
@@ -618,20 +603,31 @@ func (m Model) onChainReceivePane(w int) string {
 	}
 
 	p.labelLine("Address:")
-	addr := m.ocRecvAddress
-	if len(addr) > w-4 {
-		addr = addr[:w-7] + "..."
-	}
-	p.mono(addr)
+	p.monoWrap(m.ocRecvAddress)
 	p.blank()
 	p.dim("Send Bitcoin to this address.")
 	p.dim("Funds appear after 1 confirmation.")
 	p.blank()
 
 	btnFocused := m.contentFocused && !m.tabFocused
+
+	qr := renderQRCode(m.ocRecvAddress)
+	if qr != "" {
+		for _, line := range strings.Split(
+			qr, "\n") {
+			lineW := lipgloss.Width(line)
+			pad := (w - lineW) / 2
+			if pad < 0 {
+				pad = 0
+			}
+			p.line(strings.Repeat(" ", pad) + line)
+		}
+	}
+	p.blank()
+
 	p.buttons(
-		[]string{"Show QR", "New Address"},
-		m.ocRecvBtnIdx, btnFocused)
+		[]string{"New Address"},
+		0, btnFocused)
 
 	p.appendError(m.ocRecvError)
 
@@ -646,9 +642,8 @@ func (m Model) onChainReceivePane(w int) string {
 //	1 = Amount input
 //	2 = Max / Send All button
 //	3 = Label input
-//	4 = Fee tier selector (1/2/3 sat/vB + Custom)
-//	5 = Custom fee input (only when Custom selected)
-//	6 = Buttons (Clear / Create Transaction)
+//	4 = Fee rate input (sat/vB)
+//	5 = Buttons (Clear / Create Transaction)
 func (m Model) onChainSendPane(w, h int) string {
 	isFocused := m.contentFocused && !m.tabFocused
 
@@ -758,60 +753,24 @@ func (m Model) onChainSendPane(w, h int) string {
 		lblMarker+" "+m.ocSendLabelInput.View())
 	lines = append(lines, "")
 
-	// ── Fee tier selector (step 4) ───────────────
+	// ── Fee rate input (step 4) ──────────────────
 	feeActive := isFocused && m.ocSendStep == 4
 	feeLabelStyle := theme.Label
+	feeMarker := " "
 	if feeActive {
 		feeLabelStyle = navActiveStyle
+		feeMarker = navActiveStyle.Render("▸")
 	}
 	lines = append(lines,
-		" "+feeLabelStyle.Render("Fee Rate:"))
-
-	tierLine := " "
-	fixedRates := []string{
-		"1 sat/vB", "2 sat/vB", "3 sat/vB"}
-	for i, label := range fixedRates {
-		isSel := isFocused &&
-			m.ocSendStep == 4 &&
-			m.ocSelectedTier == i
-		if isSel {
-			tierLine += "▸ " +
-				theme.BtnFocused.Render(label) +
-				"  "
-		} else {
-			tierLine += "  " +
-				theme.BtnNormal.Render(label) +
-				"  "
-		}
-	}
-	isCustomSel := isFocused &&
-		m.ocSendStep == 4 &&
-		m.ocSelectedTier == 3
-	if isCustomSel {
-		tierLine += "▸ " +
-			theme.BtnFocused.Render("Custom")
-	} else {
-		tierLine += "  " +
-			theme.BtnNormal.Render("Custom")
-	}
-	lines = append(lines, tierLine)
-
-	// Custom fee input (step 5)
-	if m.ocSelectedTier == 3 {
-		lines = append(lines, "")
-		custActive := isFocused && m.ocSendStep == 5
-		custLabel := theme.Label
-		custMarker := " "
-		if custActive {
-			custLabel = navActiveStyle
-			custMarker = navActiveStyle.Render("▸")
-		}
-		lines = append(lines,
-			" "+custLabel.Render("sat/vB:"))
-		lines = append(lines,
-			custMarker+" "+
-				m.ocCustomFeeInput.View())
-	}
+		" "+feeLabelStyle.Render("Fee Rate (sat/vB):"))
+	lines = append(lines,
+		feeMarker+" "+m.ocCustomFeeInput.View())
+	lines = append(lines,
+		"  "+theme.Dim.Render(
+			"1 = slow, 2 = normal, 3 = fast"))
+	lines = append(lines,
+		"  "+theme.Dim.Render(
+			"Visit mempool.space for accurate fees"))
 	lines = append(lines, "")
 
 	// ── Transaction preview diagram ──────────────
@@ -879,8 +838,8 @@ func (m Model) onChainSendPane(w, h int) string {
 				m.onChainSendError))
 	}
 
-	// ── Bottom buttons (step 6) ──────────────────
-	btnFocused := isFocused && m.ocSendStep == 6
+	// ── Bottom buttons (step 5) ──────────────────
+	btnFocused := isFocused && m.ocSendStep == 5
 	btnLine := renderButtons(
 		[]string{"Clear", "Create Transaction"},
 		m.ocSendBtnIdx, btnFocused, w)
@@ -1139,9 +1098,6 @@ func parseSendAmount(val string) int64 {
 }
 
 func getSendFeeRate(m Model) int64 {
-	if m.ocSelectedTier < 3 {
-		return int64(m.ocSelectedTier + 1)
-	}
 	val := strings.TrimSpace(
 		m.ocCustomFeeInput.Value())
 	if val == "" {
@@ -1179,12 +1135,19 @@ func (m Model) onChainSendConfirmPane(
 	lines = append(lines, "")
 
 	addr := m.ocSendAddrVal
-	if len(addr) > w-14 {
-		addr = addr[:w-17] + "..."
+	lineW := w - 14
+	if len(addr) <= lineW {
+		lines = append(lines,
+			" "+theme.Label.Render("To:       ")+
+				theme.Mono.Render(addr))
+	} else {
+		lines = append(lines,
+			" "+theme.Label.Render("To:       ")+
+				theme.Mono.Render(addr[:lineW]))
+		lines = append(lines,
+			"           "+
+				theme.Mono.Render(addr[lineW:]))
 	}
-	lines = append(lines,
-		" "+theme.Label.Render("To:       ")+
-			theme.Mono.Render(addr))
 	switch {
 	case m.ocSendAll && m.ocSendAmtVal > 0:
 		// Max was pressed — show the computed amount
@@ -1358,11 +1321,7 @@ func (m Model) onChainResultContent(w int) string {
 			"Transaction Broadcast")
 		if m.onChainSendTxid != "" {
 			p.labelLine("TX ID:")
-			txid := m.onChainSendTxid
-			if len(txid) > w-4 {
-				txid = txid[:w-7] + "..."
-			}
-			p.mono(txid)
+			p.monoWrap(m.onChainSendTxid)
 		}
 	}
 
@@ -1414,15 +1373,13 @@ func (m Model) onChainTxDetailPane(
 
 	p.blank()
 	p.labelLine("TX ID:")
-	txid := tx.Txid
-	if len(txid) > w-4 {
-		txid = txid[:w-7] + "..."
-	}
-	p.mono(txid)
+	p.monoWrap(tx.Txid)
 
 	if len(tx.Inputs) > 0 {
 		p.blank()
 		p.labelLine("Inputs")
+		lineW := w - 8
+		lineW = max(lineW, 16)
 		for i, inp := range tx.Inputs {
 			isLast := i == len(tx.Inputs)-1
 			connector := "├──"
@@ -1433,18 +1390,29 @@ func (m Model) onChainTxDetailPane(
 			if inp.IsOurs {
 				ownership = " (ours)"
 			}
-			maxOP := w - 8 - len(ownership)
-			maxOP = max(maxOP, 16)
 			outpoint := inp.Outpoint
-			if len(outpoint) > maxOP {
-				outpoint = outpoint[:maxOP-3] +
-					"..."
+			if len(outpoint) <= lineW-len(ownership) {
+				line := fmt.Sprintf("  %s %s%s",
+					connector,
+					theme.Mono.Render(outpoint),
+					theme.Dim.Render(ownership))
+				p.line(line)
+			} else {
+				// Split outpoint across two lines
+				p.line(fmt.Sprintf("  %s %s%s",
+					connector,
+					theme.Mono.Render(
+						outpoint[:lineW]),
+					theme.Dim.Render(ownership)))
+				cont := "│  "
+				if isLast {
+					cont = "   "
+				}
+				p.line(fmt.Sprintf("  %s %s",
+					cont,
+					theme.Mono.Render(
+						outpoint[lineW:])))
 			}
-			line := fmt.Sprintf("  %s %s%s",
-				connector,
-				theme.Mono.Render(outpoint),
-				theme.Dim.Render(ownership))
-			p.line(line)
 			if !isLast {
 				p.line("  │")
 			}
@@ -1454,6 +1422,8 @@ func (m Model) onChainTxDetailPane(
 	if len(tx.Outputs) > 0 {
 		p.blank()
 		p.labelLine("Outputs")
+		lineW := w - 8
+		lineW = max(lineW, 16)
 		for i, out := range tx.Outputs {
 			amtStr := formatSats(out.Amount)
 			if out.Amount == 0 {
@@ -1462,14 +1432,6 @@ func (m Model) onChainTxDetailPane(
 			labelStr := ""
 			if out.Label != "" {
 				labelStr = " (" + out.Label + ")"
-			}
-			fixedW := 13 + len(amtStr) +
-				len(labelStr)
-			addrMax := w - fixedW
-			addrMax = max(addrMax, 12)
-			addr := out.Address
-			if len(addr) > addrMax {
-				addr = addr[:addrMax-3] + "..."
 			}
 			isLast := i == len(tx.Outputs)-1
 			connector := "├──"
@@ -1481,13 +1443,34 @@ func (m Model) onChainTxDetailPane(
 				out.Label == "channel" {
 				addrStyle = theme.Value
 			}
-			line := fmt.Sprintf("  %s %s  %s%s",
-				connector,
-				addrStyle.Render(addr),
-				theme.Value.Render(
-					amtStr+" sats"),
-				theme.Dim.Render(labelStr))
-			p.line(line)
+			addr := out.Address
+			valPart := "  " + amtStr + " sats" +
+				labelStr
+			maxAddr := lineW - len(valPart)
+			if len(addr) <= maxAddr {
+				line := fmt.Sprintf("  %s %s%s",
+					connector,
+					addrStyle.Render(addr),
+					theme.Value.Render("  "+
+						amtStr+" sats")+
+						theme.Dim.Render(labelStr))
+				p.line(line)
+			} else {
+				// Address on first line, value on
+				// continuation
+				p.line(fmt.Sprintf("  %s %s",
+					connector,
+					addrStyle.Render(addr)))
+				cont := "│  "
+				if isLast {
+					cont = "   "
+				}
+				p.line(fmt.Sprintf("  %s %s%s",
+					cont,
+					theme.Value.Render(
+						amtStr+" sats"),
+					theme.Dim.Render(labelStr)))
+			}
 			if !isLast {
 				p.line("  │")
 			}
