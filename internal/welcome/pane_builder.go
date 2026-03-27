@@ -76,7 +76,7 @@ func (p *paneBuilder) mono(text string) *paneBuilder {
 // splitting at lineW characters per line. Used for txids,
 // pubkeys, addresses, invoices, and other long values.
 func (p *paneBuilder) monoWrap(text string) *paneBuilder {
-	lineW := p.w - 4
+	lineW := p.w - 2
 	if lineW < 16 {
 		lineW = 16
 	}
@@ -117,8 +117,8 @@ func (p *paneBuilder) input(
 	labelStyle := theme.Label
 	marker := " "
 	if focused {
-		labelStyle = navActiveStyle
-		marker = navActiveStyle.Render("▸")
+		labelStyle = theme.NavActive
+		marker = theme.NavActive.Render("▸")
 	}
 	p.lines = append(p.lines,
 		" "+labelStyle.Render(label))
@@ -184,7 +184,7 @@ func renderButtonsWithGray(
 		if i == grayIdx && grayCondition {
 			parts = append(parts,
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("240")).
+					Foreground(theme.ColorGrayed).
 					Width(perBtn).
 					AlignHorizontal(lipgloss.Center).
 					Render(label))

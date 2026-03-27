@@ -54,17 +54,11 @@ func (m Model) addonsOverview(w, h int) string {
 		boxW = 28
 	}
 
-	borderNormal := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
-	borderActive := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220"))
+	borderNormal := theme.AddonBorderNormal
+	borderActive := theme.AddonBorderActive
 
-	titleNormal := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Bold(true)
-	titleActive := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
+	titleNormal := theme.AddonTitleNormal
+	titleActive := theme.AddonTitleActive
 
 	// ── Scrollable middle (all cards) ────────────
 	var midLines []string
@@ -123,7 +117,7 @@ func (m Model) addonsOverview(w, h int) string {
 			marker := "  "
 			if selected && i == markerRow {
 				marker =
-					navActiveStyle.Render("▸") + " "
+					theme.NavActive.Render("▸") + " "
 			}
 			midLines = append(midLines, marker+row)
 		}
@@ -225,11 +219,8 @@ func (m Model) syncthingDetailContent(
 	if pairedCount == 0 {
 		p.dim("No devices paired yet")
 	} else {
-		hdrStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245")).
-			Bold(true)
-		sepStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+		hdrStyle := theme.TableHeader
+		sepStyle := theme.TableDim
 
 		nameW := 20
 		idW := 24
@@ -263,7 +254,7 @@ func (m Model) syncthingDetailContent(
 		}
 
 		selStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
+			Foreground(theme.ColorAccent).
 			Bold(true)
 
 		if startIdx > 0 {
@@ -456,11 +447,8 @@ func (m Model) lndhubManageContent(
 	if len(accounts) == 0 {
 		p.dim("No accounts yet")
 	} else {
-		hdrStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245")).
-			Bold(true)
-		sepStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+		hdrStyle := theme.TableHeader
+		sepStyle := theme.TableDim
 
 		nameW := 18
 		loginW := 16
@@ -496,7 +484,7 @@ func (m Model) lndhubManageContent(
 		}
 
 		selStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
+			Foreground(theme.ColorAccent).
 			Bold(true)
 
 		if viewStart > 0 {

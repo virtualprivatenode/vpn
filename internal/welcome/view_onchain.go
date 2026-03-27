@@ -71,11 +71,8 @@ func (m Model) onChainOverview(w, h int) string {
 	headerH := len(headerLines)
 
 	// ── Shared styles ────────────────────────────
-	hdrStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Bold(true)
-	sepStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+	hdrStyle := theme.TableHeader
+	sepStyle := theme.TableDim
 
 	// ── UTXO table header ───────────────────────
 	uDateW := 12
@@ -141,8 +138,8 @@ func (m Model) onChainOverview(w, h int) string {
 				pencilStyle := theme.Dim
 				labelStyle := lipgloss.NewStyle()
 				if m.utxoPencilFocused {
-					pencilStyle = navActiveStyle
-					labelStyle = navActiveStyle
+					pencilStyle = theme.NavActive
+					labelStyle = theme.NavActive
 				}
 				labelCell = labelStyle.Render(
 					pad(uLabel, maxLbl)) +
@@ -180,7 +177,7 @@ func (m Model) onChainOverview(w, h int) string {
 
 			selStyle := lipgloss.NewStyle().
 				Foreground(
-					lipgloss.Color("220")).
+					theme.ColorAccent).
 				Bold(true)
 
 			switch {
@@ -204,7 +201,7 @@ func (m Model) onChainOverview(w, h int) string {
 			case isChecked:
 				checkStyle := lipgloss.NewStyle().
 					Foreground(
-						lipgloss.Color("82"))
+						theme.ColorCheck)
 				utxoMidLines = append(utxoMidLines,
 					marker+
 						checkStyle.Render(dateStr)+
@@ -241,7 +238,7 @@ func (m Model) onChainOverview(w, h int) string {
 	tBalW = max(tBalW, 10)
 
 	confStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+		Foreground(theme.ColorLabel)
 
 	var txHeaderLines []string
 	txHeaderLines = append(txHeaderLines,
@@ -320,7 +317,7 @@ func (m Model) onChainOverview(w, h int) string {
 				marker = "▸"
 				selStyle := lipgloss.NewStyle().
 					Foreground(
-						lipgloss.Color("220")).
+						theme.ColorAccent).
 					Bold(true)
 				txMidLines = append(txMidLines,
 					marker+
@@ -332,11 +329,11 @@ func (m Model) onChainOverview(w, h int) string {
 			} else {
 				amtStyle := lipgloss.NewStyle().
 					Foreground(
-						lipgloss.Color("15"))
+						theme.ColorPrimary)
 				if tx.Amount < 0 {
 					amtStyle = lipgloss.NewStyle().
 						Foreground(
-							lipgloss.Color("196"))
+							theme.ColorDanger)
 				}
 				txMidLines = append(txMidLines,
 					marker+
@@ -399,7 +396,7 @@ func (m Model) renderLabelPopup(w int) []string {
 	}
 
 	border := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(theme.ColorGrayed)
 
 	var lines []string
 	lines = append(lines,
@@ -411,8 +408,8 @@ func (m Model) renderLabelPopup(w int) []string {
 	lblStyle := theme.Label
 	marker := " "
 	if lblActive {
-		lblStyle = navActiveStyle
-		marker = navActiveStyle.Render("▸")
+		lblStyle = theme.NavActive
+		marker = theme.NavActive.Render("▸")
 	}
 	inputView := m.utxoLabelInput.View()
 	inputW := lipgloss.Width(inputView)
@@ -670,8 +667,8 @@ func (m Model) onChainSendPane(w, h int) string {
 	addrLabel := theme.Label
 	addrMarker := " "
 	if addrActive {
-		addrLabel = navActiveStyle
-		addrMarker = navActiveStyle.Render("▸")
+		addrLabel = theme.NavActive
+		addrMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
 		" "+addrLabel.Render("To:"))
@@ -684,8 +681,8 @@ func (m Model) onChainSendPane(w, h int) string {
 	amtLabel := theme.Label
 	amtMarker := " "
 	if amtActive {
-		amtLabel = navActiveStyle
-		amtMarker = navActiveStyle.Render("▸")
+		amtLabel = theme.NavActive
+		amtMarker = theme.NavActive.Render("▸")
 	}
 
 	lines = append(lines,
@@ -734,7 +731,7 @@ func (m Model) onChainSendPane(w, h int) string {
 	}
 	maxMarker := " "
 	if maxActive {
-		maxMarker = navActiveStyle.Render("▸")
+		maxMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines, maxMarker+" "+maxBtn)
 	lines = append(lines, "")
@@ -744,8 +741,8 @@ func (m Model) onChainSendPane(w, h int) string {
 	lblLabel := theme.Label
 	lblMarker := " "
 	if lblActive {
-		lblLabel = navActiveStyle
-		lblMarker = navActiveStyle.Render("▸")
+		lblLabel = theme.NavActive
+		lblMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
 		" "+lblLabel.Render("Label:"))
@@ -758,8 +755,8 @@ func (m Model) onChainSendPane(w, h int) string {
 	feeLabelStyle := theme.Label
 	feeMarker := " "
 	if feeActive {
-		feeLabelStyle = navActiveStyle
-		feeMarker = navActiveStyle.Render("▸")
+		feeLabelStyle = theme.NavActive
+		feeMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
 		" "+feeLabelStyle.Render("Fee Rate (sat/vB):"))
@@ -993,7 +990,7 @@ func renderTxDiagram(
 	// ── Transaction label with connecting lines ──
 	txStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("15"))
+		Foreground(theme.ColorPrimary)
 	txLabel := theme.Dim.Render("── ") +
 		txStyle.Render("Transaction") +
 		theme.Dim.Render(" ──")
@@ -1378,43 +1375,53 @@ func (m Model) onChainTxDetailPane(
 	if len(tx.Inputs) > 0 {
 		p.blank()
 		p.labelLine("Inputs")
-		lineW := w - 8
-		lineW = max(lineW, 16)
+		// prefix " └── " = 5 chars
+		maxW := max(w-5, 16)
 		for i, inp := range tx.Inputs {
 			isLast := i == len(tx.Inputs)-1
 			connector := "├──"
 			if isLast {
 				connector = "└──"
 			}
+			cont := "│  "
+			if isLast {
+				cont = "   "
+			}
 			ownership := ""
 			if inp.IsOurs {
 				ownership = " (ours)"
 			}
 			outpoint := inp.Outpoint
-			if len(outpoint) <= lineW-len(ownership) {
-				line := fmt.Sprintf("  %s %s%s",
+			if len(outpoint)+len(ownership) <= maxW {
+				p.line(fmt.Sprintf(" %s %s%s",
 					connector,
 					theme.Mono.Render(outpoint),
-					theme.Dim.Render(ownership))
-				p.line(line)
-			} else {
-				// Split outpoint across two lines
-				p.line(fmt.Sprintf("  %s %s%s",
-					connector,
-					theme.Mono.Render(
-						outpoint[:lineW]),
 					theme.Dim.Render(ownership)))
-				cont := "│  "
-				if isLast {
-					cont = "   "
+			} else {
+				// Wrap outpoint across lines
+				rem := outpoint
+				first := true
+				for len(rem) > 0 {
+					pfx := " " + cont + " "
+					if first {
+						pfx = " " + connector + " "
+						first = false
+					}
+					end := maxW
+					if end > len(rem) {
+						end = len(rem)
+					}
+					p.line(pfx +
+						theme.Mono.Render(rem[:end]))
+					rem = rem[end:]
 				}
-				p.line(fmt.Sprintf("  %s %s",
-					cont,
-					theme.Mono.Render(
-						outpoint[lineW:])))
+				if ownership != "" {
+					p.line(" " + cont + " " +
+						theme.Dim.Render(ownership))
+				}
 			}
 			if !isLast {
-				p.line("  │")
+				p.line(" │")
 			}
 		}
 	}
@@ -1422,8 +1429,8 @@ func (m Model) onChainTxDetailPane(
 	if len(tx.Outputs) > 0 {
 		p.blank()
 		p.labelLine("Outputs")
-		lineW := w - 8
-		lineW = max(lineW, 16)
+		// prefix " └── " = 5 chars
+		maxW := max(w-5, 16)
 		for i, out := range tx.Outputs {
 			amtStr := formatSats(out.Amount)
 			if out.Amount == 0 {
@@ -1438,41 +1445,52 @@ func (m Model) onChainTxDetailPane(
 			if isLast {
 				connector = "└──"
 			}
+			cont := "│  "
+			if isLast {
+				cont = "   "
+			}
 			addrStyle := theme.Mono
 			if out.Label == "destination" ||
 				out.Label == "channel" {
 				addrStyle = theme.Value
 			}
 			addr := out.Address
-			valPart := "  " + amtStr + " sats" +
-				labelStr
-			maxAddr := lineW - len(valPart)
-			if len(addr) <= maxAddr {
-				line := fmt.Sprintf("  %s %s%s",
+			valLine := amtStr + " sats" + labelStr
+			// Try single line: addr + value
+			if len(addr)+2+len(valLine) <= maxW {
+				p.line(fmt.Sprintf(" %s %s%s",
 					connector,
 					addrStyle.Render(addr),
 					theme.Value.Render("  "+
 						amtStr+" sats")+
-						theme.Dim.Render(labelStr))
-				p.line(line)
+						theme.Dim.Render(labelStr)))
 			} else {
-				// Address on first line, value on
-				// continuation
-				p.line(fmt.Sprintf("  %s %s",
-					connector,
-					addrStyle.Render(addr)))
-				cont := "│  "
-				if isLast {
-					cont = "   "
+				// Wrap address across lines, then
+				// value on continuation
+				rem := addr
+				first := true
+				for len(rem) > 0 {
+					pfx := " " + cont + " "
+					if first {
+						pfx = " " + connector + " "
+						first = false
+					}
+					end := maxW
+					if end > len(rem) {
+						end = len(rem)
+					}
+					p.line(pfx +
+						addrStyle.Render(rem[:end]))
+					rem = rem[end:]
 				}
-				p.line(fmt.Sprintf("  %s %s%s",
+				p.line(fmt.Sprintf(" %s %s%s",
 					cont,
 					theme.Value.Render(
 						amtStr+" sats"),
 					theme.Dim.Render(labelStr)))
 			}
 			if !isLast {
-				p.line("  │")
+				p.line(" │")
 			}
 		}
 	}

@@ -42,6 +42,7 @@ type AppConfig struct {
 	LndHubAdminToken   string            `json:"lndhub_admin_token,omitempty"`
 	LndHubDBPassword   string            `json:"lndhub_db_password,omitempty"`
 	LndHubAccounts     []LndHubAccount   `json:"lndhub_accounts,omitempty"`
+	Theme              string            `json:"theme,omitempty"`
 }
 
 type LndHubAccount struct {

@@ -61,11 +61,8 @@ func (m Model) walletOverview(w, h int) string {
 	valW := 14
 	balW := 14
 
-	hdrStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Bold(true)
-	sepStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+	hdrStyle := theme.TableHeader
+	sepStyle := theme.TableDim
 
 	hdr := " " +
 		hdrStyle.Render(
@@ -110,11 +107,11 @@ func (m Model) walletOverview(w, h int) string {
 		}
 
 		negStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
+			Foreground(theme.ColorDanger)
 		posStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15"))
+			Foreground(theme.ColorPrimary)
 		selBg := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220")).
+			Foreground(theme.ColorAccent).
 			Bold(true)
 
 		for i, entry := range m.payHistory {
@@ -393,7 +390,7 @@ func (m Model) walletReceiveWaitingPane(
 		btnFocused := m.contentFocused &&
 			!m.tabFocused
 		p.buttons(
-			[]string{"Show QR", "Full Invoice"},
+			[]string{"Show QR", "Copyable Invoice"},
 			m.recvButtonIdx, btnFocused)
 	}
 

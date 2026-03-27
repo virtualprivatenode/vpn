@@ -13,6 +13,7 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/installer"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/logger"
+	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
 type wSubview int
@@ -443,6 +444,7 @@ type Model struct {
 func NewModel(
 	cfg *config.AppConfig, version string,
 ) Model {
+	theme.Init(cfg.Theme != "light")
 	var client *lndrpc.Client
 	if cfg.HasLND() && cfg.WalletExists() {
 		client = lndrpc.New(cfg.Network)

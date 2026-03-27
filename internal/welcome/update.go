@@ -1894,6 +1894,15 @@ func (m Model) handleSidebarKey(
 		m.nav.MoveDown()
 		return m, nil
 	case "enter", "right", "l":
+		// Theme toggle — don't activate a section,
+		// just toggle the theme and stay on the icon.
+		if m.nav.IsOnThemeToggle() {
+			mode := theme.Toggle()
+			m.cfg.Theme = mode
+			m.saveCfg()
+			m.nav.UpdateThemeLabel()
+			return m, nil
+		}
 		sec := m.nav.Activate()
 		m.focusContent()
 		m.activeTab = 0
@@ -2355,6 +2364,28 @@ func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
 	}
 	tmpPath := tmpFile.Name()
 	_, _ = tmpFile.WriteString(mac)
+	_ = tmpFile.Close()
+	c := exec.Command("bash", "-c",
+		"clear && echo && cat "+tmpPath+
+			" && echo && echo && echo "+
+			"'  Press Enter...' && read && rm -f "+
+			tmpPath)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		_ = os.Remove(tmpPath)
+		return svcActionDoneMsg{}
+	})
+}
+
+func showInvoiceCmd(invoice string) tea.Cmd {
+	if invoice == "" {
+		return nil
+	}
+	tmpFile, err := os.CreateTemp("", "rlvpn-invoice-")
+	if err != nil {
+		return nil
+	}
+	tmpPath := tmpFile.Name()
+	_, _ = tmpFile.WriteString(invoice)
 	_ = tmpFile.Close()
 	c := exec.Command("bash", "-c",
 		"clear && echo && cat "+tmpPath+

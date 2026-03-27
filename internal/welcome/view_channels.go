@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"fmt"
+	"image/color"
 	"strconv"
 	"strings"
 
@@ -66,10 +67,10 @@ func (m Model) renderBalanceSummary(w int) []string {
 	remoteBarW := barInnerW - localBarW
 
 	barLocal := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("34")).
+		Foreground(theme.ColorChanLocal).
 		Render(strings.Repeat("█", localBarW))
 	barRemote := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("60")).
+		Foreground(theme.ColorChanRemote).
 		Render(strings.Repeat("█", remoteBarW))
 	barLine := " " + barLocal + barRemote + " "
 
@@ -264,26 +265,24 @@ func (m Model) channelsOverview(w, h int) string {
 			}
 			remoteFill := barW - localFill
 
-			var localColor, remoteColor string
+			var lColor, rColor color.Color
 			if isSelected {
-				localColor = "40"
-				remoteColor = "69"
+				lColor = theme.ColorChanLocalActive
+				rColor = theme.ColorChanRemoteActive
 			} else if ch.Active {
-				localColor = "34"
-				remoteColor = "60"
+				lColor = theme.ColorChanLocal
+				rColor = theme.ColorChanRemote
 			} else {
-				localColor = "22"
-				remoteColor = "237"
+				lColor = theme.ColorChanLocalDim
+				rColor = theme.ColorChanRemoteDim
 			}
 
 			lBar := lipgloss.NewStyle().
-				Foreground(
-					lipgloss.Color(localColor)).
+				Foreground(lColor).
 				Render(
 					strings.Repeat("█", localFill))
 			rBar := lipgloss.NewStyle().
-				Foreground(
-					lipgloss.Color(remoteColor)).
+				Foreground(rColor).
 				Render(strings.Repeat("█",
 					remoteFill))
 			barStr := lBar + rBar
@@ -297,7 +296,7 @@ func (m Model) channelsOverview(w, h int) string {
 			nameStyle := theme.Value
 			if isSelected {
 				marker = "▸"
-				nameStyle = navActiveStyle
+				nameStyle = theme.NavActive
 			}
 			namePad := pad(name, nameW)
 
@@ -870,11 +869,8 @@ func (m Model) channelHistoryPane(w, h int) string {
 
 	isFocused := m.contentFocused && !m.tabFocused
 
-	hdrStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Bold(true)
-	sepStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+	hdrStyle := theme.TableHeader
+	sepStyle := theme.TableDim
 
 	peerW := 16
 	capW := 10
@@ -904,7 +900,7 @@ func (m Model) channelHistoryPane(w, h int) string {
 	var midLines []string
 
 	selStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
+		Foreground(theme.ColorAccent).
 		Bold(true)
 
 	for i, ch := range m.chanHistory {
@@ -1029,10 +1025,10 @@ func renderLiquidityBar(
 	}
 	rw := width - lw
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("34")).
+		Foreground(theme.ColorChanLocal).
 		Render(strings.Repeat("█", lw)) +
 		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("60")).
+			Foreground(theme.ColorChanRemote).
 			Render(strings.Repeat("█", rw))
 }
 

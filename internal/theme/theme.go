@@ -2,126 +2,371 @@ package theme
 
 import "charm.land/lipgloss/v2"
 
-// ── Core colors ──────────────────────────────────────────
+// ── Theme state ────────────────────────────────────────
+//
+// dark tracks the current mode. Call Init(dark) once at
+// startup, then Toggle() to flip. All color vars and
+// style vars are reassigned by applyColors/applyStyles.
+
+var dark = true
+
+// Init sets the initial theme mode and rebuilds all
+// colors and styles. Call once from NewModel.
+func Init(isDark bool) {
+	dark = isDark
+	applyColors()
+	applyStyles()
+}
+
+// Toggle flips the theme and returns the new mode name
+// ("dark" or "light") for config persistence.
+func Toggle() string {
+	dark = !dark
+	applyColors()
+	applyStyles()
+	if dark {
+		return "dark"
+	}
+	return "light"
+}
+
+// IsDark returns the current mode.
+func IsDark() bool { return dark }
+
+// ThemeIcon returns the icon for the theme toggle.
+// Shows what you'd switch TO: ☼ when dark (switch to
+// light), ☽ when light (switch to dark).
+func ThemeIcon() string {
+	if dark {
+		return "☼"
+	}
+	return "☽"
+}
+
+// ── Color palette ───────────────────────────────────────
+//
+// Every color used in the TUI lives here. All colors are
+// reassigned by applyColors() based on the current mode.
+// No file outside theme.go should contain a raw
+// lipgloss.Color literal.
 
 var (
-	Title = lipgloss.NewStyle().Bold(true).
-		Foreground(lipgloss.Color("0")).
-		Background(lipgloss.Color("15")).Padding(0, 2)
+	ColorPrimary       = lipgloss.Color("252")
+	ColorAccent        = lipgloss.Color("130")
+	ColorLabel         = lipgloss.Color("250")
+	ColorDim           = lipgloss.Color("246")
+	ColorGrayed        = lipgloss.Color("243")
+	ColorFaint         = lipgloss.Color("240")
+	ColorBorder        = lipgloss.Color("248")
+	ColorSuccess       = lipgloss.Color("34")
+	ColorDanger        = lipgloss.Color("196")
+	ColorBitcoin       = lipgloss.Color("172")
+	ColorLightning     = lipgloss.Color("135")
+	ColorBtnBg         = lipgloss.Color("252")
+	ColorBtnFg         = lipgloss.Color("232")
+	ColorTabActiveBg   = lipgloss.Color("252")
+	ColorTabActiveFg   = lipgloss.Color("232")
+	ColorTabInactiveBg = lipgloss.Color("242")
+	ColorTabInactiveFg = lipgloss.Color("251")
+	ColorTitleFg       = lipgloss.Color("232")
+	ColorTitleBg       = lipgloss.Color("252")
+	ColorCursor        = lipgloss.Color("251")
 
-	Header  = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-	Label   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	Value   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	Mono    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	Dim     = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-	Grayed  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	Good    = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-	Success = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	Warn    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	Warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	Action  = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	Footer  = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	// Channel bar
+	ColorChanLocal        = lipgloss.Color("34")
+	ColorChanLocalActive  = lipgloss.Color("40")
+	ColorChanRemote       = lipgloss.Color("60")
+	ColorChanRemoteActive = lipgloss.Color("69")
+	ColorChanLocalDim     = lipgloss.Color("22")
+	ColorChanRemoteDim    = lipgloss.Color("237")
+
+	ColorCheck  = lipgloss.Color("34")
+	ColorUpdate = lipgloss.Color("34")
 )
 
-// ── Branded ──────────────────────────────────────────────
+func applyColors() {
+	if dark {
+		ColorPrimary = lipgloss.Color("252")
+		ColorAccent = lipgloss.Color("130")
+		ColorLabel = lipgloss.Color("250")
+		ColorDim = lipgloss.Color("246")
+		ColorGrayed = lipgloss.Color("243")
+		ColorFaint = lipgloss.Color("240")
+		ColorBorder = lipgloss.Color("248")
+		ColorSuccess = lipgloss.Color("34")
+		ColorDanger = lipgloss.Color("196")
+		ColorBitcoin = lipgloss.Color("172")
+		ColorLightning = lipgloss.Color("135")
+		ColorBtnBg = lipgloss.Color("252")
+		ColorBtnFg = lipgloss.Color("232")
+		ColorTabActiveBg = lipgloss.Color("252")
+		ColorTabActiveFg = lipgloss.Color("232")
+		ColorTabInactiveBg = lipgloss.Color("242")
+		ColorTabInactiveFg = lipgloss.Color("251")
+		ColorTitleFg = lipgloss.Color("232")
+		ColorTitleBg = lipgloss.Color("252")
+		ColorCursor = lipgloss.Color("251")
+		ColorChanLocal = lipgloss.Color("34")
+		ColorChanLocalActive = lipgloss.Color("40")
+		ColorChanRemote = lipgloss.Color("60")
+		ColorChanRemoteActive = lipgloss.Color("69")
+		ColorChanLocalDim = lipgloss.Color("22")
+		ColorChanRemoteDim = lipgloss.Color("240")
+		ColorCheck = lipgloss.Color("34")
+		ColorUpdate = lipgloss.Color("34")
+	} else {
+		ColorPrimary = lipgloss.Color("235")
+		ColorAccent = lipgloss.Color("130")
+		ColorLabel = lipgloss.Color("238")
+		ColorDim = lipgloss.Color("241")
+		ColorGrayed = lipgloss.Color("244")
+		ColorFaint = lipgloss.Color("247")
+		ColorBorder = lipgloss.Color("238")
+		ColorSuccess = lipgloss.Color("28")
+		ColorDanger = lipgloss.Color("160")
+		ColorBitcoin = lipgloss.Color("130")
+		ColorLightning = lipgloss.Color("91")
+		ColorBtnBg = lipgloss.Color("247")
+		ColorBtnFg = lipgloss.Color("235")
+		ColorTabActiveBg = lipgloss.Color("247")
+		ColorTabActiveFg = lipgloss.Color("235")
+		ColorTabInactiveBg = lipgloss.Color("245")
+		ColorTabInactiveFg = lipgloss.Color("238")
+		ColorTitleFg = lipgloss.Color("235")
+		ColorTitleBg = lipgloss.Color("247")
+		ColorCursor = lipgloss.Color("236")
+		ColorChanLocal = lipgloss.Color("28")
+		ColorChanLocalActive = lipgloss.Color("34")
+		ColorChanRemote = lipgloss.Color("60")
+		ColorChanRemoteActive = lipgloss.Color("63")
+		ColorChanLocalDim = lipgloss.Color("114")
+		ColorChanRemoteDim = lipgloss.Color("245")
+		ColorCheck = lipgloss.Color("28")
+		ColorUpdate = lipgloss.Color("28")
+	}
+}
+
+// ── Core styles ─────────────────────────────────────────
 
 var (
-	Bitcoin   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	Lightning = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Bold(true)
+	Title   lipgloss.Style
+	Header  lipgloss.Style
+	Label   lipgloss.Style
+	Value   lipgloss.Style
+	Mono    lipgloss.Style
+	Dim     lipgloss.Style
+	Grayed  lipgloss.Style
+	Good    lipgloss.Style
+	Success lipgloss.Style
+	Warn    lipgloss.Style
+	Warning lipgloss.Style
+	Action  lipgloss.Style
+	Footer  lipgloss.Style
 )
 
-// ── Status indicators ────────────────────────────────────
+// ── Branded ─────────────────────────────────────────────
 
 var (
-	GreenDot = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	RedDot   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	Bitcoin   lipgloss.Style
+	Lightning lipgloss.Style
 )
 
-// ── Buttons ──────────────────────────────────────────────
+// ── Status indicators ───────────────────────────────────
 
 var (
-	BtnNormal = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("0")).
-			Background(lipgloss.Color("15")).
-			Bold(true).
-			Padding(0, 1)
-	BtnFocused = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("0")).
-			Background(lipgloss.Color("220")).
-			Bold(true).
-			Padding(0, 1)
+	GreenDot lipgloss.Style
+	RedDot   lipgloss.Style
 )
 
-// ── Tabs ─────────────────────────────────────────────────
+// ── Buttons ─────────────────────────────────────────────
 
 var (
-	ActiveTab = lipgloss.NewStyle().Bold(true).
-			Foreground(lipgloss.Color("0")).
-			Background(lipgloss.Color("15")).Padding(0, 2)
-	InactiveTab = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("250")).
-			Background(lipgloss.Color("236")).Padding(0, 2)
+	BtnNormal  lipgloss.Style
+	BtnFocused lipgloss.Style
 )
 
-// ── Borders ──────────────────────────────────────────────
+// ── Tabs ────────────────────────────────────────────────
 
 var (
-	Box = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("245"))
-	SelectedBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("220"))
-	NormalBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("245"))
-	GrayedBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240"))
+	ActiveTab   lipgloss.Style
+	InactiveTab lipgloss.Style
 )
 
-// ── Install progress ─────────────────────────────────────
+// ── Borders ─────────────────────────────────────────────
 
 var (
-	ProgTitle = lipgloss.NewStyle().Bold(true).
-			Foreground(lipgloss.Color("0")).
-			Background(lipgloss.Color("15")).Padding(0, 2)
-	ProgBox = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("245")).Padding(1, 2)
-	ProgDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	ProgRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	ProgPending = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-	ProgFail    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	Box            lipgloss.Style
+	SelectedBorder lipgloss.Style
+	NormalBorder   lipgloss.Style
+	GrayedBorder   lipgloss.Style
 )
 
-// ── Setup wizard ─────────────────────────────────────────
+// ── Install progress ────────────────────────────────────
 
 var (
-	SetupSection    = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
-	SetupSelected   = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	SetupUnselected = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	SetupValue      = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	SummaryKey      = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).
-			Width(16).Align(lipgloss.Right)
-	SummaryVal = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+	ProgTitle   lipgloss.Style
+	ProgBox     lipgloss.Style
+	ProgDone    lipgloss.Style
+	ProgRunning lipgloss.Style
+	ProgPending lipgloss.Style
+	ProgFail    lipgloss.Style
 )
 
-// ── Layout constants ─────────────────────────────────────
+// ── Setup wizard ────────────────────────────────────────
+
+var (
+	SetupSection    lipgloss.Style
+	SetupSelected   lipgloss.Style
+	SetupUnselected lipgloss.Style
+	SetupValue      lipgloss.Style
+	SummaryKey      lipgloss.Style
+	SummaryVal      lipgloss.Style
+)
+
+// ── Layout constants ────────────────────────────────────
 
 const (
 	ContentWidth = 76
 	BoxHeight    = 24
 )
 
-// ── Help bar ─────────────────────────────────────────────
+// ── Help bar ────────────────────────────────────────────
 
 var (
+	HelpKey  lipgloss.Style
+	HelpDesc lipgloss.Style
+	HelpSep  lipgloss.Style
+)
+
+// ── Inline style helpers ────────────────────────────────
+
+var (
+	NavItem   lipgloss.Style
+	NavActive lipgloss.Style
+	NavCursor lipgloss.Style
+
+	TableHeader lipgloss.Style
+	TableDim    lipgloss.Style
+
+	FrameBorder lipgloss.Style
+
+	AddonBorderNormal lipgloss.Style
+	AddonBorderActive lipgloss.Style
+	AddonTitleNormal  lipgloss.Style
+	AddonTitleActive  lipgloss.Style
+)
+
+func applyStyles() {
+	// Core
+	Title = lipgloss.NewStyle().Bold(true).
+		Foreground(ColorTitleFg).
+		Background(ColorTitleBg).Padding(0, 2)
+	Header = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+	Label = lipgloss.NewStyle().Foreground(ColorLabel)
+	Value = lipgloss.NewStyle().Foreground(ColorPrimary)
+	Mono = lipgloss.NewStyle().Foreground(ColorPrimary)
+	Dim = lipgloss.NewStyle().Foreground(ColorDim)
+	Grayed = lipgloss.NewStyle().Foreground(ColorGrayed)
+	Good = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+	Success = lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true)
+	Warn = lipgloss.NewStyle().Foreground(ColorLabel)
+	Warning = lipgloss.NewStyle().Foreground(ColorDanger).Bold(true)
+	Action = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	Footer = lipgloss.NewStyle().Foreground(ColorDim)
+
+	// Branded
+	Bitcoin = lipgloss.NewStyle().Foreground(ColorBitcoin).Bold(true)
+	Lightning = lipgloss.NewStyle().Foreground(ColorLightning).Bold(true)
+
+	// Status
+	GreenDot = lipgloss.NewStyle().Foreground(ColorSuccess)
+	RedDot = lipgloss.NewStyle().Foreground(ColorDanger)
+
+	// Buttons
+	BtnNormal = lipgloss.NewStyle().
+		Foreground(ColorBtnFg).
+		Background(ColorBtnBg).
+		Bold(true).
+		Padding(0, 1)
+	BtnFocused = lipgloss.NewStyle().
+		Foreground(ColorBtnFg).
+		Background(ColorAccent).
+		Bold(true).
+		Padding(0, 1)
+
+	// Tabs
+	ActiveTab = lipgloss.NewStyle().Bold(true).
+		Foreground(ColorTabActiveFg).
+		Background(ColorTabActiveBg).Padding(0, 2)
+	InactiveTab = lipgloss.NewStyle().
+		Foreground(ColorTabInactiveFg).
+		Background(ColorTabInactiveBg).Padding(0, 2)
+
+	// Borders
+	Box = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder)
+	SelectedBorder = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorAccent)
+	NormalBorder = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder)
+	GrayedBorder = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorGrayed)
+
+	// Progress
+	ProgTitle = lipgloss.NewStyle().Bold(true).
+		Foreground(ColorTitleFg).
+		Background(ColorTitleBg).Padding(0, 2)
+	ProgBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder).Padding(1, 2)
+	ProgDone = lipgloss.NewStyle().Foreground(ColorPrimary)
+	ProgRunning = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	ProgPending = lipgloss.NewStyle().Foreground(ColorDim)
+	ProgFail = lipgloss.NewStyle().Foreground(ColorDanger).Bold(true)
+
+	// Setup
+	SetupSection = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+	SetupSelected = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	SetupUnselected = lipgloss.NewStyle().Foreground(ColorLabel)
+	SetupValue = lipgloss.NewStyle().Foreground(ColorPrimary)
+	SummaryKey = lipgloss.NewStyle().Foreground(ColorLabel).
+		Width(16).Align(lipgloss.Right)
+	SummaryVal = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+
+	// Help bar
 	HelpKey = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
+		Foreground(ColorAccent).
 		Bold(true)
 	HelpDesc = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("243"))
+		Foreground(ColorDim)
 	HelpSep = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("238"))
-)
+		Foreground(ColorFaint)
+
+	// Nav
+	NavItem = lipgloss.NewStyle().Foreground(ColorPrimary)
+	NavActive = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+	NavCursor = lipgloss.NewStyle().Foreground(ColorCursor).Bold(true)
+
+	// Table
+	TableHeader = lipgloss.NewStyle().Foreground(ColorLabel).Bold(true)
+	TableDim = lipgloss.NewStyle().Foreground(ColorGrayed)
+
+	// Frame
+	FrameBorder = lipgloss.NewStyle().Foreground(ColorBorder)
+
+	// Addon cards
+	AddonBorderNormal = lipgloss.NewStyle().Foreground(ColorGrayed)
+	AddonBorderActive = lipgloss.NewStyle().Foreground(ColorAccent)
+	AddonTitleNormal = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+	AddonTitleActive = lipgloss.NewStyle().Foreground(ColorAccent).Bold(true)
+}
+
+// init sets up the default dark theme.
+func init() {
+	applyColors()
+	applyStyles()
+}
