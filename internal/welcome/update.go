@@ -259,12 +259,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case feeTiersMsg:
 		if msg.err == nil {
-			m.ocFeeTiers = msg.tiers
 			if isCloseSubview(m.subview) {
 				m.closeFeeTiers = msg.tiers
 			}
-		} else {
-			m.onChainSendError = msg.err.Error()
 		}
 		return m, nil
 	case feeEstimateMsg:
@@ -410,16 +407,9 @@ func (m Model) handleOCReceiveTabKey(
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
-		if m.ocRecvBtnIdx > 0 {
-			m.ocRecvBtnIdx--
-			return m, nil
-		}
 		m.focusSidebar()
 		return m, nil
 	case "right", "l":
-		if m.ocRecvBtnIdx < 1 {
-			m.ocRecvBtnIdx++
-		}
 		return m, nil
 	case "up", "k":
 		if m.hasDetailTabs() {
@@ -438,18 +428,9 @@ func (m Model) handleOCReceiveTabKey(
 		return m.closeTab(m.activeTab)
 	case "enter":
 		if m.ocRecvAddress != "" {
-			if m.ocRecvBtnIdx == 0 {
-				m.urlTarget = m.ocRecvAddress
-				m.qrLabel = "On-Chain Address"
-				m.urlReturnTo = svOnChainReceive
-				m.subview = svQR
-				return m, nil
-			}
-			if m.ocRecvBtnIdx == 1 {
-				m.ocRecvAddress = ""
-				return m,
-					getNewAddressCmd(m.lndClient)
-			}
+			m.ocRecvAddress = ""
+			return m,
+				getNewAddressCmd(m.lndClient)
 		}
 		return m, nil
 	}
@@ -1440,7 +1421,6 @@ func (m Model) handleOnChainContentKey(
 			switch m.onChainBtnIdx {
 			case 0:
 				m.ocRecvAddress = ""
-				m.ocRecvBtnIdx = 0
 				m.ocRecvError = ""
 				m.subview = svOnChainReceive
 				m.openFlowTab(tabOCReceive,

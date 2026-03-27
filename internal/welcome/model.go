@@ -401,7 +401,6 @@ type Model struct {
 
 	// On-chain receive state
 	ocRecvAddress string
-	ocRecvBtnIdx  int
 	ocRecvError   string
 
 	// On-chain send flow
@@ -410,9 +409,7 @@ type Model struct {
 	ocSendLabelInput textinput.Model
 	ocCustomFeeInput textinput.Model
 	ocSendAll        bool
-	ocSendStep       int // 0=addr, 1=amount, 2=max btn, 3=label, 4=fee tiers, 5=custom fee, 6=buttons
-	ocFeeTiers       [4]feeTier
-	ocSelectedTier   int   // 0=1sat, 1=2sat, 2=3sat, 3=Custom
+	ocSendStep       int   // 0=addr, 1=amount, 2=max btn, 3=label, 4=fee rate, 5=buttons
 	ocConfirmFee     int64 // precise fee from LND
 	ocConfirmBtnIdx  int   // 0=Go Back, 1=Confirm & Broadcast
 	ocSendAddrVal    string

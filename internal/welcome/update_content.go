@@ -876,14 +876,8 @@ func (m Model) handleOCSendKey(
 		return m, tea.Quit
 
 	case "left", "h":
-		// Fee tier: move left
-		if m.ocSendStep == 4 &&
-			m.ocSelectedTier > 0 {
-			m.ocSelectedTier--
-			return m, nil
-		}
 		// Buttons: move left
-		if m.ocSendStep == 6 &&
+		if m.ocSendStep == 5 &&
 			m.ocSendBtnIdx > 0 {
 			m.ocSendBtnIdx--
 			return m, nil
@@ -918,8 +912,8 @@ func (m Model) handleOCSendKey(
 				return m, cmd
 			}
 		}
-		// Custom fee: pass through for cursor
-		if m.ocSendStep == 5 {
+		// Fee input: pass through for cursor
+		if m.ocSendStep == 4 {
 			if m.ocCustomFeeInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocCustomFeeInput, cmd =
@@ -932,14 +926,8 @@ func (m Model) handleOCSendKey(
 		return m, nil
 
 	case "right", "l":
-		// Fee tier: move right
-		if m.ocSendStep == 4 &&
-			m.ocSelectedTier < 3 {
-			m.ocSelectedTier++
-			return m, nil
-		}
 		// Buttons: move right
-		if m.ocSendStep == 6 &&
+		if m.ocSendStep == 5 &&
 			m.ocSendBtnIdx < 1 {
 			m.ocSendBtnIdx++
 			return m, nil
@@ -968,8 +956,8 @@ func (m Model) handleOCSendKey(
 					tea.Msg(msg))
 			return m, cmd
 		}
-		// Custom fee: pass through for cursor
-		if m.ocSendStep == 5 {
+		// Fee input: pass through for cursor
+		if m.ocSendStep == 4 {
 			var cmd tea.Cmd
 			m.ocCustomFeeInput, cmd =
 				m.ocCustomFeeInput.Update(
@@ -1015,7 +1003,7 @@ func (m Model) handleOCSendKey(
 				return m, cmd
 			}
 		}
-		if m.ocSendStep == 5 {
+		if m.ocSendStep == 4 {
 			if m.ocCustomFeeInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocCustomFeeInput, cmd =
@@ -1027,13 +1015,7 @@ func (m Model) handleOCSendKey(
 		// Move up one step on backspace with
 		// empty input
 		if m.ocSendStep > 0 {
-			prev := m.ocSendStep - 1
-			// Skip custom fee step when going back
-			// if not on custom tier
-			if prev == 5 && m.ocSelectedTier != 3 {
-				prev = 4
-			}
-			m.ocSendStep = prev
+			m.ocSendStep--
 			m.onChainSendError = ""
 			m.focusSendStep()
 			return m, nil
@@ -1042,13 +1024,7 @@ func (m Model) handleOCSendKey(
 
 	case "up", "k":
 		if m.ocSendStep > 0 {
-			prev := m.ocSendStep - 1
-			// Skip step 5 (custom fee) when moving
-			// up if not on custom tier
-			if prev == 5 && m.ocSelectedTier != 3 {
-				prev = 4
-			}
-			m.ocSendStep = prev
+			m.ocSendStep--
 			m.focusSendStep()
 		} else if m.hasDetailTabs() {
 			m.focusTabBar()
@@ -1060,14 +1036,9 @@ func (m Model) handleOCSendKey(
 
 	case "down", "j":
 		next := m.ocSendStep + 1
-		// Skip step 5 (custom fee) unless on custom
-		if next == 5 && m.ocSelectedTier != 3 {
-			next = 6
-		}
-		if next > 6 {
+		if next > 5 {
 			return m, nil
 		}
-		next = min(next, 6)
 		m.ocSendStep = next
 		m.focusSendStep()
 		return m, nil
@@ -1122,7 +1093,7 @@ func (m Model) handleOCSendKey(
 			return m, nil
 		}
 		// Bottom buttons
-		if m.ocSendStep == 6 {
+		if m.ocSendStep == 5 {
 			switch m.ocSendBtnIdx {
 			case 0: // Clear
 				m.resetOnChainSendState()
@@ -1134,10 +1105,7 @@ func (m Model) handleOCSendKey(
 		}
 		// Enter on any other step: advance to next
 		next := m.ocSendStep + 1
-		if next == 5 && m.ocSelectedTier != 3 {
-			next = 6
-		}
-		next = min(next, 6)
+		next = min(next, 5)
 		m.ocSendStep = next
 		m.focusSendStep()
 		return m, nil
@@ -1165,7 +1133,7 @@ func (m Model) handleOCSendKey(
 				m.ocSendLabelInput.Update(
 					tea.Msg(msg))
 			return m, cmd
-		case 5:
+		case 4:
 			var cmd tea.Cmd
 			m.ocCustomFeeInput, cmd =
 				m.ocCustomFeeInput.Update(
@@ -1192,7 +1160,7 @@ func (m *Model) focusSendStep() {
 		}
 	case 3:
 		m.ocSendLabelInput.Focus()
-	case 5:
+	case 4:
 		m.ocCustomFeeInput.Focus()
 	}
 }
@@ -1264,38 +1232,33 @@ func (m Model) validateAndConfirmSend() (
 
 	// Validate fee rate
 	var feeRate int64
-	if m.ocSelectedTier < 3 {
-		// Fixed tiers: 0=1sat, 1=2sat, 2=3sat
-		feeRate = int64(m.ocSelectedTier + 1)
-	} else {
-		feeVal := strings.TrimSpace(
-			m.ocCustomFeeInput.Value())
-		if feeVal == "" {
-			m.onChainSendError =
-				"Enter a custom fee rate"
-			m.ocSendStep = 5
-			m.focusSendStep()
-			return m, nil
-		}
-		var n int64
-		for _, c := range feeVal {
-			if c < '0' || c > '9' {
-				m.onChainSendError =
-					"Invalid fee rate"
-				m.ocSendStep = 5
-				m.focusSendStep()
-				return m, nil
-			}
-			n = n*10 + int64(c-'0')
-		}
-		if n < 1 {
-			m.onChainSendError = "Minimum 1 sat/vB"
-			m.ocSendStep = 5
-			m.focusSendStep()
-			return m, nil
-		}
-		feeRate = n
+	feeVal := strings.TrimSpace(
+		m.ocCustomFeeInput.Value())
+	if feeVal == "" {
+		m.onChainSendError =
+			"Enter a fee rate"
+		m.ocSendStep = 4
+		m.focusSendStep()
+		return m, nil
 	}
+	var fn int64
+	for _, c := range feeVal {
+		if c < '0' || c > '9' {
+			m.onChainSendError =
+				"Invalid fee rate"
+			m.ocSendStep = 4
+			m.focusSendStep()
+			return m, nil
+		}
+		fn = fn*10 + int64(c-'0')
+	}
+	if fn < 1 {
+		m.onChainSendError = "Minimum 1 sat/vB"
+		m.ocSendStep = 4
+		m.focusSendStep()
+		return m, nil
+	}
+	feeRate = fn
 
 	m.ocSendAddrVal = addr
 	m.ocSendAmtVal = amountSats
@@ -1376,8 +1339,6 @@ func (m *Model) resetOnChainSendState() {
 	m.ocCustomFeeInput = newCustomFeeInput()
 	m.ocSendAll = false
 	m.ocSendStep = 0
-	m.ocFeeTiers = [4]feeTier{}
-	m.ocSelectedTier = 0
 	m.ocConfirmFee = 0
 	m.ocConfirmBtnIdx = 0
 	m.ocSendAddrVal = ""

@@ -72,6 +72,25 @@ func (p *paneBuilder) mono(text string) *paneBuilder {
 	return p
 }
 
+// monoWrap renders a long string across multiple lines,
+// splitting at lineW characters per line. Used for txids,
+// pubkeys, addresses, invoices, and other long values.
+func (p *paneBuilder) monoWrap(text string) *paneBuilder {
+	lineW := p.w - 4
+	if lineW < 16 {
+		lineW = 16
+	}
+	for len(text) > 0 {
+		end := lineW
+		if end > len(text) {
+			end = len(text)
+		}
+		p.mono(text[:end])
+		text = text[end:]
+	}
+	return p
+}
+
 func (p *paneBuilder) dim(text string) *paneBuilder {
 	p.lines = append(p.lines,
 		" "+theme.Dim.Render(text))
