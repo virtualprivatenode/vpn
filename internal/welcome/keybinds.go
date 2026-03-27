@@ -19,27 +19,15 @@ var (
 	kEnter = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "select"))
-	kUpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑↓", "navigate"))
-	kLeftRight = key.NewBinding(
-		key.WithKeys("left", "right"),
-		key.WithHelp("←→", "navigate"))
 	kSidebar = key.NewBinding(
 		key.WithKeys("left", "h"),
 		key.WithHelp("←", "sidebar"))
-	kTabBar = key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("↑", "tab bar"))
 	kConfirm = key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "confirm"))
 	kCancel = key.NewBinding(
 		key.WithKeys("n"),
 		key.WithHelp("n", "cancel"))
-	kTab = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", "switch field"))
 )
 
 // ── Sidebar bindings ─────────────────────────────────────

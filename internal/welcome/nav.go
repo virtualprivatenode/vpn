@@ -42,9 +42,6 @@ var (
 	navCursorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
 			Bold(true)
-
-	navSepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("239"))
 )
 
 func NewNavSidebar() NavSidebar {
@@ -104,11 +101,6 @@ func (n *NavSidebar) Activate() int {
 func (n *NavSidebar) ActiveSection() int {
 	n.clamp()
 	return n.Items[n.ActiveItem].Section
-}
-
-func (n *NavSidebar) CursorSection() int {
-	n.clamp()
-	return n.Items[n.Cursor].Section
 }
 
 func (n *NavSidebar) SetActive(section int) {
@@ -195,20 +187,6 @@ func (n NavSidebar) BlockRows(
 }
 
 // ── String helpers ───────────────────────────────────────
-
-func trunc(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= w {
-		return s
-	}
-	if w == 1 {
-		return string(r[:1])
-	}
-	return string(r[:w-1]) + "…"
-}
 
 func pad(s string, w int) string {
 	r := []rune(s)

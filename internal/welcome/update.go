@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -63,7 +62,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.WalletCreated = true
 			m.saveCfg()
 		}
-		m.rebuildChannelTable()
 		return m, nil
 	case latestVersionMsg:
 		m.latestVersion = string(msg)
@@ -204,7 +202,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case paymentHistoryMsg:
 		if msg.err == nil {
 			m.payHistory = msg.entries
-			m.rebuildTxTable()
 		}
 		return m, nil
 	case utxoListMsg:
@@ -233,6 +230,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearUtxoSelection()
 		}
 		m.subview = svOnChainResult
+		if msg.err == nil && m.ocSendLabelVal != "" {
+			return m, labelTxCmd(
+				m.lndClient, msg.txid,
+				m.ocSendLabelVal)
+		}
 		return m, nil
 	case closeChannelMsg:
 		m.closeInFlight = false
@@ -250,8 +252,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case labelTxMsg:
-		m.utxoLabelEditing = false
 		if msg.err == nil {
+			m.closeLabelPopup()
 			return m, fetchOnChainTxCmd(m.lndClient)
 		}
 		return m, nil
@@ -351,7 +353,7 @@ func (m Model) handleTabContentKey(
 	case tabOnChainTx:
 		return m.handleOnChainTxDetailKey(key)
 	case tabUtxoDetail:
-		return m.handleUtxoDetailKey(key, msg)
+		return m.handleViewOnlyKey(key, svNone)
 	case tabOpenChannel:
 		return m.handleOpenChannelTabKey(key, msg)
 	case tabSend:
@@ -427,6 +429,8 @@ func (m Model) handleOCReceiveTabKey(
 			return m, nil
 		}
 		return m, nil
+	case "down", "j":
+		return m, nil
 	case "backspace":
 		m.ocRecvAddress = ""
 		m.ocRecvError = ""
@@ -478,6 +482,7 @@ func (m Model) handleChannelDetailKey(
 			m.contentFocus = 1
 			return m, nil
 		}
+		return m, nil
 	case "enter":
 		if m.contentFocus == 1 {
 			return m.startCloseFlow()
@@ -649,77 +654,6 @@ func (m Model) handleOnChainTxDetailKey(
 	return m.handleViewOnlyKey(key, svNone)
 }
 
-func (m Model) handleUtxoDetailKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	if m.utxoLabelEditing {
-		switch key {
-		case "enter":
-			if m.utxoCursor < len(m.utxos) {
-				txid :=
-					m.utxos[m.utxoCursor].Txid
-				label := m.utxoLabelInput.Value()
-				m.utxoLabelEditing = false
-				return m, labelTxCmd(
-					m.lndClient, txid, label)
-			}
-			m.utxoLabelEditing = false
-			return m, nil
-		case "escape":
-			m.utxoLabelEditing = false
-			return m, nil
-		case "q":
-			// Don't quit while editing
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.utxoLabelInput, cmd =
-				m.utxoLabelInput.Update(msg)
-			return m, cmd
-		}
-	}
-
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.contentFocus == 1 {
-			m.contentFocus = 0
-			return m, nil
-		}
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "down", "j":
-		if m.contentFocus == 0 {
-			m.contentFocus = 1
-			return m, nil
-		}
-	case "enter":
-		if m.contentFocus == 1 {
-			// Start label editing
-			current := ""
-			if m.utxoCursor < len(m.utxos) {
-				current = m.utxoTxLabel(
-					m.utxos[m.utxoCursor].Txid)
-			}
-			m.utxoLabelInput =
-				newUtxoLabelInput(current)
-			m.utxoLabelEditing = true
-			return m, nil
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
-}
-
 func labelTxCmd(
 	client *lndrpc.Client, txid, label string,
 ) tea.Cmd {
@@ -834,9 +768,9 @@ func (m Model) handleOnChainTabKey(
 ) (tea.Model, tea.Cmd) {
 	switch m.subview {
 	case svOnChain:
-		return m.handleOnChainKey(key)
+		return m.handleOnChainContentKey(key, true, msg)
 	case svOnChainResult:
-		return m.handleOnChainKey(key)
+		return m.handleOnChainContentKey(key, true, msg)
 	case svOnChainSend:
 		return m.handleOCSendKey(key, msg)
 	case svOCSendConfirm:
@@ -901,6 +835,8 @@ func (m Model) handlePairingContentKey(
 		if m.pairingButtonIdx < 3 {
 			m.pairingButtonIdx++
 		}
+	case "down", "j":
+		return m, nil
 	case "enter":
 		return m.handlePairingEnter()
 	}
@@ -1041,6 +977,12 @@ func (m Model) handleLndHubDeactivateKey(
 func (m Model) handleSectionHomeKey(
 	key string, msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
+	// UTXO label popup intercepts ALL keys
+	// before any other handling.
+	if m.utxoLabelEditing {
+		return m.handleUtxoLabelPopupKey(key, msg)
+	}
+
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -1057,7 +999,7 @@ func (m Model) handleSectionHomeKey(
 	case secWallet:
 		return m.handleWalletHomeKey(key)
 	case secOnChain:
-		return m.handleOnChainHomeKey(key)
+		return m.handleOnChainContentKey(key, false, msg)
 	case secAddons:
 		return m.handleAddonsHomeKey(key)
 	case secSystem:
@@ -1360,17 +1302,21 @@ func (m *Model) buildChannelHistory(
 	m.chanHistory = entries
 }
 
-// ── On-Chain home ────────────────────────────────────────
+// ── On-Chain content (merged home + tab handler) ────────
 
-func (m Model) handleOnChainHomeKey(
-	key string,
+func (m Model) handleOnChainContentKey(
+	key string, fromTab bool, msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
 	if m.subview == svOnChainResult {
 		switch key {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "enter", "backspace":
-			m.subview = svNone
+			if fromTab {
+				m.subview = svOnChain
+			} else {
+				m.subview = svNone
+			}
 			m.onChainSendTxid = ""
 			m.onChainSendError = ""
 			return m, tea.Sequence(
@@ -1381,23 +1327,24 @@ func (m Model) handleOnChainHomeKey(
 		return m, nil
 	}
 
-	if isOnChainSendSubview(m.subview) {
+	if !fromTab && isOnChainSendSubview(m.subview) {
 		m.openFlowTab(tabOnChain,
 			"Send", secOnChain)
 		return m, nil
 	}
 
+	// ── UTXO label popup handling ───────────────
+	if m.utxoLabelEditing {
+		return m.handleUtxoLabelPopupKey(key, msg)
+	}
+
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
-		if m.onChainTxFocus == 0 &&
-			m.onChainBtnIdx > 0 {
-			m.onChainBtnIdx--
-		} else {
-			m.focusSidebar()
+	case "backspace":
+		if fromTab {
+			return m.closeTab(m.activeTab)
 		}
-		return m, nil
 	case "up", "k":
 		switch m.onChainTxFocus {
 		case 2:
@@ -1413,15 +1360,21 @@ func (m Model) handleOnChainHomeKey(
 		case 1:
 			if m.utxoCursor > 0 {
 				m.utxoCursor--
+				m.utxoPencilFocused = false
 			} else {
 				m.onChainTxFocus = 0
 				m.onChainBtnIdx = 0
+				m.utxoPencilFocused = false
 			}
 		case 0:
 			if m.hasDetailTabs() {
 				m.focusTabBar()
 				m.tabCursorX = 0
-				m.activeTab = 1
+				if fromTab {
+					m.activeTab = m.findFlowTab()
+				} else {
+					m.activeTab = 1
+				}
 				return m, nil
 			}
 		}
@@ -1431,6 +1384,7 @@ func (m Model) handleOnChainHomeKey(
 			if len(m.utxos) > 0 {
 				m.onChainTxFocus = 1
 				m.utxoCursor = 0
+				m.utxoPencilFocused = false
 			} else if len(m.onChainTxs) > 0 {
 				m.onChainTxFocus = 2
 				m.onChainTxCursor = 0
@@ -1438,9 +1392,11 @@ func (m Model) handleOnChainHomeKey(
 		case 1:
 			if m.utxoCursor < len(m.utxos)-1 {
 				m.utxoCursor++
+				m.utxoPencilFocused = false
 			} else if len(m.onChainTxs) > 0 {
 				m.onChainTxFocus = 2
 				m.onChainTxCursor = 0
+				m.utxoPencilFocused = false
 			}
 		case 2:
 			if m.onChainTxCursor < len(m.onChainTxs)-1 {
@@ -1452,6 +1408,27 @@ func (m Model) handleOnChainHomeKey(
 			m.onChainBtnIdx < 1 {
 			m.onChainBtnIdx++
 		}
+		// UTXO row: right arrow focuses pencil icon
+		if m.onChainTxFocus == 1 &&
+			m.utxoCursor < len(m.utxos) &&
+			!m.utxoPencilFocused {
+			m.utxoPencilFocused = true
+			return m, nil
+		}
+	case "left", "h":
+		// UTXO row: left arrow unfocuses pencil
+		if m.onChainTxFocus == 1 &&
+			m.utxoPencilFocused {
+			m.utxoPencilFocused = false
+			return m, nil
+		}
+		if m.onChainTxFocus == 0 &&
+			m.onChainBtnIdx > 0 {
+			m.onChainBtnIdx--
+		} else {
+			m.focusSidebar()
+		}
+		return m, nil
 	case "space":
 		if m.onChainTxFocus == 1 &&
 			m.utxoCursor < len(m.utxos) {
@@ -1478,18 +1455,26 @@ func (m Model) handleOnChainHomeKey(
 							m.utxoSelectedTotal))
 				}
 				m.subview = svOnChainSend
+				if fromTab {
+					return m, nil
+				}
 				m.openFlowTab(tabOnChain,
 					"⛓ Send", secOnChain)
 				return m, nil
 			}
 		} else if m.onChainTxFocus == 1 &&
 			m.utxoCursor < len(m.utxos) {
+			if m.utxoPencilFocused {
+				// Open label edit popup
+				m.openLabelPopup()
+				return m, nil
+			}
+			// Open view-only detail tab
 			u := m.utxos[m.utxoCursor]
 			label := u.Address
 			if len(label) > 14 {
 				label = label[:12] + ".."
 			}
-			m.utxoLabelEditing = false
 			m.contentFocus = 0
 			m.findOrOpenTab(tabUtxoDetail, label,
 				m.utxoCursor, secOnChain)
@@ -1502,6 +1487,107 @@ func (m Model) handleOnChainHomeKey(
 			}
 			m.findOrOpenTab(tabOnChainTx, label,
 				m.onChainTxCursor, secOnChain)
+		}
+	}
+	return m, nil
+}
+
+// ── UTXO label popup keys ───────────────────────────────
+
+func (m Model) handleUtxoLabelPopupKey(
+	key string, msg tea.KeyPressMsg,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "up", "k":
+		if m.utxoLabelOnBtn {
+			m.utxoLabelOnBtn = false
+			m.utxoLabelInput.Focus()
+			return m, nil
+		}
+		return m, nil
+
+	case "down", "j":
+		if !m.utxoLabelOnBtn {
+			m.utxoLabelOnBtn = true
+			m.utxoLabelBtnIdx = 0
+			m.utxoLabelInput.Blur()
+			return m, nil
+		}
+		return m, nil
+
+	case "left", "h":
+		if m.utxoLabelOnBtn {
+			if m.utxoLabelBtnIdx > 0 {
+				m.utxoLabelBtnIdx--
+			}
+			return m, nil
+		}
+		// In label field — cursor left
+		var cmd tea.Cmd
+		m.utxoLabelInput, cmd =
+			m.utxoLabelInput.Update(tea.Msg(msg))
+		return m, cmd
+
+	case "right", "l":
+		if m.utxoLabelOnBtn {
+			if m.utxoLabelBtnIdx < 1 {
+				m.utxoLabelBtnIdx++
+			}
+			return m, nil
+		}
+		// In label field — cursor right
+		var cmd tea.Cmd
+		m.utxoLabelInput, cmd =
+			m.utxoLabelInput.Update(tea.Msg(msg))
+		return m, cmd
+
+	case "enter":
+		if m.utxoLabelOnBtn {
+			switch m.utxoLabelBtnIdx {
+			case 0: // Save
+				if m.utxoCursor < len(m.utxos) {
+					txid :=
+						m.utxos[m.utxoCursor].Txid
+					label :=
+						m.utxoLabelInput.Value()
+					return m, labelTxCmd(
+						m.lndClient, txid, label)
+				}
+				m.closeLabelPopup()
+				return m, nil
+			case 1: // Cancel
+				m.closeLabelPopup()
+				return m, nil
+			}
+		}
+		// On label field — move to buttons
+		m.utxoLabelOnBtn = true
+		m.utxoLabelBtnIdx = 0
+		m.utxoLabelInput.Blur()
+		return m, nil
+
+	case "backspace":
+		// Always delete in label field
+		if !m.utxoLabelOnBtn {
+			var cmd tea.Cmd
+			m.utxoLabelInput, cmd =
+				m.utxoLabelInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		return m, nil
+
+	default:
+		// Pass all other keys to label field
+		if !m.utxoLabelOnBtn {
+			var cmd tea.Cmd
+			m.utxoLabelInput, cmd =
+				m.utxoLabelInput.Update(
+					tea.Msg(msg))
+			return m, cmd
 		}
 	}
 	return m, nil
@@ -1649,147 +1735,6 @@ func (m Model) handleSystemHomeKey(
 			case 2:
 				m.sysConfirm = "Reboot"
 			}
-		}
-	}
-	return m, nil
-}
-
-// ── On-chain overview keys (used by on-chain TAB) ────────
-
-func (m Model) handleOnChainKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	if m.subview == svOnChainResult {
-		switch key {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		case "enter", "backspace":
-			m.subview = svOnChain
-			m.onChainSendTxid = ""
-			m.onChainSendError = ""
-			return m, tea.Sequence(
-				listUnspentCmd(m.lndClient),
-				fetchOnChainTxCmd(m.lndClient),
-				fetchStatus(m.cfg, m.lndClient))
-		}
-		return m, nil
-	}
-
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "left", "h":
-		if m.onChainTxFocus == 0 &&
-			m.onChainBtnIdx > 0 {
-			m.onChainBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	case "up", "k":
-		switch m.onChainTxFocus {
-		case 2:
-			if m.onChainTxCursor > 0 {
-				m.onChainTxCursor--
-			} else {
-				m.onChainTxFocus = 1
-				if len(m.utxos) > 0 {
-					m.utxoCursor =
-						len(m.utxos) - 1
-				}
-			}
-		case 1:
-			if m.utxoCursor > 0 {
-				m.utxoCursor--
-			} else {
-				m.onChainTxFocus = 0
-				m.onChainBtnIdx = 0
-			}
-		case 0:
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		}
-	case "down", "j":
-		switch m.onChainTxFocus {
-		case 0:
-			if len(m.utxos) > 0 {
-				m.onChainTxFocus = 1
-				m.utxoCursor = 0
-			} else if len(m.onChainTxs) > 0 {
-				m.onChainTxFocus = 2
-				m.onChainTxCursor = 0
-			}
-		case 1:
-			if m.utxoCursor < len(m.utxos)-1 {
-				m.utxoCursor++
-			} else if len(m.onChainTxs) > 0 {
-				m.onChainTxFocus = 2
-				m.onChainTxCursor = 0
-			}
-		case 2:
-			if m.onChainTxCursor < len(m.onChainTxs)-1 {
-				m.onChainTxCursor++
-			}
-		}
-	case "right", "l":
-		if m.onChainTxFocus == 0 &&
-			m.onChainBtnIdx < 1 {
-			m.onChainBtnIdx++
-		}
-	case "space":
-		if m.onChainTxFocus == 1 &&
-			m.utxoCursor < len(m.utxos) {
-			m.toggleUtxoSelection(m.utxoCursor)
-		}
-		return m, nil
-	case "enter":
-		if m.onChainTxFocus == 0 {
-			switch m.onChainBtnIdx {
-			case 0:
-				m.ocRecvAddress = ""
-				m.ocRecvBtnIdx = 0
-				m.ocRecvError = ""
-				m.subview = svOnChainReceive
-				m.openFlowTab(tabOCReceive,
-					"⛓ Receive", secOnChain)
-				return m,
-					getNewAddressCmd(m.lndClient)
-			case 1:
-				m.resetOnChainSendState()
-				if len(m.utxoSelected) > 0 {
-					m.ocSendAmtInput.SetValue(
-						fmt.Sprintf("%d",
-							m.utxoSelectedTotal))
-				}
-				m.subview = svOnChainSend
-				return m, nil
-			}
-		} else if m.onChainTxFocus == 1 &&
-			m.utxoCursor < len(m.utxos) {
-			u := m.utxos[m.utxoCursor]
-			label := u.Address
-			if len(label) > 14 {
-				label = label[:12] + ".."
-			}
-			m.utxoLabelEditing = false
-			m.contentFocus = 0
-			m.findOrOpenTab(tabUtxoDetail, label,
-				m.utxoCursor, secOnChain)
-		} else if m.onChainTxFocus == 2 &&
-			m.onChainTxCursor < len(m.onChainTxs) {
-			tx := m.onChainTxs[m.onChainTxCursor]
-			label := tx.Label
-			if len(label) > 14 {
-				label = label[:12] + ".."
-			}
-			m.findOrOpenTab(tabOnChainTx, label,
-				m.onChainTxCursor, secOnChain)
 		}
 	}
 	return m, nil
@@ -2006,15 +1951,12 @@ func (m Model) previewSection(
 ) (tea.Model, tea.Cmd) {
 	switch sec {
 	case secWallet:
-		m.rebuildTxTable()
 		return m,
 			fetchPaymentHistoryCmd(m.lndClient)
 	case secOnChain:
 		return m, tea.Batch(
 			listUnspentCmd(m.lndClient),
 			fetchOnChainTxCmd(m.lndClient))
-	case secChannels:
-		m.rebuildChannelTable()
 	}
 	return m, nil
 }
@@ -2031,6 +1973,15 @@ func (m Model) handleTabBarKey(
 		return m, tea.Quit
 
 	case "down", "j":
+		// Don't enter content on view-only tabs
+		if m.activeTab > 0 &&
+			m.activeTab < len(tabs) {
+			switch tabs[m.activeTab].Kind {
+			case tabPayment, tabOnChainTx,
+				tabUtxoDetail:
+				return m, nil
+			}
+		}
 		m.focusContent()
 		m.contentFocus = 0
 		if m.activeTab == 0 {
@@ -2081,6 +2032,15 @@ func (m Model) handleTabBarKey(
 		if m.tabCursorX == 1 && m.activeTab > 0 {
 			return m.closeTab(m.activeTab)
 		}
+		// Don't enter content on view-only tabs
+		if m.activeTab > 0 &&
+			m.activeTab < len(tabs) {
+			switch tabs[m.activeTab].Kind {
+			case tabPayment, tabOnChainTx,
+				tabUtxoDetail:
+				return m, nil
+			}
+		}
 		m.focusContent()
 		m.contentFocus = 0
 		tab := tabs[m.activeTab]
@@ -2091,6 +2051,9 @@ func (m Model) handleTabBarKey(
 		return m, nil
 
 	case "backspace":
+		if m.activeTab > 0 {
+			return m.closeTab(m.activeTab)
+		}
 		m.focusSidebar()
 		m.activeTab = 0
 		return m, nil
@@ -2118,7 +2081,7 @@ func (m Model) closeTab(
 		m.subview = svNone
 	case tabUtxoDetail:
 		m.subview = svNone
-		m.utxoLabelEditing = false
+		m.closeLabelPopup()
 	case tabSend:
 		m.resetSendState()
 		m.subview = svNone
@@ -2243,26 +2206,12 @@ func (m Model) handleGenericSubviewKey(
 func (m Model) handleViewOnlyKey(
 	key string, backSubview wSubview,
 ) (tea.Model, tea.Cmd) {
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "left", "h":
-		m.focusSidebar()
-		return m, nil
-	case "up", "k":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "backspace":
-		if backSubview != svNone {
-			m.subview = backSubview
-			return m, nil
-		}
-		return m.closeTab(m.activeTab)
-	}
+	// View-only tabs: user stays on tab bar,
+	// no content navigation. If we somehow get
+	// content focus, bounce back to tab bar.
+	m.focusTabBar()
+	m.tabCursorX = 0
+	m.activeTab = m.findFlowTab()
 	return m, nil
 }
 
@@ -2528,16 +2477,35 @@ func (m Model) handlePaste(
 		} else if m.ocSendStep == 1 && !m.ocSendAll {
 			m.ocSendAmtInput, cmd =
 				m.ocSendAmtInput.Update(msg)
-		} else if m.ocSendStep == 4 {
+		} else if m.ocSendStep == 3 {
+			m.ocSendLabelInput, cmd =
+				m.ocSendLabelInput.Update(msg)
+		} else if m.ocSendStep == 5 {
 			m.ocCustomFeeInput, cmd =
 				m.ocCustomFeeInput.Update(msg)
 		}
 		return m, cmd
 	}
+
+	// Tab-based paste routing (no subview set)
+	tabs := m.effectiveTabs()
+	idx := m.activeTab
+	if idx > 0 && idx < len(tabs) {
+		tab := tabs[idx]
+		switch tab.Kind {
+		case tabUtxoDetail:
+			// Legacy — keep for safety
+			return m, nil
+		}
+	}
+
+	// UTXO label popup paste
+	if m.utxoLabelEditing && !m.utxoLabelOnBtn {
+		var cmd tea.Cmd
+		m.utxoLabelInput, cmd =
+			m.utxoLabelInput.Update(msg)
+		return m, cmd
+	}
+
 	return m, nil
 }
-
-// Unused import guard
-var _ = theme.Value
-var _ = strings.TrimSpace
-var _ = logger.TUI

@@ -6,10 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/installer"
@@ -18,6 +16,14 @@ import (
 )
 
 type wSubview int
+
+// ── TUI layout constants ────────────────────────────────
+// Change these to resize the entire TUI frame. All widths
+// and heights derive from these values.
+const (
+	tuiWidth  = 82
+	tuiHeight = 34
+)
 
 const (
 	svNone wSubview = iota
@@ -361,10 +367,6 @@ type Model struct {
 	hubNameInput    textinput.Model
 	syncDeviceInput textinput.Model
 
-	// Tables
-	channelTable table.Model
-	txTable      table.Model
-
 	// Receive state
 	recvButtonIdx   int
 	recvPayReq      string
@@ -386,8 +388,12 @@ type Model struct {
 	onChainSendError string
 	utxos            []lndrpc.UTXO
 	utxoCursor       int
-	utxoLabelInput   textinput.Model
-	utxoLabelEditing bool
+	// UTXO pencil icon + label edit popup
+	utxoPencilFocused bool            // true when ✎ icon is focused
+	utxoLabelEditing  bool            // true when label popup is open
+	utxoLabelInput    textinput.Model // label edit field in popup
+	utxoLabelOnBtn    bool            // true when on button row
+	utxoLabelBtnIdx   int             // 0=Save, 1=Cancel
 	// Coin control: UTXO selection
 	utxoSelected      map[int]bool // keyed by UTXO index
 	utxoSelectedTotal int64        // running sat total
@@ -401,9 +407,10 @@ type Model struct {
 	// On-chain send flow
 	ocSendAddrInput  textinput.Model
 	ocSendAmtInput   textinput.Model
+	ocSendLabelInput textinput.Model
 	ocCustomFeeInput textinput.Model
 	ocSendAll        bool
-	ocSendStep       int // 0=addr, 1=amount, 2=max btn, 3=fee tiers, 4=custom fee, 5=buttons
+	ocSendStep       int // 0=addr, 1=amount, 2=max btn, 3=label, 4=fee tiers, 5=custom fee, 6=buttons
 	ocFeeTiers       [4]feeTier
 	ocSelectedTier   int   // 0=1sat, 1=2sat, 2=3sat, 3=Custom
 	ocConfirmFee     int64 // precise fee from LND
@@ -411,6 +418,7 @@ type Model struct {
 	ocSendAddrVal    string
 	ocSendAmtVal     int64
 	ocSendFeeRate    int64
+	ocSendLabelVal   string
 
 	// On-chain transaction history
 	onChainTxs      []lndrpc.OnChainTx
@@ -435,56 +443,6 @@ type Model struct {
 	payHistoryCursor int
 }
 
-func newChannelTable() table.Model {
-	cols := []table.Column{
-		{Title: "", Width: 2},
-		{Title: "Name", Width: 16},
-		{Title: "Local", Width: 10},
-		{Title: "Remote", Width: 10},
-		{Title: "Capacity", Width: 10},
-	}
-	t := table.New(
-		table.WithColumns(cols),
-		table.WithRows([]table.Row{}),
-		table.WithHeight(10),
-		table.WithFocused(false))
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).Bold(false)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).Bold(false)
-	t.SetStyles(s)
-	return t
-}
-
-func newTxTable() table.Model {
-	cols := []table.Column{
-		{Title: "", Width: 2},
-		{Title: "Dir", Width: 6},
-		{Title: "Amount", Width: 14},
-		{Title: "Memo", Width: 20},
-		{Title: "Date", Width: 10},
-	}
-	t := table.New(
-		table.WithColumns(cols),
-		table.WithRows([]table.Row{}),
-		table.WithHeight(10),
-		table.WithFocused(false))
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).Bold(false)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).Bold(false)
-	t.SetStyles(s)
-	return t
-}
-
 func NewModel(
 	cfg *config.AppConfig, version string,
 ) Model {
@@ -496,8 +454,6 @@ func NewModel(
 		cfg: cfg, lndClient: client, version: version,
 		subview: svNone, fetchInFlight: true,
 		nav:          NewNavSidebar(),
-		channelTable: newChannelTable(),
-		txTable:      newTxTable(),
 		utxoSelected: make(map[int]bool),
 	}
 }
@@ -509,9 +465,7 @@ func NewTestModel(
 	m := Model{
 		cfg: cfg, version: version,
 		subview: svNone, fetchInFlight: true,
-		nav:          NewNavSidebar(),
-		channelTable: newChannelTable(),
-		txTable:      newTxTable(),
+		nav: NewNavSidebar(),
 	}
 	m.cfgStore = store
 	m.utxoSelected = make(map[int]bool)
@@ -926,64 +880,4 @@ func fetchOnChainTxCmd(
 		txs, err := client.GetTransactions()
 		return onChainTxMsg{txs: txs, err: err}
 	}
-}
-
-func (m *Model) rebuildChannelTable() {
-	if m.status == nil {
-		m.channelTable.SetRows([]table.Row{})
-		return
-	}
-	var rows []table.Row
-	for _, ch := range m.status.channels {
-		dot := "●"
-		if !ch.Active {
-			dot = "○"
-		}
-		if ch.Pending {
-			dot = "◌"
-		}
-		name := ch.PeerAlias
-		if name == "" && len(ch.RemotePubkey) > 12 {
-			name = ch.RemotePubkey[:12] + ".."
-		}
-		rows = append(rows, table.Row{
-			dot, name,
-			formatSatsCompact(ch.LocalBalance),
-			formatSatsCompact(ch.RemoteBalance),
-			formatSatsCompact(ch.Capacity)})
-	}
-	m.channelTable.SetRows(rows)
-}
-
-func (m *Model) rebuildTxTable() {
-	var rows []table.Row
-	for _, entry := range m.payHistory {
-		var dot string
-		switch entry.Status {
-		case "FAILED":
-			dot = "✗"
-		case "EXPIRED":
-			dot = "○"
-		case "IN_FLIGHT", "OPEN":
-			dot = "◌"
-		default:
-			dot = "●"
-		}
-		dir := "↑ sent"
-		if entry.IsIncoming {
-			dir = "↓ recv"
-		}
-		amt := formatSats(entry.AmountSats) + " sat"
-		memo := entry.Memo
-		if len(memo) > 18 {
-			memo = memo[:18] + ".."
-		}
-		if memo == "" {
-			memo = "—"
-		}
-		ts := formatTimestamp(entry.CreationDate)
-		rows = append(rows, table.Row{
-			dot, dir, amt, memo, ts})
-	}
-	m.txTable.SetRows(rows)
 }

@@ -4,9 +4,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/lipgloss/v2"
-
-	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
 // ── Validators ───────────────────────────────────────────
@@ -91,22 +88,6 @@ type errInvalidChar struct{}
 func (errInvalidChar) Error() string { return "invalid character" }
 
 // ── Input styles ─────────────────────────────────────────
-
-func inputPromptStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-}
-
-func inputTextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-}
-
-func inputPlaceholderStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-}
-
-func inputCursorStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-}
 
 func applyInputStyles(ti *textinput.Model) {
 	s := textinput.DefaultStyles(true) // true = dark background
@@ -236,6 +217,18 @@ func newOnChainAmtInput() textinput.Model {
 	return ti
 }
 
+func newOCSendLabelInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "optional label"
+	ti.CharLimit = 64
+	ti.SetWidth(40)
+	ti.Validate = validatePrintableASCII
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Blur()
+	return ti
+}
+
 func newCustomFeeInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "sat/vB"
@@ -271,12 +264,23 @@ func newUtxoLabelInput(current string) textinput.Model {
 	return ti
 }
 
+// newDetailField creates a textinput for displaying a
+// value in a detail pane. The field is full-width and
+// scrollable. All fields start blurred.
+func newDetailField(value string, w int) textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.CharLimit = 0 // no limit
+	ti.SetWidth(w)
+	applyInputStyles(&ti)
+	ti.SetValue(value)
+	ti.Blur()
+	return ti
+}
+
 // ── Helpers ──────────────────────────────────────────────
 
 // syncthingIDValue returns the uppercased value of the syncthing input.
 func syncthingIDValue(ti textinput.Model) string {
 	return strings.ToUpper(ti.Value())
 }
-
-// Unused import guard for theme — used by styles referencing the dark theme.
-var _ = theme.Value
