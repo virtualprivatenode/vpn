@@ -19,10 +19,9 @@ func (m Model) systemOverview(w, h int) string {
 		boxW = 30
 	}
 
-	border := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+	border := theme.AddonBorderNormal
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
+		Foreground(theme.ColorPrimary).
 		Bold(true)
 
 	// ── Fixed header (version + buttons) ─────────
@@ -35,7 +34,7 @@ func (m Model) systemOverview(w, h int) string {
 		centerPad(
 			lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("220")).
+				Foreground(theme.ColorAccent).
 				Render(verText), w))
 
 	if m.latestVersion != "" &&
@@ -45,7 +44,7 @@ func (m Model) systemOverview(w, h int) string {
 		headerLines = append(headerLines,
 			centerPad(
 				lipgloss.NewStyle().
-					Foreground(lipgloss.Color("34")).
+					Foreground(theme.ColorUpdate).
 					Render(updateText), w))
 	}
 
@@ -128,7 +127,7 @@ func (m Model) systemOverview(w, h int) string {
 		style := theme.Value
 		if isSelected {
 			prefix = "▸"
-			style = navActiveStyle
+			style = theme.NavActive
 		}
 
 		svcLine := " " + prefix + " " + dot + " " +

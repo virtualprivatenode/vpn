@@ -144,10 +144,7 @@ func (m Model) handleReceiveWaitingKey(
 		}
 		if m.recvButtonIdx == 1 &&
 			m.recvPayReq != "" {
-			m.urlTarget = m.recvPayReq
-			m.urlReturnTo = svReceiveWaiting
-			m.subview = svFullURL
-			return m, nil
+			return m, showInvoiceCmd(m.recvPayReq)
 		}
 	}
 	return m, nil

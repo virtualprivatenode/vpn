@@ -109,8 +109,7 @@ func (m Model) viewMain() string {
 		contentLines = contentLines[:contentBodyH]
 	}
 
-	border := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+	border := theme.FrameBorder
 
 	// ── Build frame ───────────────────────────────
 	var output []string
@@ -244,14 +243,14 @@ func (m Model) renderTabBar(maxW int) string {
 
 		var s string
 		if isCursor && m.tabCursorX == 1 {
-			s = navItemStyle.Render(" "+label+" ") +
-				navActiveStyle.Render("✕") + " "
+			s = theme.NavItem.Render(" "+label+" ") +
+				theme.NavActive.Render("✕") + " "
 		} else if isCursor && m.tabCursorX == 0 {
-			s = navActiveStyle.Render(" "+label+" ") +
+			s = theme.NavActive.Render(" "+label+" ") +
 				"✕ "
 		} else {
 			s = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("245")).
+				Foreground(theme.ColorBorder).
 				Render(" " + label + " ✕ ")
 		}
 
@@ -341,7 +340,7 @@ func (m Model) renderTabBar(maxW int) string {
 	if needLeftArrow {
 		parts = append(parts,
 			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("245")).
+				Foreground(theme.ColorBorder).
 				Render("◀ "))
 	}
 
@@ -352,7 +351,7 @@ func (m Model) renderTabBar(maxW int) string {
 	if needRightArrow {
 		parts = append(parts,
 			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("245")).
+				Foreground(theme.ColorBorder).
 				Render(" ▶"))
 	}
 
