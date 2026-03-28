@@ -66,7 +66,7 @@ func (m Model) systemOverview(w, h int) string {
 	headerLines = append(headerLines,
 		renderButtonsWithGray(
 			btnLabels, m.btnIdx,
-			isFocused && m.contentFocus == 1, w,
+			isFocused && m.contentFocus == 0, w,
 			1, !hasUpdate))
 	headerLines = append(headerLines, "")
 
@@ -120,7 +120,7 @@ func (m Model) systemOverview(w, h int) string {
 		}
 
 		isSelected := isFocused &&
-			m.contentFocus == 0 &&
+			m.contentFocus == 1 &&
 			m.svcCursor == i
 
 		prefix := " "
@@ -354,7 +354,7 @@ func (m Model) systemOverview(w, h int) string {
 	vpRendered := renderViewport(
 		midContent, w, vpH, cursorLine,
 		len(midLines),
-		m.contentFocus == 0 && len(names) > 0)
+		m.contentFocus == 1 && len(names) > 0)
 
 	// ── Assemble output ──────────────────────────
 	return header + "\n" + vpRendered

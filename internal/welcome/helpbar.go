@@ -102,7 +102,18 @@ func (m Model) currentBindings() []key.Binding {
 
 	// Tab bar focused
 	if m.tabFocused {
-		return newTabBarBindings().ShortHelp()
+		viewOnly := false
+		onTab := m.activeTab > 0
+		tabs := m.effectiveTabs()
+		if m.activeTab > 0 && m.activeTab < len(tabs) {
+			switch tabs[m.activeTab].Kind {
+			case tabPayment, tabOnChainTx,
+				tabUtxoDetail:
+				viewOnly = true
+			}
+		}
+		return newTabBarBindings(viewOnly, onTab).
+			ShortHelp()
 	}
 
 	// Detail tab content (view-only)
@@ -120,7 +131,7 @@ func (m Model) currentBindings() []key.Binding {
 			if isCloseSubview(m.subview) {
 				break // fall through to subview switch
 			}
-			return newChannelsHomeBindings(
+			return newChannelDetailBindings(
 				hasTabs, m.contentFocus == 1).
 				ShortHelp()
 		}
@@ -171,7 +182,7 @@ func (m Model) currentBindings() []key.Binding {
 		return newOCSendAmountBindings(hasTabs).
 			ShortHelp()
 	case svOCSendConfirm:
-		return newOCSendAmountBindings(hasTabs).
+		return newOCSendConfirmBindings(hasTabs).
 			ShortHelp()
 	case svOCSendBroadcast:
 		return newWaitingBindings().ShortHelp()
@@ -216,7 +227,7 @@ func (m Model) currentBindings() []key.Binding {
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svOnChainReceive:
-		return newRecvWaitingBindings(hasTabs).
+		return newOCReceiveBindings(hasTabs).
 			ShortHelp()
 	}
 
@@ -226,20 +237,21 @@ func (m Model) currentBindings() []key.Binding {
 	case secChannels:
 		return newChannelsHomeBindings(
 			hasTabs,
-			m.contentFocus == 1).ShortHelp()
+			m.contentFocus == 0).ShortHelp()
 	case secWallet:
 		return newWalletHomeBindings(
 			hasTabs,
-			m.contentFocus == 1).ShortHelp()
+			m.contentFocus == 0).ShortHelp()
 	case secOnChain:
 		return newOnChainHomeBindings(hasTabs,
-			m.onChainTxFocus).ShortHelp()
+			m.contentFocus,
+			m.utxoPencilFocused).ShortHelp()
 	case secAddons:
 		return newAddonsHomeBindings(hasTabs).
 			ShortHelp()
 	case secSystem:
 		return newSystemHomeBindings(hasTabs,
-			m.contentFocus == 0).ShortHelp()
+			m.contentFocus == 1).ShortHelp()
 	}
 
 	return []key.Binding{kQuit}

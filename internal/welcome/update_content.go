@@ -104,7 +104,7 @@ func (m Model) handleReceiveWaitingKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.recvButtonIdx > 0 {
@@ -154,7 +154,7 @@ func (m Model) handleReceivePaidKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "enter", "backspace":
 		m.resetReceiveState()
@@ -171,7 +171,7 @@ func (m Model) handleReceiveExpiredKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "enter", "backspace":
 		m.resetReceiveState()
@@ -253,7 +253,7 @@ func (m Model) handleSendConfirmKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -287,7 +287,7 @@ func (m Model) handleSendConfirmKey(
 func (m Model) handleSendInFlightKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	if key == "q" || key == "ctrl+c" {
+	if key == "ctrl+c" {
 		return m, tea.Quit
 	}
 	return m, nil
@@ -297,7 +297,7 @@ func (m Model) handleSendResultKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "enter", "backspace":
 		m.resetSendState()
@@ -316,7 +316,7 @@ func (m Model) handleChannelOpenKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -582,7 +582,7 @@ func (m Model) handleChannelConfirmKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -620,7 +620,7 @@ func (m Model) handleChannelConfirmKey(
 func (m Model) handleChannelOpeningKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
-	if key == "q" || key == "ctrl+c" {
+	if key == "ctrl+c" {
 		return m, tea.Quit
 	}
 	return m, nil
@@ -630,7 +630,7 @@ func (m Model) handleChannelResultKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "enter", "backspace":
 		m.subview = svNone
@@ -649,7 +649,7 @@ func (m Model) handleChannelFundKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -676,7 +676,7 @@ func (m Model) handleSyncWebUIKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.addonBtnIdx > 0 {
@@ -1280,7 +1280,7 @@ func (m Model) handleOCSendConfirmKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.ocConfirmBtnIdx > 0 {

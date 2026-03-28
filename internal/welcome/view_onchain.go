@@ -63,7 +63,7 @@ func (m Model) onChainOverview(w, h int) string {
 		renderButtons(
 			[]string{"Receive", sendLabel},
 			m.onChainBtnIdx,
-			isFocused && m.onChainTxFocus == 0,
+			isFocused && m.contentFocus == 0,
 			w))
 	headerLines = append(headerLines, "")
 
@@ -109,7 +109,7 @@ func (m Model) onChainOverview(w, h int) string {
 	} else {
 		for i, u := range m.utxos {
 			isSelected := isFocused &&
-				m.onChainTxFocus == 1 &&
+				m.contentFocus == 1 &&
 				m.utxoCursor == i
 			isChecked := m.utxoSelected[i]
 
@@ -274,7 +274,7 @@ func (m Model) onChainOverview(w, h int) string {
 	} else {
 		for i, tx := range m.onChainTxs {
 			isSelected := isFocused &&
-				m.onChainTxFocus == 2 &&
+				m.contentFocus == 2 &&
 				m.onChainTxCursor == i
 
 			// Date
@@ -370,14 +370,14 @@ func (m Model) onChainOverview(w, h int) string {
 		utxoCursorLine,
 		len(utxoMidLines),
 		len(m.utxos) > 0 &&
-			m.onChainTxFocus == 1)
+			m.contentFocus == 1)
 
 	txVPRendered := renderViewport(
 		txMidContent, w, txVPH,
 		m.onChainTxCursor,
 		len(txMidLines),
 		len(m.onChainTxs) > 0 &&
-			m.onChainTxFocus == 2)
+			m.contentFocus == 2)
 
 	return header + "\n" +
 		utxoHeader + "\n" +

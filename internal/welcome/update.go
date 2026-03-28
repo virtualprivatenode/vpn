@@ -375,7 +375,7 @@ func (m Model) handleChannelHistoryKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -404,7 +404,7 @@ func (m Model) handleOCReceiveTabKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -443,26 +443,19 @@ func (m Model) handleChannelDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
 		return m, nil
 	case "up", "k":
-		if m.contentFocus == 1 {
-			m.contentFocus = 0
-			return m, nil
-		}
 		if m.hasDetailTabs() {
+			m.contentFocus = 0
 			m.focusTabBar()
 			m.tabCursorX = 0
 			return m, nil
 		}
 	case "down", "j":
-		if m.contentFocus == 0 {
-			m.contentFocus = 1
-			return m, nil
-		}
 		return m, nil
 	case "enter":
 		if m.contentFocus == 1 {
@@ -512,7 +505,7 @@ func (m Model) handleCloseFlowKey(
 	case svCloseConfirm:
 		return m.handleCloseConfirmKey(key)
 	case svClosing:
-		if key == "q" || key == "ctrl+c" {
+		if key == "ctrl+c" {
 			return m, tea.Quit
 		}
 		return m, nil
@@ -526,7 +519,7 @@ func (m Model) handleCloseTypeKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -561,7 +554,7 @@ func (m Model) handleCloseConfirmKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		m.focusSidebar()
@@ -607,7 +600,7 @@ func (m Model) handleCloseResultKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "enter", "backspace":
 		m.subview = svNone
@@ -757,7 +750,7 @@ func (m Model) handleOnChainTabKey(
 	case svOCSendConfirm:
 		return m.handleOCSendConfirmKey(key)
 	case svOCSendBroadcast:
-		if key == "q" || key == "ctrl+c" {
+		if key == "ctrl+c" {
 			return m, tea.Quit
 		}
 		return m, nil
@@ -770,7 +763,7 @@ func (m Model) handlePairingTabKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.pairingButtonIdx > 0 {
@@ -873,7 +866,7 @@ func (m Model) handleLndHubCreatedKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.addonBtnIdx > 0 {
@@ -965,11 +958,10 @@ func (m Model) handleSectionHomeKey(
 	}
 
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "backspace":
 		m.focusSidebar()
-		m.contentFocus = 0
 		return m, nil
 	}
 
@@ -996,25 +988,22 @@ func (m Model) handleChannelsHomeKey(
 ) (tea.Model, tea.Cmd) {
 	switch key {
 	case "left", "h":
-		if m.contentFocus == 1 && m.btnIdx > 0 {
+		if m.contentFocus == 0 && m.btnIdx > 0 {
 			m.btnIdx--
 			return m, nil
 		}
 		m.focusSidebar()
-		m.contentFocus = 0
 		return m, nil
 	case "up", "k":
 		if m.contentFocus == 1 {
-			m.contentFocus = 0
-			if m.status != nil &&
-				len(m.status.channels) > 0 {
-				m.chanCursor =
-					len(m.status.channels) - 1
-			}
-		} else if m.contentFocus == 0 {
 			if m.chanCursor > 0 {
 				m.chanCursor--
-			} else if m.hasDetailTabs() {
+			} else {
+				m.contentFocus = 0
+				m.btnIdx = 0
+			}
+		} else if m.contentFocus == 0 {
+			if m.hasDetailTabs() {
 				m.focusTabBar()
 				m.tabCursorX = 0
 				m.activeTab = 1
@@ -1023,20 +1012,23 @@ func (m Model) handleChannelsHomeKey(
 	case "down", "j":
 		if m.contentFocus == 0 {
 			if m.status != nil &&
+				len(m.status.channels) > 0 {
+				m.contentFocus = 1
+				m.chanCursor = 0
+			}
+		} else if m.contentFocus == 1 {
+			if m.status != nil &&
 				m.chanCursor <
 					len(m.status.channels)-1 {
 				m.chanCursor++
-			} else {
-				m.contentFocus = 1
-				m.btnIdx = 0
 			}
 		}
 	case "right", "l":
-		if m.contentFocus == 1 && m.btnIdx < 1 {
+		if m.contentFocus == 0 && m.btnIdx < 1 {
 			m.btnIdx++
 		}
 	case "enter":
-		if m.contentFocus == 0 {
+		if m.contentFocus == 1 {
 			if m.status != nil &&
 				len(m.status.channels) > 0 &&
 				m.chanCursor <
@@ -1055,7 +1047,7 @@ func (m Model) handleChannelsHomeKey(
 				m.findOrOpenTab(tabChannel, label,
 					m.chanCursor, secChannels)
 			}
-		} else if m.contentFocus == 1 {
+		} else if m.contentFocus == 0 {
 			switch m.btnIdx {
 			case 0:
 				return m.startChannelOpenCmd()
@@ -1079,7 +1071,7 @@ func (m Model) handleWalletHomeKey(
 ) (tea.Model, tea.Cmd) {
 	switch key {
 	case "left", "h":
-		if m.contentFocus == 1 {
+		if m.contentFocus == 0 {
 			if m.btnIdx > 0 {
 				m.btnIdx--
 				return m, nil
@@ -1088,14 +1080,14 @@ func (m Model) handleWalletHomeKey(
 		m.focusSidebar()
 		return m, nil
 	case "up", "k":
-		if m.contentFocus == 0 {
+		if m.contentFocus == 1 {
 			if m.payHistoryCursor > 0 {
 				m.payHistoryCursor--
 			} else {
-				m.contentFocus = 1
+				m.contentFocus = 0
 				m.btnIdx = 0
 			}
-		} else if m.contentFocus == 1 {
+		} else if m.contentFocus == 0 {
 			if m.hasDetailTabs() {
 				m.focusTabBar()
 				m.tabCursorX = 0
@@ -1104,23 +1096,23 @@ func (m Model) handleWalletHomeKey(
 			}
 		}
 	case "down", "j":
-		if m.contentFocus == 1 {
-			m.contentFocus = 0
+		if m.contentFocus == 0 {
+			m.contentFocus = 1
 			m.payHistoryCursor = 0
-		} else if m.contentFocus == 0 {
+		} else if m.contentFocus == 1 {
 			if m.payHistoryCursor <
 				len(m.payHistory)-1 {
 				m.payHistoryCursor++
 			}
 		}
 	case "right", "l":
-		if m.contentFocus == 1 {
+		if m.contentFocus == 0 {
 			if m.btnIdx < 2 {
 				m.btnIdx++
 			}
 		}
 	case "enter":
-		if m.contentFocus == 0 &&
+		if m.contentFocus == 1 &&
 			len(m.payHistory) > 0 {
 			entry :=
 				m.payHistory[m.payHistoryCursor]
@@ -1139,7 +1131,7 @@ func (m Model) handleWalletHomeKey(
 			}
 			m.findOrOpenTab(tabPayment, label,
 				m.payHistoryCursor, secWallet)
-		} else if m.contentFocus == 1 {
+		} else if m.contentFocus == 0 {
 			switch m.btnIdx {
 			case 0:
 				if m.cfg.HasLND() &&
@@ -1290,7 +1282,7 @@ func (m Model) handleOnChainContentKey(
 ) (tea.Model, tea.Cmd) {
 	if m.subview == svOnChainResult {
 		switch key {
-		case "q", "ctrl+c":
+		case "ctrl+c":
 			return m, tea.Quit
 		case "enter", "backspace":
 			if fromTab {
@@ -1320,19 +1312,19 @@ func (m Model) handleOnChainContentKey(
 	}
 
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "backspace":
 		if fromTab {
 			return m.closeTab(m.activeTab)
 		}
 	case "up", "k":
-		switch m.onChainTxFocus {
+		switch m.contentFocus {
 		case 2:
 			if m.onChainTxCursor > 0 {
 				m.onChainTxCursor--
 			} else {
-				m.onChainTxFocus = 1
+				m.contentFocus = 1
 				if len(m.utxos) > 0 {
 					m.utxoCursor =
 						len(m.utxos) - 1
@@ -1343,7 +1335,7 @@ func (m Model) handleOnChainContentKey(
 				m.utxoCursor--
 				m.utxoPencilFocused = false
 			} else {
-				m.onChainTxFocus = 0
+				m.contentFocus = 0
 				m.onChainBtnIdx = 0
 				m.utxoPencilFocused = false
 			}
@@ -1360,14 +1352,14 @@ func (m Model) handleOnChainContentKey(
 			}
 		}
 	case "down", "j":
-		switch m.onChainTxFocus {
+		switch m.contentFocus {
 		case 0:
 			if len(m.utxos) > 0 {
-				m.onChainTxFocus = 1
+				m.contentFocus = 1
 				m.utxoCursor = 0
 				m.utxoPencilFocused = false
 			} else if len(m.onChainTxs) > 0 {
-				m.onChainTxFocus = 2
+				m.contentFocus = 2
 				m.onChainTxCursor = 0
 			}
 		case 1:
@@ -1375,7 +1367,7 @@ func (m Model) handleOnChainContentKey(
 				m.utxoCursor++
 				m.utxoPencilFocused = false
 			} else if len(m.onChainTxs) > 0 {
-				m.onChainTxFocus = 2
+				m.contentFocus = 2
 				m.onChainTxCursor = 0
 				m.utxoPencilFocused = false
 			}
@@ -1385,12 +1377,12 @@ func (m Model) handleOnChainContentKey(
 			}
 		}
 	case "right", "l":
-		if m.onChainTxFocus == 0 &&
+		if m.contentFocus == 0 &&
 			m.onChainBtnIdx < 1 {
 			m.onChainBtnIdx++
 		}
 		// UTXO row: right arrow focuses pencil icon
-		if m.onChainTxFocus == 1 &&
+		if m.contentFocus == 1 &&
 			m.utxoCursor < len(m.utxos) &&
 			!m.utxoPencilFocused {
 			m.utxoPencilFocused = true
@@ -1398,12 +1390,12 @@ func (m Model) handleOnChainContentKey(
 		}
 	case "left", "h":
 		// UTXO row: left arrow unfocuses pencil
-		if m.onChainTxFocus == 1 &&
+		if m.contentFocus == 1 &&
 			m.utxoPencilFocused {
 			m.utxoPencilFocused = false
 			return m, nil
 		}
-		if m.onChainTxFocus == 0 &&
+		if m.contentFocus == 0 &&
 			m.onChainBtnIdx > 0 {
 			m.onChainBtnIdx--
 		} else {
@@ -1411,20 +1403,20 @@ func (m Model) handleOnChainContentKey(
 		}
 		return m, nil
 	case "space":
-		if m.onChainTxFocus == 1 &&
+		if m.contentFocus == 1 &&
 			m.utxoCursor < len(m.utxos) {
 			m.toggleUtxoSelection(m.utxoCursor)
 		}
 		return m, nil
 	case "enter":
-		if m.onChainTxFocus == 0 {
+		if m.contentFocus == 0 {
 			switch m.onChainBtnIdx {
 			case 0:
 				m.ocRecvAddress = ""
 				m.ocRecvError = ""
 				m.subview = svOnChainReceive
-				m.openFlowTab(tabOCReceive,
-					"⛓ Receive", secOnChain)
+				m.findOrOpenTab(tabOCReceive,
+					"⛓ Receive", 0, secOnChain)
 				return m,
 					getNewAddressCmd(m.lndClient)
 			case 1:
@@ -1442,7 +1434,7 @@ func (m Model) handleOnChainContentKey(
 					"⛓ Send", secOnChain)
 				return m, nil
 			}
-		} else if m.onChainTxFocus == 1 &&
+		} else if m.contentFocus == 1 &&
 			m.utxoCursor < len(m.utxos) {
 			if m.utxoPencilFocused {
 				// Open label edit popup
@@ -1458,7 +1450,7 @@ func (m Model) handleOnChainContentKey(
 			m.contentFocus = 0
 			m.findOrOpenTab(tabUtxoDetail, label,
 				m.utxoCursor, secOnChain)
-		} else if m.onChainTxFocus == 2 &&
+		} else if m.contentFocus == 2 &&
 			m.onChainTxCursor < len(m.onChainTxs) {
 			tx := m.onChainTxs[m.onChainTxCursor]
 			label := tx.Label
@@ -1651,7 +1643,7 @@ func (m Model) handleSystemHomeKey(
 
 	switch key {
 	case "left", "h":
-		if m.contentFocus == 1 && m.btnIdx > 0 {
+		if m.contentFocus == 0 && m.btnIdx > 0 {
 			m.btnIdx--
 		} else {
 			m.focusSidebar()
@@ -1659,17 +1651,14 @@ func (m Model) handleSystemHomeKey(
 		return m, nil
 	case "up", "k":
 		if m.contentFocus == 1 {
-			m.contentFocus = 0
-			if m.svcCursor >= m.svcCount() {
-				m.svcCursor = m.svcCount() - 1
-			}
-			if m.svcCursor < 0 {
-				m.svcCursor = 0
-			}
-		} else if m.contentFocus == 0 {
 			if m.svcCursor > 0 {
 				m.svcCursor--
-			} else if m.hasDetailTabs() {
+			} else {
+				m.contentFocus = 0
+				m.btnIdx = 0
+			}
+		} else if m.contentFocus == 0 {
+			if m.hasDetailTabs() {
 				m.focusTabBar()
 				m.tabCursorX = 0
 				m.activeTab = 1
@@ -1678,33 +1667,35 @@ func (m Model) handleSystemHomeKey(
 		}
 	case "down", "j":
 		if m.contentFocus == 0 {
+			if m.svcCount() > 0 {
+				m.contentFocus = 1
+				m.svcCursor = 0
+			}
+		} else if m.contentFocus == 1 {
 			if m.svcCursor < m.svcCount()-1 {
 				m.svcCursor++
-			} else {
-				m.contentFocus = 1
-				m.btnIdx = 0
 			}
 		}
 	case "right", "l":
-		if m.contentFocus == 1 {
+		if m.contentFocus == 0 {
 			if m.btnIdx < maxBtn {
 				m.btnIdx++
 			}
 		}
 	case "r":
-		if m.contentFocus == 0 {
+		if m.contentFocus == 1 {
 			m.svcConfirm = "Restart"
 		}
 	case "s":
-		if m.contentFocus == 0 {
+		if m.contentFocus == 1 {
 			m.svcConfirm = "Stop"
 		}
 	case "a":
-		if m.contentFocus == 0 {
+		if m.contentFocus == 1 {
 			m.svcConfirm = "Start"
 		}
 	case "enter":
-		if m.contentFocus == 1 {
+		if m.contentFocus == 0 {
 			switch m.btnIdx {
 			case 0:
 				m.sysConfirm = "Update packages"
@@ -1726,7 +1717,7 @@ func (m Model) handleSyncDetailKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.addonFocus == 0 && m.addonBtnIdx > 0 {
@@ -1798,7 +1789,7 @@ func (m Model) handleLndhubManageKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "left", "h":
 		if m.addonFocus == 0 && m.addonBtnIdx > 0 {
@@ -1877,7 +1868,7 @@ func (m Model) handleSidebarKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "up", "k":
 		if m.nav.Cursor == 0 && m.hasDetailTabs() {
@@ -1908,7 +1899,6 @@ func (m Model) handleSidebarKey(
 		m.activeTab = 0
 		m.subview = svNone
 		m.btnIdx = 0
-		m.contentFocus = 0
 		m.tabFocused = false
 		m.tabCursorX = 0
 		m.ensureContentCursor()
@@ -1958,7 +1948,7 @@ func (m Model) handleTabBarKey(
 	tabs := m.effectiveTabs()
 
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 
 	case "down", "j":
@@ -1969,10 +1959,17 @@ func (m Model) handleTabBarKey(
 			case tabPayment, tabOnChainTx,
 				tabUtxoDetail:
 				return m, nil
+			case tabChannel:
+				// Skip dead detail area, go straight
+				// to Close Channel button.
+				if !isCloseSubview(m.subview) {
+					m.focusContent()
+					m.contentFocus = 1
+					return m, nil
+				}
 			}
 		}
 		m.focusContent()
-		m.contentFocus = 0
 		if m.activeTab == 0 {
 			m.subview = svNone
 		}
@@ -1996,7 +1993,6 @@ func (m Model) handleTabBarKey(
 			return m, nil
 		}
 		m.focusSidebar()
-		m.contentFocus = 0
 		m.activeTab = 0
 		m.tabScrollOffset = 0
 		return m, nil
@@ -2028,10 +2024,15 @@ func (m Model) handleTabBarKey(
 			case tabPayment, tabOnChainTx,
 				tabUtxoDetail:
 				return m, nil
+			case tabChannel:
+				if !isCloseSubview(m.subview) {
+					m.focusContent()
+					m.contentFocus = 1
+					return m, nil
+				}
 			}
 		}
 		m.focusContent()
-		m.contentFocus = 0
 		tab := tabs[m.activeTab]
 		if tab.Kind == tabMain {
 			m.subview = svNone
@@ -2175,7 +2176,7 @@ func (m Model) handleGenericSubviewKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	case "backspace":
 		if m.urlReturnTo != svNone {

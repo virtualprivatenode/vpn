@@ -349,7 +349,7 @@ type Model struct {
 	// Navigation
 	nav            NavSidebar
 	contentFocused bool
-	contentFocus   int // 0=primary area, 1=buttons
+	contentFocus   int // 0=buttons, 1+=content zones
 
 	// Tab bar
 	tabs            []openTab
@@ -421,7 +421,6 @@ type Model struct {
 	// On-chain transaction history
 	onChainTxs      []lndrpc.OnChainTx
 	onChainTxCursor int
-	onChainTxFocus  int // 0=buttons, 1=utxo table, 2=tx table
 
 	// Send state
 	sendDecodedValid bool
