@@ -201,18 +201,18 @@ func (m Model) channelsOverview(w, h int) string {
 	header := strings.Join(headerLines, "\n")
 	headerH := len(headerLines)
 
-	// ── Fixed footer (buttons) ───────────────────
-	isOnButton := isFocused && m.contentFocus == 1
-	var footerLines []string
-	footerLines = append(footerLines, "")
-	footerLines = append(footerLines,
+	// ── Buttons (below balance summary) ─────────
+	isOnButton := isFocused && m.contentFocus == 0
+	var btnLines []string
+	btnLines = append(btnLines,
 		renderButtons(
 			[]string{"Open Channel", "History"},
 			m.btnIdx, isOnButton, w))
-	footerLines = append(footerLines, "")
+	btnLines = append(btnLines, "")
+	btnLines = append(btnLines, "")
 
-	footer := strings.Join(footerLines, "\n")
-	footerH := len(footerLines)
+	btnContent := strings.Join(btnLines, "\n")
+	btnH := len(btnLines)
 
 	// ── Scrollable middle (all channel bars) ─────
 	chanCount := len(m.status.channels)
@@ -235,7 +235,7 @@ func (m Model) channelsOverview(w, h int) string {
 
 			isSelected := isFocused &&
 				m.chanCursor == i &&
-				m.contentFocus == 0
+				m.contentFocus == 1
 
 			name := ch.PeerAlias
 			if name == "" {
@@ -320,7 +320,7 @@ func (m Model) channelsOverview(w, h int) string {
 	midContent := strings.Join(midLines, "\n")
 
 	// ── Viewport ─────────────────────────────────
-	vpH := h - headerH - footerH
+	vpH := h - headerH - btnH
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -332,10 +332,10 @@ func (m Model) channelsOverview(w, h int) string {
 	vpRendered := renderViewport(
 		midContent, w, vpH, cursorLine,
 		len(midLines),
-		chanCount > 0 && m.contentFocus == 0)
+		chanCount > 0 && m.contentFocus == 1)
 
 	// ── Assemble output ──────────────────────────
-	return header + "\n" + vpRendered + "\n" + footer
+	return header + "\n" + btnContent + "\n" + vpRendered
 }
 
 // ── Channel detail ───────────────────────────────────────

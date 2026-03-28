@@ -11,8 +11,8 @@ import (
 // Common bindings reused across states
 var (
 	kQuit = key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "quit"))
+		key.WithKeys("ctrl+c"),
+		key.WithHelp("ctrl+c", "quit"))
 	kBack = key.NewBinding(
 		key.WithKeys("backspace"),
 		key.WithHelp("⌫", "back"))
@@ -68,13 +68,14 @@ type tabBarBindings struct {
 	LeftRight key.Binding
 	Down      key.Binding
 	Enter     key.Binding
-	Close     key.Binding
 	Back      key.Binding
 	Quit      key.Binding
 }
 
-func newTabBarBindings() tabBarBindings {
-	return tabBarBindings{
+func newTabBarBindings(
+	viewOnly bool, onTab bool,
+) tabBarBindings {
+	b := tabBarBindings{
 		LeftRight: key.NewBinding(
 			key.WithKeys("left", "right"),
 			key.WithHelp("←→", "tabs")),
@@ -84,21 +85,33 @@ func newTabBarBindings() tabBarBindings {
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select")),
-		Close: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("✕", "close tab")),
 		Back: key.NewBinding(
 			key.WithKeys("backspace"),
 			key.WithHelp("⌫", "sidebar")),
 		Quit: kQuit,
 	}
+	if viewOnly {
+		b.Down.SetEnabled(false)
+		b.Enter.SetEnabled(false)
+	}
+	if onTab {
+		b.Back = key.NewBinding(
+			key.WithKeys("backspace"),
+			key.WithHelp("⌫", "close tab"))
+	}
+	return b
 }
 
 func (b tabBarBindings) ShortHelp() []key.Binding {
-	return []key.Binding{
-		b.LeftRight, b.Down, b.Enter,
-		b.Close, b.Back, b.Quit,
+	binds := []key.Binding{b.LeftRight}
+	if b.Down.Enabled() {
+		binds = append(binds, b.Down)
 	}
+	if b.Enter.Enabled() {
+		binds = append(binds, b.Enter)
+	}
+	binds = append(binds, b.Back, b.Quit)
+	return binds
 }
 
 func (b tabBarBindings) FullHelp() [][]key.Binding {
@@ -166,6 +179,66 @@ func (b channelsHomeBindings) ShortHelp() []key.Binding {
 }
 
 func (b channelsHomeBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
+// ── Channel detail bindings ─────────────────────────────
+
+type channelDetailBindings struct {
+	Down    key.Binding
+	Up      key.Binding
+	Enter   key.Binding
+	Sidebar key.Binding
+	Back    key.Binding
+	Quit    key.Binding
+}
+
+func newChannelDetailBindings(
+	hasTabs bool, onButton bool,
+) channelDetailBindings {
+	b := channelDetailBindings{
+		Down: key.NewBinding(
+			key.WithKeys("down", "j"),
+			key.WithHelp("↓", "close button")),
+		Up: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "tab bar")),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "close channel")),
+		Sidebar: kSidebar,
+		Back: key.NewBinding(
+			key.WithKeys("backspace"),
+			key.WithHelp("⌫", "close tab")),
+		Quit: kQuit,
+	}
+	if !hasTabs {
+		b.Up.SetEnabled(false)
+	}
+	if onButton {
+		b.Down.SetEnabled(false)
+	} else {
+		b.Enter.SetEnabled(false)
+	}
+	return b
+}
+
+func (b channelDetailBindings) ShortHelp() []key.Binding {
+	var binds []key.Binding
+	if b.Down.Enabled() {
+		binds = append(binds, b.Down)
+	}
+	if b.Up.Enabled() {
+		binds = append(binds, b.Up)
+	}
+	if b.Enter.Enabled() {
+		binds = append(binds, b.Enter)
+	}
+	binds = append(binds, b.Sidebar, b.Back, b.Quit)
+	return binds
+}
+
+func (b channelDetailBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }
 
@@ -390,9 +463,7 @@ func newTextInputBindings(hasTabs bool) textInputBindings {
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit")),
+		Quit: kQuit,
 	}
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
@@ -437,9 +508,7 @@ func newTwoFieldBindings(hasTabs bool) twoFieldBindings {
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit")),
+		Quit: kQuit,
 	}
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
@@ -602,7 +671,6 @@ type recvWaitingBindings struct {
 	LeftRight key.Binding
 	Enter     key.Binding
 	Back      key.Binding
-	Sidebar   key.Binding
 	TabBar    key.Binding
 	Quit      key.Binding
 }
@@ -618,9 +686,6 @@ func newRecvWaitingBindings(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select")),
 		Back: kBack,
-		Sidebar: key.NewBinding(
-			key.WithKeys("left"),
-			key.WithHelp("←", "sidebar")),
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
@@ -654,14 +719,13 @@ type onChainHomeBindings struct {
 	UpDown    key.Binding
 	Space     key.Binding
 	Enter     key.Binding
-	Back      key.Binding
 	Sidebar   key.Binding
 	TabBar    key.Binding
 	Quit      key.Binding
 }
 
 func newOnChainHomeBindings(
-	hasTabs bool, focus int,
+	hasTabs bool, focus int, pencilFocused bool,
 ) onChainHomeBindings {
 	b := onChainHomeBindings{
 		LeftRight: key.NewBinding(
@@ -674,7 +738,6 @@ func newOnChainHomeBindings(
 			key.WithKeys("space"),
 			key.WithHelp("space", "select")),
 		Enter:   kEnter,
-		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
@@ -698,6 +761,17 @@ func newOnChainHomeBindings(
 			key.WithHelp("enter", "details"))
 		b.LeftRight.SetEnabled(false)
 		b.Space.SetEnabled(true)
+		if pencilFocused {
+			b.Enter = key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "edit label"))
+			b.LeftRight = key.NewBinding(
+				key.WithKeys("left"),
+				key.WithHelp("←", "UTXO"))
+			b.LeftRight.SetEnabled(true)
+			b.Space.SetEnabled(false)
+			b.UpDown.SetEnabled(false)
+		}
 	} else {
 		b.UpDown = key.NewBinding(
 			key.WithKeys("up", "down"),
@@ -715,12 +789,13 @@ func (b onChainHomeBindings) ShortHelp() []key.Binding {
 	if b.LeftRight.Enabled() {
 		binds = append(binds, b.LeftRight)
 	}
-	binds = append(binds, b.UpDown)
+	if b.UpDown.Enabled() {
+		binds = append(binds, b.UpDown)
+	}
 	if b.Space.Enabled() {
 		binds = append(binds, b.Space)
 	}
-	binds = append(binds, b.Enter,
-		b.Back, b.Sidebar)
+	binds = append(binds, b.Enter, b.Sidebar)
 	if b.TabBar.Enabled() {
 		binds = append(binds, b.TabBar)
 	}
@@ -766,9 +841,7 @@ func newOCSendAmountBindings(
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit")),
+		Quit: kQuit,
 	}
 	b.TabToggle.SetEnabled(false)
 	if !hasTabs {
@@ -790,6 +863,53 @@ func (b ocSendAmountBindings) ShortHelp() []key.Binding {
 }
 
 func (b ocSendAmountBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
+// ── On-chain send confirm bindings ──────────────────────
+
+type ocSendConfirmBindings struct {
+	LeftRight key.Binding
+	Enter     key.Binding
+	Back      key.Binding
+	TabBar    key.Binding
+	Quit      key.Binding
+}
+
+func newOCSendConfirmBindings(
+	hasTabs bool,
+) ocSendConfirmBindings {
+	b := ocSendConfirmBindings{
+		LeftRight: key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←→", "buttons")),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select")),
+		Back: kBack,
+		TabBar: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "tab bar")),
+		Quit: kQuit,
+	}
+	if !hasTabs {
+		b.TabBar.SetEnabled(false)
+	}
+	return b
+}
+
+func (b ocSendConfirmBindings) ShortHelp() []key.Binding {
+	binds := []key.Binding{
+		b.LeftRight, b.Enter, b.Back,
+	}
+	if b.TabBar.Enabled() {
+		binds = append(binds, b.TabBar)
+	}
+	binds = append(binds, b.Quit)
+	return binds
+}
+
+func (b ocSendConfirmBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }
 
@@ -942,9 +1062,7 @@ func newAmountSelectBindings(
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit")),
+		Quit: kQuit,
 	}
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
@@ -1006,6 +1124,53 @@ func (b detailTabBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }
 
+// ── On-chain receive bindings ───────────────────────────
+
+type ocReceiveBindings struct {
+	Enter   key.Binding
+	Sidebar key.Binding
+	Back    key.Binding
+	TabBar  key.Binding
+	Quit    key.Binding
+}
+
+func newOCReceiveBindings(
+	hasTabs bool,
+) ocReceiveBindings {
+	b := ocReceiveBindings{
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "new addr")),
+		Sidebar: kSidebar,
+		Back: key.NewBinding(
+			key.WithKeys("backspace"),
+			key.WithHelp("⌫", "close tab")),
+		TabBar: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "tab bar")),
+		Quit: kQuit,
+	}
+	if !hasTabs {
+		b.TabBar.SetEnabled(false)
+	}
+	return b
+}
+
+func (b ocReceiveBindings) ShortHelp() []key.Binding {
+	binds := []key.Binding{
+		b.Enter, b.Sidebar, b.Back,
+	}
+	if b.TabBar.Enabled() {
+		binds = append(binds, b.TabBar)
+	}
+	binds = append(binds, b.Quit)
+	return binds
+}
+
+func (b ocReceiveBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
 // ── Receive input bindings (up/down fields) ──────────────
 
 type recvInputBindings struct {
@@ -1032,9 +1197,7 @@ func newRecvInputBindings(
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit")),
+		Quit: kQuit,
 	}
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
@@ -1083,9 +1246,7 @@ func newSendInputBindings(
 		TabBar: key.NewBinding(
 			key.WithKeys("up", "k"),
 			key.WithHelp("↑", "tab bar")),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit")),
+		Quit: kQuit,
 	}
 	if !hasTabs {
 		b.TabBar.SetEnabled(false)
