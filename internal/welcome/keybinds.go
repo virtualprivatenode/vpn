@@ -20,7 +20,7 @@ var (
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "select"))
 	kSidebar = key.NewBinding(
-		key.WithKeys("left", "h"),
+		key.WithKeys("left"),
 		key.WithHelp("←", "sidebar"))
 	kConfirm = key.NewBinding(
 		key.WithKeys("y"),
@@ -42,13 +42,13 @@ type sidebarBindings struct {
 func newSidebarBindings() sidebarBindings {
 	return sidebarBindings{
 		Up: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑↓", "navigate")),
 		Down: key.NewBinding(
-			key.WithKeys("down", "j"),
+			key.WithKeys("down", "tab"),
 			key.WithHelp("", "")),
 		Enter: key.NewBinding(
-			key.WithKeys("enter", "right", "l"),
+			key.WithKeys("enter", "right"),
 			key.WithHelp("enter", "select")),
 		Quit: kQuit,
 	}
@@ -80,7 +80,7 @@ func newTabBarBindings(
 			key.WithKeys("left", "right"),
 			key.WithHelp("←→", "tabs")),
 		Down: key.NewBinding(
-			key.WithKeys("down", "j"),
+			key.WithKeys("down", "tab"),
 			key.WithHelp("↓", "content")),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
@@ -144,7 +144,7 @@ func newChannelsHomeBindings(
 			key.WithHelp("enter", "details")),
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -198,10 +198,10 @@ func newChannelDetailBindings(
 ) channelDetailBindings {
 	b := channelDetailBindings{
 		Down: key.NewBinding(
-			key.WithKeys("down", "j"),
+			key.WithKeys("down", "tab"),
 			key.WithHelp("↓", "close button")),
 		Up: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
@@ -266,7 +266,7 @@ func newWalletHomeBindings(
 		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -314,7 +314,7 @@ func newAddonsHomeBindings(hasTabs bool) addonsHomeBindings {
 		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -375,7 +375,7 @@ func newSystemHomeBindings(
 		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -461,7 +461,7 @@ func newTextInputBindings(hasTabs bool) textInputBindings {
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -506,7 +506,7 @@ func newTwoFieldBindings(hasTabs bool) twoFieldBindings {
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -549,7 +549,7 @@ func newPayConfirmBindings(hasTabs bool) payConfirmBindings {
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -596,7 +596,7 @@ func newChanConfirmBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -687,7 +687,7 @@ func newRecvWaitingBindings(
 			key.WithHelp("enter", "select")),
 		Back: kBack,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -740,7 +740,7 @@ func newOnChainHomeBindings(
 		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -839,7 +839,7 @@ func newOCSendAmountBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -888,7 +888,7 @@ func newOCSendConfirmBindings(
 			key.WithHelp("enter", "select")),
 		Back: kBack,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -961,7 +961,7 @@ func newAddonDetailBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -1011,7 +1011,7 @@ func newPeerSelectBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -1060,7 +1060,7 @@ func newAmountSelectBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -1097,7 +1097,7 @@ type detailTabBindings struct {
 func newDetailTabBindings(hasTabs bool) detailTabBindings {
 	b := detailTabBindings{
 		Up: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Sidebar: kSidebar,
 		Back: key.NewBinding(
@@ -1146,7 +1146,7 @@ func newOCReceiveBindings(
 			key.WithKeys("backspace"),
 			key.WithHelp("⌫", "close tab")),
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -1195,7 +1195,7 @@ func newRecvInputBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -1244,7 +1244,7 @@ func newSendInputBindings(
 		Back:    kBack,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}
@@ -1326,7 +1326,7 @@ func newChannelHistoryBindings(
 			key.WithHelp("⌫", "close tab")),
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
-			key.WithKeys("up", "k"),
+			key.WithKeys("up"),
 			key.WithHelp("↑", "tab bar")),
 		Quit: kQuit,
 	}

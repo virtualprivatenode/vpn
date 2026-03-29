@@ -63,7 +63,7 @@ func (m Model) onChainOverview(w, h int) string {
 		renderButtons(
 			[]string{"Receive", sendLabel},
 			m.onChainBtnIdx,
-			isFocused && m.contentFocus == 0,
+			isFocused && m.contentFocus() == 0,
 			w))
 	headerLines = append(headerLines, "")
 
@@ -109,14 +109,14 @@ func (m Model) onChainOverview(w, h int) string {
 	} else {
 		for i, u := range m.utxos {
 			isSelected := isFocused &&
-				m.contentFocus == 1 &&
+				m.contentFocus() == 1 &&
 				m.utxoCursor == i
 			isChecked := m.utxoSelected[i]
 
 			// Date from tx lookup
 			dateStr := m.utxoDate(u.Txid)
 			if u.Confirmations == 0 {
-				dateStr = "Unconfirmed"
+				dateStr = "unconfirmed"
 			}
 			dateStr = pad(dateStr, uDateW)
 
@@ -274,12 +274,14 @@ func (m Model) onChainOverview(w, h int) string {
 	} else {
 		for i, tx := range m.onChainTxs {
 			isSelected := isFocused &&
-				m.contentFocus == 2 &&
+				m.contentFocus() == 2 &&
 				m.onChainTxCursor == i
 
 			// Date
-			date := "Unconfirmed"
-			if tx.Confirmations > 0 {
+			date := "unconfirmed"
+			if tx.IsAnchorSweep {
+				date = formatDateShort(tx.Timestamp)
+			} else if tx.Confirmations > 0 {
 				date = formatDateShort(tx.Timestamp)
 			}
 			dateStr := pad(date, tDateW)
@@ -293,6 +295,9 @@ func (m Model) onChainOverview(w, h int) string {
 
 			// Conf indicator (always gray)
 			confIcon := confIndicator(tx.Confirmations)
+			if tx.IsAnchorSweep {
+				confIcon = "–"
+			}
 			confCell := confStyle.Render(
 				" " + pad(confIcon, tConfW-1))
 
@@ -370,14 +375,14 @@ func (m Model) onChainOverview(w, h int) string {
 		utxoCursorLine,
 		len(utxoMidLines),
 		len(m.utxos) > 0 &&
-			m.contentFocus == 1)
+			m.contentFocus() == 1)
 
 	txVPRendered := renderViewport(
 		txMidContent, w, txVPH,
 		m.onChainTxCursor,
 		len(txMidLines),
 		len(m.onChainTxs) > 0 &&
-			m.contentFocus == 2)
+			m.contentFocus() == 2)
 
 	return header + "\n" +
 		utxoHeader + "\n" +
@@ -495,13 +500,13 @@ func (m Model) utxoDetailPane(w int) string {
 
 	confStr := fmt.Sprintf("%d", u.Confirmations)
 	if u.Confirmations == 0 {
-		confStr = "Unconfirmed"
+		confStr = "unconfirmed"
 	}
 	p.field("Confs:     ", confStr)
 
 	dateStr := m.utxoDate(u.Txid)
 	if u.Confirmations == 0 {
-		dateStr = "Unconfirmed"
+		dateStr = "unconfirmed"
 	}
 	p.field("Date:      ", dateStr)
 	p.blank()
@@ -636,11 +641,10 @@ func (m Model) onChainReceivePane(w int) string {
 // Steps:
 //
 //	0 = Address input
-//	1 = Amount input
-//	2 = Max / Send All button
-//	3 = Label input
-//	4 = Fee rate input (sat/vB)
-//	5 = Buttons (Clear / Create Transaction)
+//	1 = Amount input (right arrow → Max button)
+//	2 = Label input
+//	3 = Fee rate input (sat/vB)
+//	4 = Buttons (Clear / Create Transaction)
 func (m Model) onChainSendPane(w, h int) string {
 	isFocused := m.contentFocused && !m.tabFocused
 
@@ -698,46 +702,31 @@ func (m Model) onChainSendPane(w, h int) string {
 				amtVal = formatSats(parsed)
 			}
 		}
+		clearStyle := theme.BtnNormal
+		if amtActive && m.ocMaxFocused {
+			clearStyle = theme.BtnFocused
+		}
 		lines = append(lines,
 			"  "+theme.Value.Render(amtVal+" sats")+
-				"  "+theme.Dim.Render("(max)"))
+				"  "+clearStyle.Render("Clear Max"))
 	} else {
+		maxStyle := theme.BtnNormal
+		if amtActive && m.ocMaxFocused {
+			maxStyle = theme.BtnFocused
+		}
+		maxLabel := "Max"
+		if len(m.utxoSelected) > 0 {
+			maxLabel = fmt.Sprintf("Max (%s)",
+				formatSats(m.utxoSelectedTotal))
+		}
 		lines = append(lines,
-			amtMarker+" "+m.ocSendAmtInput.View())
+			amtMarker+" "+m.ocSendAmtInput.View()+
+				"  "+maxStyle.Render(maxLabel))
 	}
 	lines = append(lines, "")
 
-	// ── Max / Send All button (step 2) ───────────
-	maxActive := isFocused && m.ocSendStep == 2
-	maxLabel := "Max"
-	if len(m.utxoSelected) > 0 && !m.ocSendAll {
-		maxLabel = fmt.Sprintf(
-			"Max (%d UTXOs: %s sats)",
-			len(m.utxoSelected),
-			formatSats(m.utxoSelectedTotal))
-	}
-	if m.ocSendAll {
-		maxLabel = "Clear Max"
-	}
-
-	var maxBtn string
-	switch {
-	case maxActive:
-		maxBtn = theme.BtnFocused.Render(maxLabel)
-	case m.ocSendAll:
-		maxBtn = theme.BtnFocused.Render(maxLabel)
-	default:
-		maxBtn = theme.BtnNormal.Render(maxLabel)
-	}
-	maxMarker := " "
-	if maxActive {
-		maxMarker = theme.NavActive.Render("▸")
-	}
-	lines = append(lines, maxMarker+" "+maxBtn)
-	lines = append(lines, "")
-
-	// ── Label input (step 3) ────────────────────
-	lblActive := isFocused && m.ocSendStep == 3
+	// ── Label input (step 2) ────────────────────
+	lblActive := isFocused && m.ocSendStep == 2
 	lblLabel := theme.Label
 	lblMarker := " "
 	if lblActive {
@@ -751,7 +740,7 @@ func (m Model) onChainSendPane(w, h int) string {
 	lines = append(lines, "")
 
 	// ── Fee rate input (step 4) ──────────────────
-	feeActive := isFocused && m.ocSendStep == 4
+	feeActive := isFocused && m.ocSendStep == 3
 	feeLabelStyle := theme.Label
 	feeMarker := " "
 	if feeActive {
@@ -762,12 +751,13 @@ func (m Model) onChainSendPane(w, h int) string {
 		" "+feeLabelStyle.Render("Fee Rate (sat/vB):"))
 	lines = append(lines,
 		feeMarker+" "+m.ocCustomFeeInput.View())
-	lines = append(lines,
-		"  "+theme.Dim.Render(
-			"1 = slow, 2 = normal, 3 = fast"))
-	lines = append(lines,
-		"  "+theme.Dim.Render(
-			"Visit mempool.space for accurate fees"))
+
+	// Friendly fee reference hints
+	hints := formatFeeHints(m.sendFeeTiers)
+	if hints != "" {
+		lines = append(lines,
+			"  "+theme.Dim.Render(hints))
+	}
 	lines = append(lines, "")
 
 	// ── Transaction preview diagram ──────────────
@@ -836,7 +826,7 @@ func (m Model) onChainSendPane(w, h int) string {
 	}
 
 	// ── Bottom buttons (step 5) ──────────────────
-	btnFocused := isFocused && m.ocSendStep == 5
+	btnFocused := isFocused && m.ocSendStep == 4
 	btnLine := renderButtons(
 		[]string{"Clear", "Create Transaction"},
 		m.ocSendBtnIdx, btnFocused, w)
@@ -1332,15 +1322,24 @@ func (m Model) onChainTxDetailPane(
 ) string {
 	p := newPane(w)
 
-	switch tx.TxType {
-	case "channel_open":
-		p.title(theme.Header, "⚡ Channel Open")
-	case "channel_close":
-		p.title(theme.Warning, "⚡ Channel Close")
-	case "send":
-		p.title(theme.Warning, "↑ On-Chain Send")
+	switch {
+	case tx.IsAnchorSweep:
+		// No title — explanation text is the header
+	case tx.TxType == "channel_open":
+		p.title(theme.Header, "Channel Open")
+	case tx.TxType == "channel_close":
+		p.title(theme.Warning, "Channel Close")
+	case tx.TxType == "send":
+		p.title(theme.Warning, "On-Chain Send")
 	default:
-		p.title(theme.Success, "↓ On-Chain Receive")
+		p.title(theme.Success, "On-Chain Receive")
+	}
+
+	if tx.IsAnchorSweep {
+		p.dim("330-sat anchor from force close.")
+		p.dim("Sweep fee exceeded value.")
+		p.dim("No funds lost -- this is normal.")
+		p.blank()
 	}
 
 	if tx.ChannelPeer != "" {
@@ -1358,9 +1357,31 @@ func (m Model) onChainTxDetailPane(
 	}
 	confStr := fmt.Sprintf("%d", tx.Confirmations)
 	if tx.Confirmations == 0 {
-		confStr = "pending"
+		if tx.IsAnchorSweep {
+			confStr = "abandoned"
+		} else {
+			confStr = "unconfirmed"
+		}
 	}
 	p.field("Confs:   ", confStr)
+
+	// Pending force close: show blocks remaining
+	if tx.TxType == "channel_close" &&
+		tx.Confirmations > 0 &&
+		m.status != nil {
+		for _, fc := range m.status.
+			pendingForceCloseChannels {
+			if fc.ClosingTxid == tx.Txid &&
+				fc.BlocksRemaining > 0 {
+				p.field("Locked:  ",
+					fmt.Sprintf(
+						"~%d blocks remaining",
+						fc.BlocksRemaining))
+				break
+			}
+		}
+	}
+
 	if tx.BlockHeight > 0 {
 		p.field("Block:   ",
 			fmt.Sprintf("%d", tx.BlockHeight))

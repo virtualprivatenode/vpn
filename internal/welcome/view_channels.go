@@ -202,7 +202,7 @@ func (m Model) channelsOverview(w, h int) string {
 	headerH := len(headerLines)
 
 	// ── Buttons (below balance summary) ─────────
-	isOnButton := isFocused && m.contentFocus == 0
+	isOnButton := isFocused && m.contentFocus() == 0
 	var btnLines []string
 	btnLines = append(btnLines,
 		renderButtons(
@@ -235,7 +235,7 @@ func (m Model) channelsOverview(w, h int) string {
 
 			isSelected := isFocused &&
 				m.chanCursor == i &&
-				m.contentFocus == 1
+				m.contentFocus() == 1
 
 			name := ch.PeerAlias
 			if name == "" {
@@ -332,7 +332,7 @@ func (m Model) channelsOverview(w, h int) string {
 	vpRendered := renderViewport(
 		midContent, w, vpH, cursorLine,
 		len(midLines),
-		chanCount > 0 && m.contentFocus == 1)
+		chanCount > 0 && m.contentFocus() == 1)
 
 	// ── Assemble output ──────────────────────────
 	return header + "\n" + btnContent + "\n" + vpRendered
@@ -408,7 +408,7 @@ func (m Model) channelDetailPane(w int) string {
 		isFocused := m.contentFocused &&
 			!m.tabFocused
 		isOnButton := isFocused &&
-			m.contentFocus == 1
+			m.contentFocus() == 1
 		p.line(renderButtons(
 			[]string{"Close Channel"},
 			0, isOnButton, w))
@@ -741,48 +741,33 @@ func (m Model) channelCloseConfirmPane(w int) string {
 	p.blank()
 
 	if m.closeForce {
-		p.warn("⚠ Force close will lock your funds")
+		p.warn("Force close will lock your funds")
 		p.warn("for up to 2,016 blocks (~2 weeks).")
 		p.warn("Use cooperative close when possible.")
 		p.blank()
 	} else {
-		// Fee tier display for cooperative close
-		anyTier := false
-		for _, t := range m.closeFeeTiers {
-			if t.SatPerVB > 0 {
-				anyTier = true
-				break
-			}
+		// Fee rate input for cooperative close
+		p.line(" " + theme.Label.Render(
+			"Fee rate (sat/vB):"))
+		p.line("  " + m.closeFeeInput.View())
+
+		// Estimated total fee
+		feeRate := parseFeeInputRate(
+			m.closeFeeInput.Value())
+		if feeRate > 0 {
+			estFee := int64(feeRate * 170)
+			p.line(" " + theme.Dim.Render(
+				fmt.Sprintf("Est. fee: ~%s sats",
+					formatSats(estFee))))
 		}
-		if anyTier {
-			p.line(" " + theme.Label.Render(
-				"Fee Rate:"))
-			tierLine := " "
-			isFocused := m.contentFocused &&
-				!m.tabFocused
-			for i, t := range m.closeFeeTiers {
-				isSelected := isFocused &&
-					m.closeFeeIdx == i
-				var label string
-				if t.SatPerVB > 0 {
-					label = fmt.Sprintf("%s %.0f",
-						t.Label, t.SatPerVB)
-				} else {
-					label = t.Label + " n/a"
-				}
-				if isSelected {
-					tierLine += "▸ " +
-						theme.BtnFocused.Render(
-							label) + "  "
-				} else {
-					tierLine += "  " +
-						theme.BtnNormal.Render(
-							label) + "  "
-				}
-			}
-			p.line(tierLine)
+
+		// Friendly reference hints
+		hints := formatFeeHints(m.closeFeeTiers)
+		if hints != "" {
 			p.blank()
+			p.dim(hints)
 		}
+		p.blank()
 	}
 
 	if m.closeForce {
@@ -792,7 +777,19 @@ func (m Model) channelCloseConfirmPane(w int) string {
 	}
 
 	p.blank()
-	p.dim("y confirm    ⌫ back")
+
+	isBtnFocused := m.contentFocused &&
+		!m.tabFocused &&
+		!m.closeFeeInput.Focused()
+	if m.closeForce {
+		p.line(renderButtons(
+			[]string{"Go Back", "Force Close"},
+			m.closeConfirmBtnIdx, isBtnFocused, w))
+	} else {
+		p.line(renderButtons(
+			[]string{"Go Back", "Close Channel"},
+			m.closeConfirmBtnIdx, isBtnFocused, w))
+	}
 
 	p.appendError(m.closeError)
 
