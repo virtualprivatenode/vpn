@@ -16,10 +16,10 @@ func (m Model) handleReceiveKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		m.focusSidebar()
 		return m, nil
-	case "right", "l":
+	case "right":
 		var cmd tea.Cmd
 		if m.recvAmountInput.Focused() {
 			m.recvAmountInput, cmd =
@@ -50,13 +50,13 @@ func (m Model) handleReceiveKey(
 		}
 		m.resetReceiveState()
 		return m.closeTab(m.activeTab)
-	case "down", "j":
+	case "down", "tab":
 		if m.recvAmountInput.Focused() {
 			m.recvAmountInput.Blur()
 			m.recvMemoInput.Focus()
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.recvMemoInput.Focused() {
 			m.recvMemoInput.Blur()
 			m.recvAmountInput.Focus()
@@ -106,14 +106,14 @@ func (m Model) handleReceiveWaitingKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.recvButtonIdx > 0 {
 			m.recvButtonIdx--
 		} else {
 			m.focusSidebar()
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -121,12 +121,12 @@ func (m Model) handleReceiveWaitingKey(
 			return m, nil
 		}
 		return m, nil
-	case "down", "j":
+	case "down", "tab":
 		return m, nil
 	case "backspace":
 		m.resetReceiveState()
 		return m.closeTab(m.activeTab)
-	case "right", "l":
+	case "right":
 		if m.recvButtonIdx < 1 {
 			m.recvButtonIdx++
 		}
@@ -188,7 +188,7 @@ func (m Model) handleSendKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.sendInput.Value() != "" {
 			var cmd tea.Cmd
 			m.sendInput, cmd =
@@ -197,7 +197,7 @@ func (m Model) handleSendKey(
 		}
 		m.focusSidebar()
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.sendInput.Value() != "" {
 			var cmd tea.Cmd
 			m.sendInput, cmd =
@@ -205,7 +205,7 @@ func (m Model) handleSendKey(
 			return m, cmd
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -255,10 +255,10 @@ func (m Model) handleSendConfirmKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		m.focusSidebar()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -318,10 +318,10 @@ func (m Model) handleChannelOpenKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		m.focusSidebar()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.chanOpenPeerIdx > 0 {
 			m.chanOpenPeerIdx--
 		} else if m.hasDetailTabs() {
@@ -334,7 +334,7 @@ func (m Model) handleChannelOpenKey(
 		m.subview = svNone
 		m.chanOpenError = ""
 		return m.closeTab(m.activeTab)
-	case "down", "j":
+	case "down", "tab":
 		if m.chanOpenPeerIdx < len(m.chanPeerList) {
 			m.chanOpenPeerIdx++
 		}
@@ -378,7 +378,7 @@ func (m Model) handleChannelCustomPeerKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.chanPubkeyInput.Focused() &&
 			m.chanPubkeyInput.Value() != "" {
 			var cmd tea.Cmd
@@ -397,7 +397,7 @@ func (m Model) handleChannelCustomPeerKey(
 		}
 		m.focusSidebar()
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.chanPubkeyInput.Focused() {
 			var cmd tea.Cmd
 			m.chanPubkeyInput, cmd =
@@ -433,7 +433,7 @@ func (m Model) handleChannelCustomPeerKey(
 		m.subview = svChannelOpen
 		m.chanOpenError = ""
 		return m, nil
-	case "tab", "down", "j":
+	case "tab", "down":
 		if m.chanPubkeyInput.Focused() {
 			m.chanPubkeyInput.Blur()
 			m.chanHostInput.Focus()
@@ -442,7 +442,7 @@ func (m Model) handleChannelCustomPeerKey(
 			m.chanPubkeyInput.Focus()
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.chanHostInput.Focused() {
 			m.chanHostInput.Blur()
 			m.chanPubkeyInput.Focus()
@@ -500,7 +500,7 @@ func (m Model) handleChannelAmountKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if isCustom &&
 			m.chanAmountInput.Value() != "" {
 			var cmd tea.Cmd
@@ -511,7 +511,7 @@ func (m Model) handleChannelAmountKey(
 		}
 		m.focusSidebar()
 		return m, nil
-	case "right", "l":
+	case "right":
 		if isCustom {
 			var cmd tea.Cmd
 			m.chanAmountInput, cmd =
@@ -520,7 +520,7 @@ func (m Model) handleChannelAmountKey(
 			return m, cmd
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if !isCustom && m.chanAmountPreset > 0 {
 			m.chanAmountPreset--
 			m.chanOpenError = ""
@@ -532,7 +532,7 @@ func (m Model) handleChannelAmountKey(
 				return m, nil
 			}
 		}
-	case "down", "j":
+	case "down", "tab":
 		if !isCustom &&
 			m.chanAmountPreset <
 				len(amountPresets)-1 {
@@ -584,10 +584,10 @@ func (m Model) handleChannelConfirmKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		m.focusSidebar()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -651,10 +651,10 @@ func (m Model) handleChannelFundKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		m.focusSidebar()
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -678,18 +678,18 @@ func (m Model) handleSyncWebUIKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.addonBtnIdx > 0 {
 			m.addonBtnIdx--
 		} else {
 			m.focusSidebar()
 		}
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.addonBtnIdx < 1 {
 			m.addonBtnIdx++
 		}
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -723,7 +723,7 @@ func (m Model) handleSyncthingPairInputKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.syncDeviceInput.Value() != "" {
 			var cmd tea.Cmd
 			m.syncDeviceInput, cmd =
@@ -733,7 +733,7 @@ func (m Model) handleSyncthingPairInputKey(
 		}
 		m.focusSidebar()
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.syncDeviceInput.Value() != "" {
 			var cmd tea.Cmd
 			m.syncDeviceInput, cmd =
@@ -811,7 +811,7 @@ func (m Model) handleLndHubCreateNameKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.hubNameInput.Value() != "" {
 			var cmd tea.Cmd
 			m.hubNameInput, cmd =
@@ -821,7 +821,7 @@ func (m Model) handleLndHubCreateNameKey(
 		}
 		m.focusSidebar()
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.hubNameInput.Value() != "" {
 			var cmd tea.Cmd
 			m.hubNameInput, cmd =
@@ -858,12 +858,11 @@ func (m Model) handleLndHubCreateNameKey(
 //
 // Steps:
 //   0 = Address input
-//   1 = Amount input
-//   2 = Max / Send All button
-//   3 = Label input
-//   4 = Fee tier selector
-//   5 = Custom fee input (only when Custom selected)
-//   6 = Buttons (Clear / Create Transaction)
+//   1 = Amount input (right arrow → Max button focus,
+//       enter on Max button toggles)
+//   2 = Label input
+//   3 = Fee rate input
+//   4 = Buttons (Clear / Create Transaction)
 
 func (m Model) handleOCSendKey(
 	key string, msg tea.KeyPressMsg,
@@ -872,9 +871,9 @@ func (m Model) handleOCSendKey(
 	case "ctrl+c":
 		return m, tea.Quit
 
-	case "left", "h":
+	case "left":
 		// Buttons: move left
-		if m.ocSendStep == 5 &&
+		if m.ocSendStep == 4 &&
 			m.ocSendBtnIdx > 0 {
 			m.ocSendBtnIdx--
 			return m, nil
@@ -889,6 +888,14 @@ func (m Model) handleOCSendKey(
 				return m, cmd
 			}
 		}
+		// Amount step: Max focused → back to input
+		if m.ocSendStep == 1 && m.ocMaxFocused {
+			m.ocMaxFocused = false
+			if !m.ocSendAll {
+				m.ocSendAmtInput.Focus()
+			}
+			return m, nil
+		}
 		// Amount input: pass through for cursor
 		if m.ocSendStep == 1 && !m.ocSendAll {
 			if m.ocSendAmtInput.Value() != "" {
@@ -900,7 +907,7 @@ func (m Model) handleOCSendKey(
 			}
 		}
 		// Label input: pass through for cursor
-		if m.ocSendStep == 3 {
+		if m.ocSendStep == 2 {
 			if m.ocSendLabelInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocSendLabelInput, cmd =
@@ -910,7 +917,7 @@ func (m Model) handleOCSendKey(
 			}
 		}
 		// Fee input: pass through for cursor
-		if m.ocSendStep == 4 {
+		if m.ocSendStep == 3 {
 			if m.ocCustomFeeInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocCustomFeeInput, cmd =
@@ -922,9 +929,9 @@ func (m Model) handleOCSendKey(
 		m.focusSidebar()
 		return m, nil
 
-	case "right", "l":
+	case "right":
 		// Buttons: move right
-		if m.ocSendStep == 5 &&
+		if m.ocSendStep == 4 &&
 			m.ocSendBtnIdx < 1 {
 			m.ocSendBtnIdx++
 			return m, nil
@@ -937,16 +944,14 @@ func (m Model) handleOCSendKey(
 					tea.Msg(msg))
 			return m, cmd
 		}
-		// Amount input: pass through for cursor
-		if m.ocSendStep == 1 && !m.ocSendAll {
-			var cmd tea.Cmd
-			m.ocSendAmtInput, cmd =
-				m.ocSendAmtInput.Update(
-					tea.Msg(msg))
-			return m, cmd
+		// Amount step: focus Max button (two-step)
+		if m.ocSendStep == 1 && !m.ocMaxFocused {
+			m.ocMaxFocused = true
+			m.ocSendAmtInput.Blur()
+			return m, nil
 		}
 		// Label input: pass through for cursor
-		if m.ocSendStep == 3 {
+		if m.ocSendStep == 2 {
 			var cmd tea.Cmd
 			m.ocSendLabelInput, cmd =
 				m.ocSendLabelInput.Update(
@@ -954,7 +959,7 @@ func (m Model) handleOCSendKey(
 			return m, cmd
 		}
 		// Fee input: pass through for cursor
-		if m.ocSendStep == 4 {
+		if m.ocSendStep == 3 {
 			var cmd tea.Cmd
 			m.ocCustomFeeInput, cmd =
 				m.ocCustomFeeInput.Update(
@@ -976,8 +981,17 @@ func (m Model) handleOCSendKey(
 			// Empty addr input: close tab
 			return m.closeTab(m.activeTab)
 		}
+		// Max focused: unfocus back to amount input
+		if m.ocSendStep == 1 && m.ocMaxFocused {
+			m.ocMaxFocused = false
+			if !m.ocSendAll {
+				m.ocSendAmtInput.Focus()
+			}
+			return m, nil
+		}
 		if m.ocSendStep == 1 && m.ocSendAll {
 			m.ocSendAll = false
+			m.ocMaxFocused = false
 			m.ocSendAmtInput.SetValue("")
 			m.ocSendAmtInput.Focus()
 			return m, nil
@@ -991,7 +1005,7 @@ func (m Model) handleOCSendKey(
 				return m, cmd
 			}
 		}
-		if m.ocSendStep == 3 {
+		if m.ocSendStep == 2 {
 			if m.ocSendLabelInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocSendLabelInput, cmd =
@@ -1000,7 +1014,7 @@ func (m Model) handleOCSendKey(
 				return m, cmd
 			}
 		}
-		if m.ocSendStep == 4 {
+		if m.ocSendStep == 3 {
 			if m.ocCustomFeeInput.Value() != "" {
 				var cmd tea.Cmd
 				m.ocCustomFeeInput, cmd =
@@ -1013,15 +1027,17 @@ func (m Model) handleOCSendKey(
 		// empty input
 		if m.ocSendStep > 0 {
 			m.ocSendStep--
+			m.ocMaxFocused = false
 			m.onChainSendError = ""
 			m.focusSendStep()
 			return m, nil
 		}
 		return m.closeTab(m.activeTab)
 
-	case "up", "k":
+	case "up":
 		if m.ocSendStep > 0 {
 			m.ocSendStep--
+			m.ocMaxFocused = false
 			m.focusSendStep()
 		} else if m.hasDetailTabs() {
 			m.focusTabBar()
@@ -1031,66 +1047,23 @@ func (m Model) handleOCSendKey(
 		}
 		return m, nil
 
-	case "down", "j":
+	case "down", "tab":
 		next := m.ocSendStep + 1
-		if next > 5 {
+		if next > 4 {
 			return m, nil
 		}
 		m.ocSendStep = next
+		m.ocMaxFocused = false
 		m.focusSendStep()
 		return m, nil
 
 	case "enter":
-		// Max button: toggle send all
-		if m.ocSendStep == 2 {
-			if m.ocSendAll {
-				// Clear max
-				m.ocSendAll = false
-				m.ocSendAmtInput.SetValue("")
-				m.ocSendAmtInput.Focus()
-			} else if len(m.utxoSelected) > 0 {
-				// Coin control: fill with selected
-				// total minus estimated fee
-				feeRate := getSendFeeRate(m)
-				numInputs := max(
-					len(m.utxoOutpoints), 1)
-				estFee := estimateSimpleFee(
-					numInputs, 1, feeRate)
-				maxAmt := m.utxoSelectedTotal - estFee
-				if maxAmt < 0 {
-					maxAmt = 0
-				}
-				m.ocSendAll = true
-				m.ocSendAmtInput.SetValue(
-					fmt.Sprintf("%d", maxAmt))
-				m.ocSendAmtInput.Blur()
-			} else {
-				// No coin control: compute from
-				// on-chain balance minus est fee
-				// using actual UTXO count
-				m.ocSendAll = true
-				if m.status != nil &&
-					m.status.lndBalance != "" {
-					bal := parseBalance(
-						m.status.lndBalance)
-					feeRate := getSendFeeRate(m)
-					numInputs := max(
-						len(m.utxos), 1)
-					estFee := estimateSimpleFee(
-						numInputs, 1, feeRate)
-					maxAmt := bal - estFee
-					if maxAmt < 0 {
-						maxAmt = 0
-					}
-					m.ocSendAmtInput.SetValue(
-						fmt.Sprintf("%d", maxAmt))
-				}
-				m.ocSendAmtInput.Blur()
-			}
-			return m, nil
+		// Amount step: Max focused → toggle Max
+		if m.ocSendStep == 1 && m.ocMaxFocused {
+			return m.toggleMax()
 		}
 		// Bottom buttons
-		if m.ocSendStep == 5 {
+		if m.ocSendStep == 4 {
 			switch m.ocSendBtnIdx {
 			case 0: // Clear
 				m.resetOnChainSendState()
@@ -1102,8 +1075,9 @@ func (m Model) handleOCSendKey(
 		}
 		// Enter on any other step: advance to next
 		next := m.ocSendStep + 1
-		next = min(next, 5)
+		next = min(next, 4)
 		m.ocSendStep = next
+		m.ocMaxFocused = false
 		m.focusSendStep()
 		return m, nil
 
@@ -1117,20 +1091,20 @@ func (m Model) handleOCSendKey(
 					tea.Msg(msg))
 			return m, cmd
 		case 1:
-			if !m.ocSendAll {
+			if !m.ocSendAll && !m.ocMaxFocused {
 				var cmd tea.Cmd
 				m.ocSendAmtInput, cmd =
 					m.ocSendAmtInput.Update(
 						tea.Msg(msg))
 				return m, cmd
 			}
-		case 3:
+		case 2:
 			var cmd tea.Cmd
 			m.ocSendLabelInput, cmd =
 				m.ocSendLabelInput.Update(
 					tea.Msg(msg))
 			return m, cmd
-		case 4:
+		case 3:
 			var cmd tea.Cmd
 			m.ocCustomFeeInput, cmd =
 				m.ocCustomFeeInput.Update(
@@ -1148,6 +1122,7 @@ func (m *Model) focusSendStep() {
 	m.ocSendAmtInput.Blur()
 	m.ocSendLabelInput.Blur()
 	m.ocCustomFeeInput.Blur()
+	m.ocMaxFocused = false
 	switch m.ocSendStep {
 	case 0:
 		m.ocSendAddrInput.Focus()
@@ -1155,11 +1130,58 @@ func (m *Model) focusSendStep() {
 		if !m.ocSendAll {
 			m.ocSendAmtInput.Focus()
 		}
-	case 3:
+	case 2:
 		m.ocSendLabelInput.Focus()
-	case 4:
+	case 3:
 		m.ocCustomFeeInput.Focus()
 	}
+}
+
+// toggleMax toggles send-all / max mode. When coin
+// control is active, uses the selected UTXO total.
+// Otherwise uses the full wallet balance.
+func (m Model) toggleMax() (tea.Model, tea.Cmd) {
+	if m.ocSendAll {
+		m.ocSendAll = false
+		m.ocSendAmtInput.SetValue("")
+		m.ocSendAmtInput.Focus()
+		return m, nil
+	}
+	if len(m.utxoSelected) > 0 {
+		feeRate := getSendFeeRate(m)
+		numInputs := max(
+			len(m.utxoOutpoints), 1)
+		estFee := estimateSimpleFee(
+			numInputs, 1, feeRate)
+		maxAmt := m.utxoSelectedTotal - estFee
+		if maxAmt < 0 {
+			maxAmt = 0
+		}
+		m.ocSendAll = true
+		m.ocSendAmtInput.SetValue(
+			fmt.Sprintf("%d", maxAmt))
+		m.ocSendAmtInput.Blur()
+	} else {
+		m.ocSendAll = true
+		if m.status != nil &&
+			m.status.lndBalance != "" {
+			bal := parseBalance(
+				m.status.lndBalance)
+			feeRate := getSendFeeRate(m)
+			numInputs := max(
+				len(m.utxos), 1)
+			estFee := estimateSimpleFee(
+				numInputs, 1, feeRate)
+			maxAmt := bal - estFee
+			if maxAmt < 0 {
+				maxAmt = 0
+			}
+			m.ocSendAmtInput.SetValue(
+				fmt.Sprintf("%d", maxAmt))
+		}
+		m.ocSendAmtInput.Blur()
+	}
+	return m, nil
 }
 
 // validateAndConfirmSend validates all fields and
@@ -1234,7 +1256,7 @@ func (m Model) validateAndConfirmSend() (
 	if feeVal == "" {
 		m.onChainSendError =
 			"Enter a fee rate"
-		m.ocSendStep = 4
+		m.ocSendStep = 3
 		m.focusSendStep()
 		return m, nil
 	}
@@ -1243,7 +1265,7 @@ func (m Model) validateAndConfirmSend() (
 		if c < '0' || c > '9' {
 			m.onChainSendError =
 				"Invalid fee rate"
-			m.ocSendStep = 4
+			m.ocSendStep = 3
 			m.focusSendStep()
 			return m, nil
 		}
@@ -1251,7 +1273,7 @@ func (m Model) validateAndConfirmSend() (
 	}
 	if fn < 1 {
 		m.onChainSendError = "Minimum 1 sat/vB"
-		m.ocSendStep = 4
+		m.ocSendStep = 3
 		m.focusSendStep()
 		return m, nil
 	}
@@ -1282,19 +1304,19 @@ func (m Model) handleOCSendConfirmKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "left":
 		if m.ocConfirmBtnIdx > 0 {
 			m.ocConfirmBtnIdx--
 		} else {
 			m.focusSidebar()
 		}
 		return m, nil
-	case "right", "l":
+	case "right":
 		if m.ocConfirmBtnIdx < 1 {
 			m.ocConfirmBtnIdx++
 		}
 		return m, nil
-	case "up", "k":
+	case "up":
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -1302,7 +1324,7 @@ func (m Model) handleOCSendConfirmKey(
 			return m, nil
 		}
 		return m, nil
-	case "down", "j":
+	case "down", "tab":
 		return m, nil
 	case "backspace":
 		m.subview = svOnChainSend
@@ -1335,6 +1357,7 @@ func (m *Model) resetOnChainSendState() {
 	m.ocSendLabelInput = newOCSendLabelInput()
 	m.ocCustomFeeInput = newCustomFeeInput()
 	m.ocSendAll = false
+	m.ocMaxFocused = false
 	m.ocSendStep = 0
 	m.ocConfirmFee = 0
 	m.ocConfirmBtnIdx = 0

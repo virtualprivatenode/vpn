@@ -87,6 +87,7 @@ func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
 			5*time.Second,
 			"sudo", "-u", "bitcoin",
 			cliName,
+			fmt.Sprintf("-datadir=%s", paths.BitcoinDataDir),
 			fmt.Sprintf("-conf=%s", paths.BitcoinConf),
 			"estimatesmartfee",
 			fmt.Sprintf("%d", target),
@@ -130,6 +131,51 @@ func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
 	}
 
 	return feeTiersMsg{tiers: tiers}
+}
+
+// formatFeeHints returns a user-friendly fee reference
+// line like "Next block ~5  ·  ~1 hour ~3  ·  ~1 day ~1"
+// Uses targets: [0]=1 blk, [1]=3 blk, [2]=6 blk, [3]=25 blk
+// We show: target 0 as "Next block", 2 as "~1 hour",
+// 3 as "~1 day".
+func formatFeeHints(tiers [4]feeTier) string {
+	var parts []string
+	if tiers[0].SatPerVB > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"Next block %.0f sat/vB",
+			tiers[0].SatPerVB))
+	}
+	if tiers[2].SatPerVB > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"1 hour %.0f sat/vB",
+			tiers[2].SatPerVB))
+	}
+	if tiers[3].SatPerVB > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"1 day %.0f sat/vB",
+			tiers[3].SatPerVB))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+// parseFeeInputRate parses a fee rate string from a text
+// input. Returns the rate as int64, minimum 1.
+func parseFeeInputRate(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	var n int64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n
 }
 
 // isValidOnChainAddr does a basic prefix check.

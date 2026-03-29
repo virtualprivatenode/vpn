@@ -328,19 +328,21 @@ type Model struct {
 	chanFundAddress  string
 
 	// Channel close
-	closeForce     bool
-	closeChanPoint string
-	closePeerAlias string
-	closeCapacity  int64
-	closeLocalBal  int64
-	closeRemoteBal int64
-	closeFeeTiers  [4]feeTier
-	closeFeeIdx    int
-	closeEstFee    int64
-	closeTxid      string
-	closeError     string
-	closeBtnIdx    int
-	closeInFlight  bool
+	closeForce         bool
+	closeChanPoint     string
+	closePeerAlias     string
+	closeCapacity      int64
+	closeLocalBal      int64
+	closeRemoteBal     int64
+	closeFeeTiers      [4]feeTier
+	closeFeeInput      textinput.Model
+	closeFeeIdx        int
+	closeEstFee        int64
+	closeTxid          string
+	closeError         string
+	closeBtnIdx        int
+	closeConfirmBtnIdx int
+	closeInFlight      bool
 
 	// Channel history
 	chanHistory       []channelHistoryEntry
@@ -349,7 +351,7 @@ type Model struct {
 	// Navigation
 	nav            NavSidebar
 	contentFocused bool
-	contentFocus   int // 0=buttons, 1+=content zones
+	sectionFocus   [numSections]int // per-section focus zone
 
 	// Tab bar
 	tabs            []openTab
@@ -410,13 +412,15 @@ type Model struct {
 	ocSendLabelInput textinput.Model
 	ocCustomFeeInput textinput.Model
 	ocSendAll        bool
-	ocSendStep       int   // 0=addr, 1=amount, 2=max btn, 3=label, 4=fee rate, 5=buttons
+	ocMaxFocused     bool  // true when Max button (not amount input) is focused on step 1
+	ocSendStep       int   // 0=addr, 1=amount, 2=label, 3=fee rate, 4=buttons
 	ocConfirmFee     int64 // precise fee from LND
 	ocConfirmBtnIdx  int   // 0=Go Back, 1=Confirm & Broadcast
 	ocSendAddrVal    string
 	ocSendAmtVal     int64
 	ocSendFeeRate    int64
 	ocSendLabelVal   string
+	sendFeeTiers     [4]feeTier
 
 	// On-chain transaction history
 	onChainTxs      []lndrpc.OnChainTx

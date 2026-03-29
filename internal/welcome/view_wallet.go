@@ -117,7 +117,7 @@ func (m Model) walletOverview(w, h int) string {
 		for i, entry := range m.payHistory {
 			isSelected := i == m.payHistoryCursor &&
 				isFocused &&
-				m.contentFocus == 1
+				m.contentFocus() == 1
 
 			date := formatTimestampTable(
 				entry.CreationDate)
@@ -186,7 +186,7 @@ func (m Model) walletOverview(w, h int) string {
 	vpRendered := renderViewport(
 		midContent, w, vpH, m.payHistoryCursor,
 		len(midLines),
-		len(m.payHistory) > 0 && m.contentFocus == 1)
+		len(m.payHistory) > 0 && m.contentFocus() == 1)
 
 	// ── Assemble output ──────────────────────────
 	return header + "\n" + vpRendered
@@ -195,7 +195,7 @@ func (m Model) walletOverview(w, h int) string {
 func (m Model) walletButtons(w int) string {
 	isFocused := m.contentFocused &&
 		!m.tabFocused &&
-		m.contentFocus == 0
+		m.contentFocus() == 0
 	return renderButtons(
 		[]string{"Send", "Receive", "Pairing"},
 		m.btnIdx, isFocused, w)

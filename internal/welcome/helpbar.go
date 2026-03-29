@@ -132,7 +132,7 @@ func (m Model) currentBindings() []key.Binding {
 				break // fall through to subview switch
 			}
 			return newChannelDetailBindings(
-				hasTabs, m.contentFocus == 1).
+				hasTabs, m.contentFocus() == 1).
 				ShortHelp()
 		}
 	}
@@ -191,7 +191,7 @@ func (m Model) currentBindings() []key.Binding {
 	case svCloseType:
 		return newCloseTypeBindings().ShortHelp()
 	case svCloseConfirm:
-		return newPayConfirmBindings(hasTabs).
+		return newOCSendConfirmBindings(hasTabs).
 			ShortHelp()
 	case svClosing:
 		return newWaitingBindings().ShortHelp()
@@ -237,21 +237,21 @@ func (m Model) currentBindings() []key.Binding {
 	case secChannels:
 		return newChannelsHomeBindings(
 			hasTabs,
-			m.contentFocus == 0).ShortHelp()
+			m.contentFocus() == 0).ShortHelp()
 	case secWallet:
 		return newWalletHomeBindings(
 			hasTabs,
-			m.contentFocus == 0).ShortHelp()
+			m.contentFocus() == 0).ShortHelp()
 	case secOnChain:
 		return newOnChainHomeBindings(hasTabs,
-			m.contentFocus,
+			m.contentFocus(),
 			m.utxoPencilFocused).ShortHelp()
 	case secAddons:
 		return newAddonsHomeBindings(hasTabs).
 			ShortHelp()
 	case secSystem:
 		return newSystemHomeBindings(hasTabs,
-			m.contentFocus == 1).ShortHelp()
+			m.contentFocus() == 1).ShortHelp()
 	}
 
 	return []key.Binding{kQuit}

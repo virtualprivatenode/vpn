@@ -46,6 +46,7 @@ type OnChainTx struct {
 	Inputs         []TxInput
 	Outputs        []TxOutput
 	TotalInputSats int64
+	IsAnchorSweep  bool // abandoned anchor sweep (0 confs, ≤330 sats)
 }
 
 type TxInput struct {
@@ -370,6 +371,27 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 			ChannelPeer:   channelPeer,
 			Inputs:        inputs,
 			Outputs:       outputs,
+		}
+
+		// Detect abandoned anchor sweeps:
+		// 0 confirmations, total amount ≤ 330 sats
+		// (BOLT 3 anchor output value), typically
+		// associated with a force close. The sweep
+		// tx is abandoned because the fee exceeds
+		// the 330-sat anchor value.
+		if tx.Confirmations == 0 {
+			absAmt := tx.Amount
+			if absAmt < 0 {
+				absAmt = -absAmt
+			}
+			if absAmt <= 330 &&
+				(tx.TxType == "channel_close" ||
+					strings.Contains(
+						strings.ToLower(tx.Label),
+						"anchor")) {
+				tx.IsAnchorSweep = true
+				tx.Label = "Anchor Sweep"
+			}
 		}
 
 		txs = append(txs, tx)

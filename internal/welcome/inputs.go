@@ -197,7 +197,7 @@ func newOnChainAddrInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "bc1q..."
 	ti.CharLimit = 90
-	ti.SetWidth(50)
+	ti.SetWidth(62)
 	ti.Validate = validateOnChainAddr
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
@@ -230,6 +230,18 @@ func newOCSendLabelInput() textinput.Model {
 }
 
 func newCustomFeeInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "sat/vB"
+	ti.CharLimit = 6
+	ti.SetWidth(10)
+	ti.Validate = validateDigits
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Focus()
+	return ti
+}
+
+func newCloseFeeInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "sat/vB"
 	ti.CharLimit = 6
