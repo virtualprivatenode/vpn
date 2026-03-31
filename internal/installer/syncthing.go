@@ -417,6 +417,34 @@ func syncthingAPIPut(apiKey, endpoint, body string) error {
 	return err
 }
 
+func syncthingAPIDelete(apiKey, endpoint string) error {
+	_, err := system.RunContext(10*time.Second,
+		"curl", "-s",
+		"-X", "DELETE",
+		"-H", "X-API-Key: "+apiKey,
+		"http://127.0.0.1:8384"+endpoint)
+	return err
+}
+
+// UnpairSyncthingDevice removes a device from Syncthing
+// via the REST API. The folder sharing is dropped
+// automatically when the device is removed.
+func UnpairSyncthingDevice(deviceID string) error {
+	apiKey, err := getSyncthingAPIKey()
+	if err != nil {
+		return fmt.Errorf("get API key: %w", err)
+	}
+
+	if err := syncthingAPIDelete(apiKey,
+		"/rest/config/devices/"+deviceID); err != nil {
+		return fmt.Errorf("remove device: %w", err)
+	}
+
+	logger.Install("Removed Syncthing device: %s...",
+		deviceID[:min(16, len(deviceID))])
+	return nil
+}
+
 func syncthingAPIGet(apiKey, endpoint string) (string, error) {
 	return system.RunContext(10*time.Second,
 		"curl", "-s",

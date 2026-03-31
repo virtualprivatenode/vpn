@@ -180,6 +180,19 @@ func (m Model) handleReceiveExpiredKey(
 	return m, nil
 }
 
+func (m Model) handleReceiveErrorKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter", "backspace":
+		m.resetReceiveState()
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
 // ── Send flow handlers ───────────────────────────────────
 
 func (m Model) handleSendKey(
@@ -189,23 +202,46 @@ func (m Model) handleSendKey(
 	case "ctrl+c":
 		return m, tea.Quit
 	case "left":
-		if m.sendInput.Value() != "" {
-			var cmd tea.Cmd
-			m.sendInput, cmd =
-				m.sendInput.Update(tea.Msg(msg))
-			return m, cmd
+		// Buttons: move left
+		if m.contentFocus() == 1 &&
+			m.sendBtnIdx > 0 {
+			m.sendBtnIdx--
+			return m, nil
+		}
+		// Input: pass through for cursor
+		if m.contentFocus() == 0 {
+			if m.sendInput.Value() != "" {
+				var cmd tea.Cmd
+				m.sendInput, cmd =
+					m.sendInput.Update(tea.Msg(msg))
+				return m, cmd
+			}
 		}
 		m.focusSidebar()
 		return m, nil
 	case "right":
-		if m.sendInput.Value() != "" {
-			var cmd tea.Cmd
-			m.sendInput, cmd =
-				m.sendInput.Update(tea.Msg(msg))
-			return m, cmd
+		// Buttons: move right
+		if m.contentFocus() == 1 &&
+			m.sendBtnIdx < 1 {
+			m.sendBtnIdx++
+			return m, nil
+		}
+		// Input: pass through for cursor
+		if m.contentFocus() == 0 {
+			if m.sendInput.Value() != "" {
+				var cmd tea.Cmd
+				m.sendInput, cmd =
+					m.sendInput.Update(tea.Msg(msg))
+				return m, cmd
+			}
 		}
 		return m, nil
 	case "up":
+		if m.contentFocus() == 1 {
+			m.setContentFocus(0)
+			m.sendInput.Focus()
+			return m, nil
+		}
 		if m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -213,7 +249,21 @@ func (m Model) handleSendKey(
 			return m, nil
 		}
 		return m, nil
+	case "down", "tab":
+		if m.contentFocus() == 0 {
+			m.setContentFocus(1)
+			m.sendBtnIdx = 1 // default to Send
+			m.sendInput.Blur()
+			return m, nil
+		}
+		return m, nil
 	case "backspace":
+		// Buttons: go back to input
+		if m.contentFocus() == 1 {
+			m.setContentFocus(0)
+			m.sendInput.Focus()
+			return m, nil
+		}
 		if m.sendInput.Value() != "" {
 			var cmd tea.Cmd
 			m.sendInput, cmd =
@@ -223,30 +273,54 @@ func (m Model) handleSendKey(
 		m.resetSendState()
 		return m.closeTab(m.activeTab)
 	case "enter":
-		payReq := strings.TrimSpace(
-			m.sendInput.Value())
-		if payReq == "" {
-			m.sendError = "Paste a payment request"
+		// Buttons
+		if m.contentFocus() == 1 {
+			switch m.sendBtnIdx {
+			case 0: // Clear
+				m.sendInput = newSendPayReqInput()
+				m.sendError = ""
+				m.setContentFocus(0)
+				return m, nil
+			case 1: // Send
+				return m.submitSendPayment()
+			}
 			return m, nil
 		}
-		payReq = cleanPayReq(payReq)
-		m.sendInput.SetValue(payReq)
-		if !strings.HasPrefix(payReq, "lnbc") &&
-			!strings.HasPrefix(payReq, "lntb") &&
-			!strings.HasPrefix(payReq, "lnbcrt") {
-			m.sendError =
-				"Not a valid Lightning invoice"
-			return m, nil
-		}
-		m.sendError = ""
-		return m, decodePayReqCmd(
-			m.lndClient, payReq)
+		// Enter in input field → submit
+		return m.submitSendPayment()
 	default:
-		var cmd tea.Cmd
-		m.sendInput, cmd =
-			m.sendInput.Update(tea.Msg(msg))
-		return m, cmd
+		if m.contentFocus() == 0 {
+			var cmd tea.Cmd
+			m.sendInput, cmd =
+				m.sendInput.Update(tea.Msg(msg))
+			return m, cmd
+		}
 	}
+	return m, nil
+}
+
+// submitSendPayment validates and submits the payment.
+func (m Model) submitSendPayment() (
+	tea.Model, tea.Cmd,
+) {
+	payReq := strings.TrimSpace(
+		m.sendInput.Value())
+	if payReq == "" {
+		m.sendError = "Paste a payment request"
+		return m, nil
+	}
+	payReq = cleanPayReq(payReq)
+	m.sendInput.SetValue(payReq)
+	if !strings.HasPrefix(payReq, "lnbc") &&
+		!strings.HasPrefix(payReq, "lntb") &&
+		!strings.HasPrefix(payReq, "lnbcrt") {
+		m.sendError =
+			"Not a valid Lightning invoice"
+		return m, nil
+	}
+	m.sendError = ""
+	return m, decodePayReqCmd(
+		m.lndClient, payReq)
 }
 
 func (m Model) handleSendConfirmKey(
@@ -711,8 +785,7 @@ func (m Model) handleSyncWebUIKey(
 			m.showSecrets = !m.showSecrets
 		}
 	case "backspace":
-		m.subview = svSyncthingDetail
-		m.addonBtnIdx = 0
+		return m.closeTab(m.activeTab)
 	}
 	return m, nil
 }
@@ -720,10 +793,23 @@ func (m Model) handleSyncWebUIKey(
 func (m Model) handleSyncthingPairInputKey(
 	key string, msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
+	// Post-pair screen: button navigation only
+	if m.syncPairSuccess {
+		return m.handleSyncPostPairKey(key)
+	}
+
+	// Pre-pair screen: input (contentFocus=0) +
+	// buttons (contentFocus=1)
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "left":
+		if m.contentFocus() == 1 {
+			if m.addonBtnIdx > 0 {
+				m.addonBtnIdx--
+			}
+			return m, nil
+		}
 		if m.syncDeviceInput.Value() != "" {
 			var cmd tea.Cmd
 			m.syncDeviceInput, cmd =
@@ -734,6 +820,12 @@ func (m Model) handleSyncthingPairInputKey(
 		m.focusSidebar()
 		return m, nil
 	case "right":
+		if m.contentFocus() == 1 {
+			if m.addonBtnIdx < 1 {
+				m.addonBtnIdx++
+			}
+			return m, nil
+		}
 		if m.syncDeviceInput.Value() != "" {
 			var cmd tea.Cmd
 			m.syncDeviceInput, cmd =
@@ -742,65 +834,175 @@ func (m Model) handleSyncthingPairInputKey(
 			return m, cmd
 		}
 		return m, nil
-	case "backspace":
-		if m.syncDeviceInput.Value() == "" &&
-			!m.syncPairSuccess {
-			m.syncPairError = ""
-			m.syncPairSuccess = false
-			m.subview = svSyncthingDetail
+	case "up":
+		if m.contentFocus() == 1 {
+			m.setContentFocus(0)
+			m.syncDeviceInput.Focus()
 			return m, nil
 		}
-		if m.syncPairSuccess {
-			m.syncDeviceInput =
-				newSyncthingIDInput()
-			m.syncPairSuccess = false
-			m.subview = svSyncthingDetail
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
 			return m, nil
-		}
-		var cmd tea.Cmd
-		m.syncDeviceInput, cmd =
-			m.syncDeviceInput.Update(tea.Msg(msg))
-		return m, cmd
-	case "enter":
-		if m.syncPairSuccess {
-			m.syncDeviceInput =
-				newSyncthingIDInput()
-			m.syncPairSuccess = false
-			m.subview = svSyncthingDetail
-			return m, nil
-		}
-		deviceID := syncthingIDValue(
-			m.syncDeviceInput)
-		if deviceID != "" {
-			parts := strings.Split(deviceID, "-")
-			if len(parts) != 8 {
-				m.syncPairError =
-					"Invalid Device ID format." +
-						" Expected 8 groups" +
-						" separated by hyphens."
-				return m, nil
-			}
-			for _, p := range parts {
-				if len(p) != 7 {
-					m.syncPairError =
-						"Invalid Device ID" +
-							" format. Each group" +
-							" should be 7" +
-							" characters."
-					return m, nil
-				}
-			}
-			m.syncPairError = ""
-			return m,
-				pairSyncthingDeviceCmd(deviceID)
 		}
 		return m, nil
+	case "down", "tab":
+		if m.contentFocus() == 0 {
+			m.setContentFocus(1)
+			m.addonBtnIdx = 1 // default to Pair
+			m.syncDeviceInput.Blur()
+			return m, nil
+		}
+		return m, nil
+	case "backspace":
+		if m.contentFocus() == 1 {
+			m.setContentFocus(0)
+			m.syncDeviceInput.Focus()
+			return m, nil
+		}
+		if m.syncDeviceInput.Value() != "" {
+			var cmd tea.Cmd
+			m.syncDeviceInput, cmd =
+				m.syncDeviceInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
+		m.syncPairError = ""
+		return m.closeTab(m.activeTab)
+	case "enter":
+		if m.contentFocus() == 1 {
+			switch m.addonBtnIdx {
+			case 0: // Clear
+				m.syncDeviceInput =
+					newSyncthingIDInput()
+				m.syncPairError = ""
+				m.setContentFocus(0)
+				return m, nil
+			case 1: // Pair
+				return m.submitSyncthingPair()
+			}
+			return m, nil
+		}
+		// Enter in input field → submit
+		return m.submitSyncthingPair()
 	default:
-		var cmd tea.Cmd
-		m.syncDeviceInput, cmd =
-			m.syncDeviceInput.Update(tea.Msg(msg))
-		return m, cmd
+		if m.contentFocus() == 0 {
+			var cmd tea.Cmd
+			m.syncDeviceInput, cmd =
+				m.syncDeviceInput.Update(
+					tea.Msg(msg))
+			return m, cmd
+		}
 	}
+	return m, nil
+}
+
+// submitSyncthingPair validates and submits the pair.
+func (m Model) submitSyncthingPair() (
+	tea.Model, tea.Cmd,
+) {
+	deviceID := syncthingIDValue(
+		m.syncDeviceInput)
+	if deviceID == "" {
+		m.syncPairError = "Paste a Device ID"
+		return m, nil
+	}
+	parts := strings.Split(deviceID, "-")
+	if len(parts) != 8 {
+		m.syncPairError =
+			"Invalid format. Expected 8 groups" +
+				" separated by hyphens."
+		return m, nil
+	}
+	for _, p := range parts {
+		if len(p) != 7 {
+			m.syncPairError =
+				"Invalid format. Each group" +
+					" should be 7 characters."
+			return m, nil
+		}
+	}
+	// Check for duplicate
+	for _, d := range m.cfg.SyncthingDevices {
+		if d.DeviceID == deviceID {
+			m.syncPairError =
+				"Device already paired."
+			return m, nil
+		}
+	}
+	m.syncPairError = ""
+	return m, pairSyncthingDeviceCmd(deviceID)
+}
+
+// handleSyncPostPairKey handles the post-pair screen
+// with Show QR / Done buttons.
+func (m Model) handleSyncPostPairKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "left":
+		if m.addonBtnIdx > 0 {
+			m.addonBtnIdx--
+		} else {
+			m.focusSidebar()
+		}
+		return m, nil
+	case "right":
+		if m.addonBtnIdx < 1 {
+			m.addonBtnIdx++
+		}
+		return m, nil
+	case "up":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+		return m, nil
+	case "enter":
+		switch m.addonBtnIdx {
+		case 0: // Show QR
+			m.subview = svSyncthingPairQR
+		case 1: // Done
+			m.syncPairSuccess = false
+			return m.closeTab(m.activeTab)
+		}
+		return m, nil
+	case "backspace":
+		m.syncPairSuccess = false
+		return m.closeTab(m.activeTab)
+	}
+	return m, nil
+}
+
+// handleSyncPairQRKey handles the QR code subview
+// with a single Back button.
+func (m Model) handleSyncPairQRKey(
+	key string,
+) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "left":
+		m.focusSidebar()
+		return m, nil
+	case "up":
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+	case "enter", "backspace":
+		m.subview = svSyncthingPairInput
+		m.addonBtnIdx = 0
+		return m, nil
+	}
+	return m, nil
 }
 
 // ── LndHub create name handler ───────────────────────────
@@ -812,34 +1014,96 @@ func (m Model) handleLndHubCreateNameKey(
 	case "ctrl+c":
 		return m, tea.Quit
 	case "left":
-		if m.hubNameInput.Value() != "" {
-			var cmd tea.Cmd
-			m.hubNameInput, cmd =
-				m.hubNameInput.Update(
-					tea.Msg(msg))
-			return m, cmd
+		// Buttons: move left
+		if m.contentFocus() == 1 &&
+			m.hubCreateBtnIdx > 0 {
+			m.hubCreateBtnIdx--
+			return m, nil
+		}
+		// Input: pass through for cursor
+		if m.contentFocus() == 0 {
+			if m.hubNameInput.Value() != "" {
+				var cmd tea.Cmd
+				m.hubNameInput, cmd =
+					m.hubNameInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
 		}
 		m.focusSidebar()
 		return m, nil
 	case "right":
-		if m.hubNameInput.Value() != "" {
-			var cmd tea.Cmd
-			m.hubNameInput, cmd =
-				m.hubNameInput.Update(
-					tea.Msg(msg))
-			return m, cmd
+		// Buttons: move right
+		if m.contentFocus() == 1 &&
+			m.hubCreateBtnIdx < 1 {
+			m.hubCreateBtnIdx++
+			return m, nil
+		}
+		// Input: pass through for cursor
+		if m.contentFocus() == 0 {
+			if m.hubNameInput.Value() != "" {
+				var cmd tea.Cmd
+				m.hubNameInput, cmd =
+					m.hubNameInput.Update(
+						tea.Msg(msg))
+				return m, cmd
+			}
+		}
+		return m, nil
+	case "up":
+		if m.contentFocus() == 1 {
+			m.setContentFocus(0)
+			m.hubNameInput.Focus()
+			return m, nil
+		}
+		if m.hasDetailTabs() {
+			m.focusTabBar()
+			m.tabCursorX = 0
+			m.activeTab = m.findFlowTab()
+			return m, nil
+		}
+		return m, nil
+	case "down", "tab":
+		if m.contentFocus() == 0 {
+			m.setContentFocus(1)
+			m.hubCreateBtnIdx = 1 // default to Create
+			m.hubNameInput.Blur()
+			return m, nil
 		}
 		return m, nil
 	case "backspace":
-		if m.hubNameInput.Value() == "" {
-			m.subview = svLndHubManage
+		// Buttons: go back to input
+		if m.contentFocus() == 1 {
+			m.setContentFocus(0)
+			m.hubNameInput.Focus()
 			return m, nil
 		}
-		var cmd tea.Cmd
-		m.hubNameInput, cmd =
-			m.hubNameInput.Update(tea.Msg(msg))
-		return m, cmd
+		if m.hubNameInput.Value() != "" {
+			var cmd tea.Cmd
+			m.hubNameInput, cmd =
+				m.hubNameInput.Update(tea.Msg(msg))
+			return m, cmd
+		}
+		m.subview = svLndHubManage
+		return m, nil
 	case "enter":
+		// Buttons
+		if m.contentFocus() == 1 {
+			switch m.hubCreateBtnIdx {
+			case 0: // Clear
+				m.hubNameInput = newHubNameInput()
+				m.setContentFocus(0)
+				return m, nil
+			case 1: // Create Account
+				name := m.hubNameInput.Value()
+				if name != "" {
+					return m, createLndHubAccountCmd(
+						m.cfg.LndHubAdminToken)
+				}
+			}
+			return m, nil
+		}
+		// Enter in input field → submit
 		name := m.hubNameInput.Value()
 		if name != "" {
 			return m, createLndHubAccountCmd(
@@ -847,11 +1111,14 @@ func (m Model) handleLndHubCreateNameKey(
 		}
 		return m, nil
 	default:
-		var cmd tea.Cmd
-		m.hubNameInput, cmd =
-			m.hubNameInput.Update(tea.Msg(msg))
-		return m, cmd
+		if m.contentFocus() == 0 {
+			var cmd tea.Cmd
+			m.hubNameInput, cmd =
+				m.hubNameInput.Update(tea.Msg(msg))
+			return m, cmd
+		}
 	}
+	return m, nil
 }
 
 // ── On-chain send flow keys (single screen) ─────────────
@@ -1394,6 +1661,7 @@ func (m *Model) resetSendState() {
 	m.sendPreimage = ""
 	m.sendRouteHops = nil
 	m.sendFeeSats = 0
+	m.sendBtnIdx = 1
 }
 
 // ── Parse helpers ────────────────────────────────────────

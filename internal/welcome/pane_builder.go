@@ -103,6 +103,24 @@ func (p *paneBuilder) warn(text string) *paneBuilder {
 	return p
 }
 
+func (p *paneBuilder) warnWrap(
+	text string,
+) *paneBuilder {
+	lineW := p.w - 2
+	if lineW < 16 {
+		lineW = 16
+	}
+	for len(text) > 0 {
+		end := lineW
+		if end > len(text) {
+			end = len(text)
+		}
+		p.warn(text[:end])
+		text = text[end:]
+	}
+	return p
+}
+
 func (p *paneBuilder) success(
 	text string,
 ) *paneBuilder {
@@ -140,8 +158,7 @@ func (p *paneBuilder) appendError(
 ) *paneBuilder {
 	if errMsg != "" {
 		p.lines = append(p.lines, "")
-		p.lines = append(p.lines,
-			" "+theme.Warning.Render(errMsg))
+		p.warnWrap(errMsg)
 	}
 	return p
 }
