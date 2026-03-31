@@ -618,7 +618,7 @@ func (m Model) channelResultPane(w int) string {
 
 	if m.chanOpenError != "" {
 		p.title(theme.Warning, "Channel Open Failed")
-		p.warn(m.chanOpenError)
+		p.warnWrap(m.chanOpenError)
 	} else {
 		p.title(theme.Success, "Channel Opening")
 		p.line(" " + theme.Value.Render(
@@ -818,7 +818,7 @@ func (m Model) channelCloseResultPane(w int) string {
 
 	if m.closeError != "" {
 		p.title(theme.Warning, "Channel Close Failed")
-		p.warn(m.closeError)
+		p.warnWrap(m.closeError)
 	} else {
 		if m.closeForce {
 			p.title(theme.Warning,

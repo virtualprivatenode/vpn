@@ -98,9 +98,10 @@ func (m Model) walletOverview(w, h int) string {
 		for i := 0; i < len(m.payHistory); i++ {
 			balances[i] = runBal
 			entry := m.payHistory[i]
-			if entry.IsIncoming {
+			if entry.IsIncoming &&
+				entry.Status == "SETTLED" {
 				runBal -= entry.AmountSats
-			} else {
+			} else if !entry.IsIncoming {
 				runBal += entry.AmountSats +
 					entry.FeeSats
 			}
@@ -110,6 +111,7 @@ func (m Model) walletOverview(w, h int) string {
 			Foreground(theme.ColorDanger)
 		posStyle := lipgloss.NewStyle().
 			Foreground(theme.ColorPrimary)
+		dimStyle := theme.Dim
 		selBg := lipgloss.NewStyle().
 			Foreground(theme.ColorAccent).
 			Bold(true)
@@ -125,7 +127,21 @@ func (m Model) walletOverview(w, h int) string {
 				dateW, date)
 			memo := entry.Memo
 			if memo == "" {
-				memo = "—"
+				if entry.IsIncoming &&
+					entry.Status == "OPEN" {
+					memo = "(pending)"
+				} else if entry.IsIncoming &&
+					entry.Status == "EXPIRED" {
+					memo = "(expired)"
+				} else if entry.IsIncoming &&
+					entry.Status == "CANCELED" {
+					memo = "(canceled)"
+				} else if entry.IsIncoming &&
+					entry.Status == "ACCEPTED" {
+					memo = "(accepted)"
+				} else {
+					memo = "—"
+				}
 			}
 			if len(memo) > memoW-1 {
 				memo = memo[:memoW-2] + ".."
@@ -143,9 +159,16 @@ func (m Model) walletOverview(w, h int) string {
 						entry.AmountSats))
 			}
 
-			bal := balances[i]
-			balStr := fmt.Sprintf("%*s",
-				balW, formatSats(bal))
+			// OPEN/EXPIRED incoming: no balance impact
+			var balStr string
+			if entry.IsIncoming &&
+				entry.Status != "SETTLED" {
+				balStr = fmt.Sprintf("%*s", balW, "—")
+			} else {
+				bal := balances[i]
+				balStr = fmt.Sprintf("%*s",
+					balW, formatSats(bal))
+			}
 
 			marker := " "
 			if isSelected {
@@ -158,19 +181,43 @@ func (m Model) walletOverview(w, h int) string {
 						selBg.Render(balStr))
 			} else {
 				var valRendered string
-				if entry.IsIncoming {
+				if entry.IsIncoming &&
+					entry.Status == "SETTLED" {
 					valRendered =
 						posStyle.Render(valStr)
+				} else if entry.IsIncoming {
+					// OPEN or EXPIRED — dim
+					valRendered =
+						dimStyle.Render(valStr)
 				} else {
 					valRendered =
 						negStyle.Render(valStr)
 				}
+
+				var dateRendered, memoRendered,
+					balRendered string
+				if entry.IsIncoming &&
+					entry.Status != "SETTLED" {
+					dateRendered =
+						dimStyle.Render(dateStr)
+					memoRendered =
+						dimStyle.Render(memoStr)
+					balRendered =
+						dimStyle.Render(balStr)
+				} else {
+					dateRendered =
+						theme.Value.Render(dateStr)
+					memoRendered =
+						theme.Dim.Render(memoStr)
+					balRendered =
+						theme.Value.Render(balStr)
+				}
 				midLines = append(midLines,
 					marker+
-						theme.Value.Render(dateStr)+
-						theme.Dim.Render(memoStr)+
+						dateRendered+
+						memoRendered+
 						valRendered+
-						theme.Value.Render(balStr))
+						balRendered)
 			}
 		}
 	}
@@ -214,9 +261,28 @@ func (m Model) paymentDetailContent(w int) string {
 	p := newPane(w)
 
 	if entry.IsIncoming {
-		p.title(theme.Success, "↓ Received Payment")
+		switch entry.Status {
+		case "SETTLED":
+			p.title(theme.Success,
+				"Received Payment")
+		case "OPEN":
+			p.title(theme.Header,
+				"Pending Invoice")
+		case "EXPIRED":
+			p.title(theme.Warning,
+				"Expired Invoice")
+		case "CANCELED":
+			p.title(theme.Warning,
+				"Canceled Invoice")
+		case "ACCEPTED":
+			p.title(theme.Header,
+				"Accepting Payment")
+		default:
+			p.title(theme.Header,
+				"Incoming Invoice")
+		}
 	} else {
-		p.title(theme.Warning, "↑ Sent Payment")
+		p.title(theme.Warning, "Sent Payment")
 	}
 
 	p.field("Amount:  ",
@@ -275,12 +341,22 @@ func (m Model) walletSendPane(w int) string {
 		formatSats(totalLocal)+" sats")
 	p.blank()
 
+	inputFocused := m.contentFocused &&
+		!m.tabFocused && m.contentFocus() == 0
 	p.input("Payment Request:",
-		m.sendInput, m.contentFocused)
+		m.sendInput, inputFocused)
 	p.blank()
 	p.dim("Paste a bolt11 invoice")
 
 	p.appendError(m.sendError)
+
+	p.blank()
+	btnFocused := m.contentFocused &&
+		!m.tabFocused && m.contentFocus() == 1
+	p.buttons(
+		[]string{"Clear", "Send"},
+		m.sendBtnIdx, btnFocused)
+
 	return p.render()
 }
 
@@ -319,7 +395,7 @@ func (m Model) walletSendResultPane(w int) string {
 
 	if m.sendError != "" {
 		p.title(theme.Warning, "Payment Failed")
-		p.warn(m.sendError)
+		p.warnWrap(m.sendError)
 	} else {
 		p.title(theme.Success, "Payment Sent")
 		p.field("Amount: ",
@@ -412,6 +488,18 @@ func (m Model) walletReceiveExpiredPane(w int) string {
 	p := newPane(w)
 	p.title(theme.Warning, "Invoice Expired")
 	p.dim("Create a new invoice to try again.")
+	return p.render()
+}
+
+func (m Model) walletReceiveErrorPane(w int) string {
+	p := newPane(w)
+	p.title(theme.Warning, "Receive Failed")
+	p.warnWrap(m.recvError)
+	p.blank()
+	p.dim("The connection to LND was lost while")
+	p.dim("waiting for payment. Your invoice may")
+	p.dim("still be valid — check your payment")
+	p.dim("history after reconnecting.")
 	return p.render()
 }
 

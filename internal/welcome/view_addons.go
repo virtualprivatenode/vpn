@@ -13,17 +13,17 @@ import (
 func (m Model) renderSyncthingTabContent(
 	w, h int,
 ) string {
+	return m.syncthingDetailContent(w, h)
+}
+
+func (m Model) renderSyncthingPairTabContent(
+	w, h int,
+) string {
 	switch m.subview {
-	case svSyncthingPairInput:
-		return m.syncthingPairContent(w)
-	case svSyncthingWebUI:
-		return m.syncthingWebUIContent(w)
-	case svSyncthingDeviceDetail:
-		return m.syncthingDeviceDetailContent(w)
-	case svSyncthingDeviceQR:
-		return m.syncthingDetailContent(w, h)
+	case svSyncthingPairQR:
+		return m.syncthingPairQRContent(w, h)
 	default:
-		return m.syncthingDetailContent(w, h)
+		return m.syncthingPairContent(w, h)
 	}
 }
 
@@ -35,94 +35,55 @@ func (m Model) renderLndHubTabContent(
 		return m.lndhubCreateNameContent(w)
 	case svLndHubCreateAccount:
 		return m.lndhubCreatedContent(w)
-	case svLndHubAccountDetail:
-		return m.lndhubAccountDetailContent(w)
-	case svLndHubDeactivateConfirm:
-		return m.lndhubDeactivateContent(w)
+	case svLndHubCreateQR:
+		return m.lndhubCreateQRContent(w)
 	default:
 		return m.lndhubManageContent(w, h)
 	}
 }
 
-// ── Add-ons overview (card buttons) ──────────────────────
+// ── Add-ons overview ─────────────────────────────────────
 
 func (m Model) addonsOverview(w, h int) string {
 	isFocused := m.contentFocused && !m.tabFocused
 
-	boxW := w - 6
-	if boxW < 28 {
-		boxW = 28
-	}
-
-	borderNormal := theme.AddonBorderNormal
-	borderActive := theme.AddonBorderActive
-
 	titleNormal := theme.AddonTitleNormal
 	titleActive := theme.AddonTitleActive
+	sepStyle := theme.TableDim
 
-	// ── Scrollable middle (all cards) ────────────
-	var midLines []string
-
-	renderCard := func(
+	renderSection := func(
 		icon, name, desc string,
 		statusLine1, statusLine2 string,
 		selected bool,
-	) {
-		brd := borderNormal
+	) []string {
 		ttl := titleNormal
 		if selected {
-			brd = borderActive
 			ttl = titleActive
 		}
 
-		cardH := 8
-		markerRow := cardH / 2
-
-		topLine := brd.Render(
-			"┌" + strings.Repeat("─", boxW-2) + "┐")
-		botLine := brd.Render(
-			"└" + strings.Repeat("─", boxW-2) + "┘")
-
-		cardRows := make([]string, cardH)
-		cardRows[0] = topLine
-		cardRows[cardH-1] = botLine
-
-		innerLines := []string{
-			"",
-			icon + " " + ttl.Render(name),
-			theme.Dim.Render(desc),
-			"",
-			statusLine1,
-			statusLine2,
+		marker := "  "
+		if selected {
+			marker =
+				theme.NavActive.Render("▸") + " "
 		}
 
-		for i := 1; i < cardH-1; i++ {
-			content := ""
-			idx := i - 1
-			if idx < len(innerLines) {
-				content = innerLines[idx]
-			}
-			contentVis := lipgloss.Width(content)
-			padR := boxW - 2 - contentVis - 1
-			if padR < 0 {
-				padR = 0
-			}
-			cardRows[i] = brd.Render("│") +
-				" " + content +
-				strings.Repeat(" ", padR) +
-				brd.Render("│")
+		var lines []string
+		lines = append(lines,
+			marker+icon+" "+ttl.Render(name))
+		lines = append(lines, "")
+		lines = append(lines,
+			"   "+theme.Dim.Render(desc))
+		lines = append(lines, "")
+		lines = append(lines,
+			"   "+statusLine1)
+		if statusLine2 != "" {
+			lines = append(lines,
+				"   "+statusLine2)
 		}
-
-		for i, row := range cardRows {
-			marker := "  "
-			if selected && i == markerRow {
-				marker =
-					theme.NavActive.Render("▸") + " "
-			}
-			midLines = append(midLines, marker+row)
-		}
+		return lines
 	}
 
+	// ── Syncthing section content ────────────────
 	syncSelected := isFocused && m.btnIdx == 0
 
 	var syncStat1, syncStat2 string
@@ -138,15 +99,14 @@ func (m Model) addonsOverview(w, h int) string {
 		syncStat2 = ""
 	}
 
-	renderCard(
+	syncLines := renderSection(
 		"🔄", "Syncthing",
 		"Auto-backup LND channel state",
 		syncStat1, syncStat2,
 		syncSelected,
 	)
 
-	midLines = append(midLines, "")
-
+	// ── LndHub section content ───────────────────
 	hubSelected := isFocused && m.btnIdx == 1
 
 	var hubStat1, hubStat2 string
@@ -167,31 +127,59 @@ func (m Model) addonsOverview(w, h int) string {
 		hubStat2 = ""
 	}
 
-	renderCard(
+	hubLines := renderSection(
 		"⚡", "LndHub",
 		"Lightning accounts for family & friends",
 		hubStat1, hubStat2,
 		hubSelected,
 	)
 
-	midContent := strings.Join(midLines, "\n")
-
-	// ── Viewport ─────────────────────────────────
-	// Top gap line
-	vpH := h - 1
-	if vpH < 1 {
-		vpH = 1
+	// ── Layout: two halves + divider ─────────────
+	// 1 line for divider, remaining split evenly
+	bodyH := h
+	if bodyH < 4 {
+		bodyH = 4
 	}
 
-	// Each card is 8 lines + 1 gap = 9 lines
-	cursorLine := m.btnIdx * 9
+	topH := (bodyH - 1) / 2
+	botH := bodyH - 1 - topH
 
-	vpRendered := renderViewport(
-		midContent, w, vpH, cursorLine,
-		len(midLines), isFocused)
+	// Center section content vertically in its half
+	centerInHalf := func(
+		content []string, halfH int,
+	) []string {
+		pad := (halfH - len(content)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		blank := ""
+		var out []string
+		for i := 0; i < pad; i++ {
+			out = append(out, blank)
+		}
+		out = append(out, content...)
+		for len(out) < halfH {
+			out = append(out, blank)
+		}
+		return out
+	}
 
-	// ── Assemble output ──────────────────────────
-	return "\n" + vpRendered
+	var lines []string
+
+	// Top half: Syncthing
+	lines = append(lines,
+		centerInHalf(syncLines, topH)...)
+
+	// Divider — full width
+	lines = append(lines,
+		sepStyle.Render(
+			strings.Repeat("─", w)))
+
+	// Bottom half: LndHub
+	lines = append(lines,
+		centerInHalf(hubLines, botH)...)
+
+	return strings.Join(lines, "\n")
 }
 
 // ── Syncthing detail ─────────────────────────────────────
@@ -199,25 +187,43 @@ func (m Model) addonsOverview(w, h int) string {
 func (m Model) syncthingDetailContent(
 	w, h int,
 ) string {
-	p := newPane(w)
-	p.title(theme.Header, "🔄 Syncthing — Details")
-
 	isFocused := m.contentFocused && !m.tabFocused
-	onButtons := isFocused && m.addonFocus == 0
+	onButtons := isFocused && m.contentFocus() == 0
 
-	p.buttons(
-		[]string{"Pair Device", "Device QR", "Web UI"},
-		m.addonBtnIdx, onButtons)
-	p.blank()
-	p.blank()
+	// ── Fixed header: title + buttons ────────────
+	var headerLines []string
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines,
+		centerPad(
+			theme.Header.Render(
+				"Syncthing — Details"), w))
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines,
+		renderButtons(
+			[]string{"Pair Device", "Web UI"},
+			m.addonBtnIdx, onButtons, w))
+	headerLines = append(headerLines, "")
+
+	headerH := len(headerLines)
+	header := strings.Join(headerLines, "\n")
+
+	// ── Scrollable body ─────────────────────────
+	var midLines []string
 
 	pairedCount := len(m.cfg.SyncthingDevices)
-	p.labelLine(fmt.Sprintf(
-		"Paired Devices (%d)", pairedCount))
-	p.blank()
+	midLines = append(midLines,
+		" "+theme.Label.Render(fmt.Sprintf(
+			"Paired Devices (%d)", pairedCount)))
+	midLines = append(midLines, "")
+
+	// Track cursor line for viewport auto-scroll.
+	// cursorLine is relative to midLines.
+	cursorLine := 0
 
 	if pairedCount == 0 {
-		p.dim("No devices paired yet")
+		midLines = append(midLines,
+			" "+theme.Dim.Render(
+				"No devices paired yet"))
 	} else {
 		hdrStyle := theme.TableHeader
 		sepStyle := theme.TableDim
@@ -234,34 +240,20 @@ func (m Model) syncthingDetailContent(
 			hdrStyle.Render(pad("Device ID", idW)) +
 			hdrStyle.Render(
 				fmt.Sprintf("%-*s", dateW, "Paired"))
-		p.line(hdr)
-		p.line(" " + sepStyle.Render(
-			strings.Repeat("─", w-2)))
+		midLines = append(midLines, hdr)
+		midLines = append(midLines,
+			" "+sepStyle.Render(
+				strings.Repeat("─", w-2)))
 
-		onList := isFocused && m.addonFocus == 1
-		maxRows := h - 14
-		if maxRows < 3 {
-			maxRows = 3
-		}
-
-		startIdx := 0
-		if m.syncCursor >= startIdx+maxRows {
-			startIdx = m.syncCursor - maxRows + 1
-		}
-		endIdx := startIdx + maxRows
-		if endIdx > pairedCount {
-			endIdx = pairedCount
-		}
+		onList := isFocused && m.contentFocus() == 1
 
 		selStyle := lipgloss.NewStyle().
 			Foreground(theme.ColorAccent).
 			Bold(true)
 
-		if startIdx > 0 {
-			p.dim("  ↑ more")
-		}
+		tableStart := len(midLines)
 
-		for i := startIdx; i < endIdx; i++ {
+		for i := 0; i < pairedCount; i++ {
 			d := m.cfg.SyncthingDevices[i]
 
 			name := d.Name
@@ -284,74 +276,318 @@ func (m Model) syncthingDetailContent(
 			marker := " "
 			if isSelected {
 				marker = "▸"
-				p.line(marker +
-					selStyle.Render(nameStr) +
-					selStyle.Render(idStr) +
-					selStyle.Render(dateStr))
+				cursorLine = tableStart + i
+				midLines = append(midLines,
+					marker+
+						selStyle.Render(nameStr)+
+						selStyle.Render(idStr)+
+						selStyle.Render(dateStr))
 			} else {
-				p.line(marker +
-					theme.Value.Render(nameStr) +
-					theme.Dim.Render(idStr) +
-					theme.Dim.Render(dateStr))
+				midLines = append(midLines,
+					marker+
+						theme.Value.Render(nameStr)+
+						theme.Dim.Render(idStr)+
+						theme.Dim.Render(dateStr))
 			}
 		}
-
-		if endIdx < pairedCount {
-			p.dim("  ↓ more")
-		}
 	}
+
+	midContent := strings.Join(midLines, "\n")
+
+	// ── Viewport ────────────────────────────────
+	vpH := h - headerH
+	if vpH < 1 {
+		vpH = 1
+	}
+
+	vpRendered := renderViewport(
+		midContent, w, vpH, cursorLine,
+		len(midLines),
+		isFocused && m.contentFocus() == 1)
+
+	return header + "\n" + vpRendered
+}
+
+// ── Pair Device flow ────────────────────────────────────
+
+func (m Model) syncthingPairContent(
+	w, h int,
+) string {
+	if m.syncPairSuccess {
+		return m.syncthingPostPairContent(w, h)
+	}
+	return m.syncthingPairInputContent(w, h)
+}
+
+// Screen 1: Setup instructions + Device ID input
+
+func (m Model) syncthingPairInputContent(
+	w, h int,
+) string {
+	isFocused := m.contentFocused && !m.tabFocused
+
+	var lines []string
+
+	// Title
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Pair Device"), w))
+	lines = append(lines, "")
+
+	// Instructions
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"Set up Syncthing on your local machine:"))
+	lines = append(lines, "")
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"1. Download & verify Syncthing"))
+	lines = append(lines,
+		"    "+theme.Mono.Render("syncthing.net"))
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"2. "+"\u2699"+" Actions "+"\u2192"+
+				" "+"\u2699"+" Settings "+"\u2192"+
+				" Connections "+"\u2192"+
+				" UNCHECK ALL:"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Enable NAT traversal"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Global Discovery"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Local Discovery"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Enable Relaying"))
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"3. "+"\u2713"+" Save"))
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"4. "+"\u2699"+" Actions "+"\u2192"+
+				" Show ID "+"\u2192"+" Copy"))
+	lines = append(lines,
+		" "+theme.Dim.Render("5. Paste below"))
+	lines = append(lines, "")
+
+	// Input
+	labelStyle := theme.Label
+	marker := " "
+	if isFocused && m.contentFocus() == 0 {
+		labelStyle = theme.NavActive
+		marker = theme.NavActive.Render("▸")
+	}
+	lines = append(lines,
+		" "+labelStyle.Render("Your Device ID:"))
+	lines = append(lines,
+		marker+m.syncDeviceInput.View())
+
+	if m.syncPairError != "" {
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Warning.Render(
+				m.syncPairError))
+	}
+
+	// Pad to push buttons to bottom
+	contentLines := len(lines)
+	// Reserve 1 line for buttons
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	// Buttons at bottom
+	lines = append(lines,
+		renderButtons(
+			[]string{"Clear", "Pair"},
+			m.addonBtnIdx,
+			isFocused && m.contentFocus() == 1, w))
+
+	// Clamp to h
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	_ = contentLines
+	return strings.Join(lines, "\n")
+}
+
+// Screen 2: Post-pair success + Node ID + instructions
+
+func (m Model) syncthingPostPairContent(
+	w, h int,
+) string {
+	isFocused := m.contentFocused && !m.tabFocused
+
+	var lines []string
+
+	// Title
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Complete Pairing"), w))
+	lines = append(lines, "")
 
 	vpsDeviceID := installer.GetSyncthingDeviceID()
 	if vpsDeviceID != "" {
-		p.blank()
-		p.labelLine("Node ID:")
-		id := vpsDeviceID
-		if len(id) > w-4 {
-			id = id[:w-7] + "..."
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Your device was added to the node."))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Now add this node to your local"+
+					" Syncthing:"))
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Label.Render("Node ID:"))
+
+		// monoWrap inline
+		lineW := w - 2
+		if lineW < 16 {
+			lineW = 16
 		}
-		p.mono(id)
+		text := vpsDeviceID
+		for len(text) > 0 {
+			end := lineW
+			if end > len(text) {
+				end = len(text)
+			}
+			lines = append(lines,
+				" "+theme.Mono.Render(text[:end]))
+			text = text[end:]
+		}
+
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"1. Add Remote Device"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"General "+"\u2192"+" Device ID:"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"paste Node ID above"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"or press Show QR to scan"))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"2. Advanced "+"\u2192"+
+					" Addresses "+"\u2192"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"replace \"dynamic\" with:"))
+		lines = append(lines,
+			"    "+theme.Mono.Render(
+				"tcp://<your-server-ip>:22000"))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"3. Save "+"\u2192"+
+					" wait for connection"))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"4. Accept the lnd-backup"+
+					" folder share"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"General "+"\u2192"+
+					" set custom Folder Path"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"Advanced "+"\u2192"+
+					" Folder Type "+"\u2192"+
+					" Receive Only"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"\u2713"+" Save"))
 	}
 
-	return p.render()
+	// Pad to push buttons to bottom
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	// Buttons at bottom
+	lines = append(lines,
+		renderButtons(
+			[]string{"Show QR", "Done"},
+			m.addonBtnIdx, isFocused, w))
+
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n")
 }
 
-func (m Model) syncthingPairContent(w int) string {
-	p := newPane(w)
-	p.title(theme.Header, "Pair Device")
+func (m Model) syncthingPairQRContent(
+	w, h int,
+) string {
+	isFocused := m.contentFocused && !m.tabFocused
 
-	p.input("Device ID:",
-		m.syncDeviceInput,
-		m.contentFocused)
-	p.blank()
-	p.dim("Paste your local Syncthing Device ID.")
-	p.dim("Find it in Syncthing → Actions → Show ID")
-	p.dim("Format: XXXXXXX-XXXXXXX-XXXXXXX-...")
-	p.blank()
-	p.dim("After pairing, add this node's ID in your")
-	p.dim("local Syncthing to complete the connection.")
+	var lines []string
 
-	if m.syncPairError != "" {
-		p.blank()
-		p.warn("Error: " + m.syncPairError)
-	}
-	if m.syncPairSuccess {
-		p.blank()
-		p.success("✅ Device paired!")
-		vpsDeviceID := installer.GetSyncthingDeviceID()
-		if vpsDeviceID != "" {
-			p.blank()
-			p.dim(
-				"Now add this node in your " +
-					"local Syncthing:")
-			id := vpsDeviceID
-			if len(id) > w-4 {
-				id = id[:w-7] + "..."
+	// Title
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Node ID — QR Code"), w))
+	lines = append(lines, "")
+
+	vpsDeviceID := installer.GetSyncthingDeviceID()
+	if vpsDeviceID != "" {
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Scan to add this node as a"+
+					" remote device:"))
+		lines = append(lines, "")
+
+		qr := renderQRCode(vpsDeviceID)
+		if qr != "" {
+			for _, line := range strings.Split(
+				qr, "\n") {
+				qrW := lipgloss.Width(line)
+				padN := (w - qrW) / 2
+				if padN < 0 {
+					padN = 0
+				}
+				lines = append(lines,
+					strings.Repeat(" ", padN)+
+						line)
 			}
-			p.mono(id)
 		}
+	} else {
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Node ID not available yet."))
 	}
 
-	return p.render()
+	// Pad to push button to bottom
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	// Button at bottom
+	lines = append(lines,
+		renderButtons(
+			[]string{"Back"},
+			0, isFocused, w))
+
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) syncthingWebUIContent(w int) string {
@@ -423,6 +659,45 @@ func (m Model) syncthingDeviceDetailContent(
 	p.blank()
 	p.field("Paired: ", dev.PairedAt)
 
+	// Remove button (like LndHub Deactivate)
+	p.blank()
+	isFocused := m.contentFocused && !m.tabFocused
+	isOnButton := isFocused && m.contentFocus() == 1
+	p.line(renderButtons(
+		[]string{"Remove"},
+		0, isOnButton, w))
+
+	p.appendError(m.syncRemoveError)
+
+	return p.render()
+}
+
+func (m Model) syncthingRemoveConfirmContent(
+	w int,
+) string {
+	p := newPane(w)
+
+	if m.syncCursor < len(m.cfg.SyncthingDevices) {
+		dev := m.cfg.SyncthingDevices[m.syncCursor]
+		p.title(theme.Warning,
+			"Remove "+dev.Name+"?")
+		p.line(" " + theme.Value.Render(
+			"• Stop syncing channel backups"+
+				" to this device"))
+		p.line(" " + theme.Value.Render(
+			"• Remove device from Syncthing"))
+		p.line(" " + theme.Value.Render(
+			"• Does not delete data on the"+
+				" remote device"))
+	}
+
+	p.blank()
+
+	isFocused := m.contentFocused && !m.tabFocused
+	p.line(renderButtons(
+		[]string{"Go Back", "Remove"},
+		m.syncRemoveBtnIdx, isFocused, w))
+
 	return p.render()
 }
 
@@ -431,21 +706,34 @@ func (m Model) syncthingDeviceDetailContent(
 func (m Model) lndhubManageContent(
 	w, h int,
 ) string {
-	p := newPane(w)
-	p.title(theme.Header, "⚡ LndHub — Accounts")
-
 	isFocused := m.contentFocused && !m.tabFocused
-	onButtons := isFocused && m.addonFocus == 0
+	onButtons := isFocused && m.contentFocus() == 0
 
-	p.buttons(
-		[]string{"Create", "Details", "Deactivate"},
-		m.addonBtnIdx, onButtons)
-	p.blank()
-	p.blank()
+	// ── Fixed header: title + button ─────────────
+	var headerLines []string
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines,
+		centerPad(
+			theme.Header.Render(
+				"LndHub Accounts"), w))
+	headerLines = append(headerLines, "")
+	headerLines = append(headerLines,
+		renderButtons(
+			[]string{"Create New Account"},
+			m.addonBtnIdx, onButtons, w))
+	headerLines = append(headerLines, "")
+
+	headerH := len(headerLines)
+	header := strings.Join(headerLines, "\n")
+
+	// ── Scrollable body ─────────────────────────
+	var midLines []string
+	cursorLine := 0
 
 	accounts := m.cfg.LndHubAccounts
 	if len(accounts) == 0 {
-		p.dim("No accounts yet")
+		midLines = append(midLines,
+			" "+theme.Dim.Render("No accounts yet"))
 	} else {
 		hdrStyle := theme.TableHeader
 		sepStyle := theme.TableDim
@@ -465,35 +753,20 @@ func (m Model) lndhubManageContent(
 				pad("Status", statusW)) +
 			hdrStyle.Render(
 				fmt.Sprintf("%-*s", dateW, "Created"))
-		p.line(hdr)
-		p.line(" " + sepStyle.Render(
-			strings.Repeat("─", w-2)))
+		midLines = append(midLines, hdr)
+		midLines = append(midLines,
+			" "+sepStyle.Render(
+				strings.Repeat("─", w-2)))
 
-		onList := isFocused && m.addonFocus == 1
-		visSize := h - 12
-		if visSize < 3 {
-			visSize = 3
-		}
-		viewStart := 0
-		if m.hubCursor >= viewStart+visSize {
-			viewStart = m.hubCursor - visSize + 1
-		}
-		viewEnd := viewStart + visSize
-		if viewEnd > len(accounts) {
-			viewEnd = len(accounts)
-		}
+		onList := isFocused && m.contentFocus() == 1
 
 		selStyle := lipgloss.NewStyle().
 			Foreground(theme.ColorAccent).
 			Bold(true)
 
-		if viewStart > 0 {
-			p.dim("  ↑ more")
-		}
+		tableStart := len(midLines)
 
-		for i := viewStart; i < viewEnd; i++ {
-			a := accounts[i]
-
+		for i, a := range accounts {
 			name := a.Label
 			if len(name) > nameW-1 {
 				name = name[:nameW-2] + ".."
@@ -522,11 +795,13 @@ func (m Model) lndhubManageContent(
 			marker := " "
 			if isSelected {
 				marker = "▸"
-				p.line(marker +
-					selStyle.Render(nameStr) +
-					selStyle.Render(loginStr) +
-					selStyle.Render(statusStr) +
-					selStyle.Render(dateStr))
+				cursorLine = tableStart + i
+				midLines = append(midLines,
+					marker+
+						selStyle.Render(nameStr)+
+						selStyle.Render(loginStr)+
+						selStyle.Render(statusStr)+
+						selStyle.Render(dateStr))
 			} else {
 				var stRendered string
 				if a.Active {
@@ -536,34 +811,53 @@ func (m Model) lndhubManageContent(
 					stRendered = theme.Warn.Render(
 						statusStr)
 				}
-				p.line(marker +
-					theme.Value.Render(nameStr) +
-					theme.Dim.Render(loginStr) +
-					stRendered +
-					theme.Dim.Render(dateStr))
+				midLines = append(midLines,
+					marker+
+						theme.Value.Render(nameStr)+
+						theme.Dim.Render(loginStr)+
+						stRendered+
+						theme.Dim.Render(dateStr))
 			}
-		}
-
-		if viewEnd < len(accounts) {
-			p.dim("  ↓ more")
 		}
 	}
 
-	return p.render()
+	midContent := strings.Join(midLines, "\n")
+
+	// ── Viewport ────────────────────────────────
+	vpH := h - headerH
+	if vpH < 1 {
+		vpH = 1
+	}
+
+	vpRendered := renderViewport(
+		midContent, w, vpH, cursorLine,
+		len(midLines),
+		isFocused && m.contentFocus() == 1)
+
+	return header + "\n" + vpRendered
 }
 
 func (m Model) lndhubCreateNameContent(w int) string {
 	p := newPane(w)
-	p.title(theme.Header, "Create Account")
+	p.title(theme.Header, "Create New Account")
 
 	p.dim("Create a custodial Lightning wallet account.")
 	p.dim("The recipient will receive a login and")
 	p.dim("password to connect via BlueWallet or Zeus.")
 	p.blank()
 
-	p.input("Name:", m.hubNameInput, m.contentFocused)
+	inputFocused := m.contentFocused &&
+		!m.tabFocused && m.contentFocus() == 0
+	p.input("Name:", m.hubNameInput, inputFocused)
 	p.blank()
 	p.dim("Letters, numbers, spaces, hyphens")
+
+	p.blank()
+	btnFocused := m.contentFocused &&
+		!m.tabFocused && m.contentFocus() == 1
+	p.buttons(
+		[]string{"Clear", "Create Account"},
+		m.hubCreateBtnIdx, btnFocused)
 
 	return p.render()
 }
@@ -571,7 +865,7 @@ func (m Model) lndhubCreateNameContent(w int) string {
 func (m Model) lndhubCreatedContent(w int) string {
 	p := newPane(w)
 	p.title(theme.Success,
-		"✅ Account created: "+
+		"Account created: "+
 			m.hubNameInput.Value())
 
 	if m.lastAccount != nil {
@@ -594,13 +888,58 @@ func (m Model) lndhubCreatedContent(w int) string {
 		p.warn("Share with " +
 			m.hubNameInput.Value() +
 			". Won't be shown again.")
-		p.blank()
 
+		p.blank()
 		isFocused := m.contentFocused && !m.tabFocused
-		p.buttons(
-			[]string{"Show QR", "Done"},
-			m.addonBtnIdx, isFocused)
+		buttons := []string{"Done"}
+		if hubOnion != "" {
+			buttons = []string{"Show QR", "Done"}
+		}
+		p.line(renderButtons(
+			buttons,
+			m.addonBtnIdx, isFocused, w))
 	}
+
+	return p.render()
+}
+
+func (m Model) lndhubCreateQRContent(w int) string {
+	p := newPane(w)
+	p.title(theme.Header, "LndHub Connection QR")
+
+	if m.lastAccount != nil {
+		hubOnion := readOnion(paths.TorLndHubHostname)
+		if hubOnion != "" {
+			qrData := fmt.Sprintf(
+				"lndhub://%s:%s@%s:%s",
+				m.lastAccount.Login,
+				m.lastAccount.Password,
+				hubOnion,
+				paths.LndHubExternalPort)
+			qr := renderQRCode(qrData)
+			if qr != "" {
+				p.dim("Scan with BlueWallet or Zeus")
+				p.blank()
+				for _, line := range strings.Split(
+					qr, "\n") {
+					lineW := lipgloss.Width(line)
+					padN := (w - lineW) / 2
+					if padN < 0 {
+						padN = 0
+					}
+					p.line(
+						strings.Repeat(" ", padN) +
+							line)
+				}
+			}
+		}
+	}
+
+	p.blank()
+	isFocused := m.contentFocused && !m.tabFocused
+	p.buttons(
+		[]string{"Back"},
+		0, isFocused)
 
 	return p.render()
 }
@@ -624,6 +963,16 @@ func (m Model) lndhubAccountDetailContent(
 	if acct.Active {
 		p.line(" " + theme.Label.Render("Status:  ") +
 			theme.Success.Render("active"))
+
+		// Deactivate button (like Close Channel)
+		p.blank()
+		isFocused := m.contentFocused &&
+			!m.tabFocused
+		isOnButton := isFocused &&
+			m.contentFocus() == 1
+		p.line(renderButtons(
+			[]string{"Deactivate"},
+			0, isOnButton, w))
 	} else {
 		p.line(" " + theme.Label.Render("Status:  ") +
 			theme.Warning.Render("deactivated"))
@@ -631,12 +980,9 @@ func (m Model) lndhubAccountDetailContent(
 			p.field("Deactivated: ",
 				acct.DeactivatedAt)
 		}
-		if acct.BalanceOnDeactivate != "" &&
-			acct.BalanceOnDeactivate != "0" &&
-			acct.BalanceOnDeactivate != "unknown" {
-			p.blank()
-			p.warn("Had " +
-				acct.BalanceOnDeactivate + " sats")
+		if acct.BalanceOnDeactivate != "" {
+			p.field("Balance:     ",
+				acct.BalanceOnDeactivate+" sats")
 		}
 	}
 
@@ -660,35 +1006,12 @@ func (m Model) lndhubDeactivateContent(
 			"• Login stops working"))
 	}
 
+	p.blank()
+
+	isFocused := m.contentFocused && !m.tabFocused
+	p.line(renderButtons(
+		[]string{"Go Back", "Deactivate"},
+		m.hubDeactivateBtnIdx, isFocused, w))
+
 	return p.render()
-}
-
-func (m Model) viewSyncthingDeviceQR() string {
-	vpsDeviceID := installer.GetSyncthingDeviceID()
-
-	var lines []string
-	lines = append(lines, theme.Header.Render(
-		"🔄 Node Device ID — Scan to Pair"))
-	lines = append(lines, "")
-
-	if vpsDeviceID == "" {
-		lines = append(lines, theme.Warn.Render(
-			"Device ID not available."))
-	} else {
-		qr := renderQRCode(vpsDeviceID)
-		if qr != "" {
-			lines = append(lines, qr)
-		}
-		lines = append(lines, "")
-		lines = append(lines, theme.Dim.Render(
-			"Scan → paste into local Syncthing"))
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, theme.Footer.Render(
-		"backspace back • q quit"))
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		lipgloss.JoinVertical(
-			lipgloss.Left, lines...))
 }

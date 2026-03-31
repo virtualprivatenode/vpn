@@ -133,16 +133,26 @@ func (c *Client) LookupInvoice(paymentHash []byte) (*Invoice, error) {
 		return nil, err
 	}
 
-	now := time.Now().Unix()
-	isExpired := !resp.GetSettled() &&
-		(resp.GetCreationDate()+resp.GetExpiry()) < now
+	// Use LND's state field; check expiry client-side
+	// for OPEN invoices (LND doesn't auto-expire them)
+	settled := resp.GetState() == lnrpc.Invoice_SETTLED
+	isExpired := false
+	if resp.GetState() == lnrpc.Invoice_OPEN {
+		expiry := resp.GetExpiry()
+		if expiry > 0 {
+			now := time.Now().Unix()
+			isExpired = (resp.GetCreationDate() + expiry) < now
+		}
+	} else if resp.GetState() == lnrpc.Invoice_CANCELED {
+		isExpired = true
+	}
 
 	return &Invoice{
 		PaymentRequest: resp.GetPaymentRequest(),
 		PaymentHash:    fmt.Sprintf("%x", resp.GetRHash()),
 		AmountSats:     resp.GetValue(),
 		Memo:           resp.GetMemo(),
-		Settled:        resp.GetSettled(),
+		Settled:        settled,
 		CreationDate:   resp.GetCreationDate(),
 		SettleDate:     resp.GetSettleDate(),
 		Expiry:         resp.GetExpiry(),
@@ -172,18 +182,33 @@ func (c *Client) ListInvoices(limit uint64) ([]PaymentEntry, error) {
 
 	var entries []PaymentEntry
 	for _, inv := range resp.GetInvoices() {
-		if inv.GetValue() == 0 && !inv.GetSettled() {
+		if inv.GetValue() == 0 &&
+			inv.GetState() != lnrpc.Invoice_SETTLED {
 			continue // skip zero-amount unsettled
 		}
-		status := "OPEN"
-		if inv.GetSettled() {
+
+		var status string
+		switch inv.GetState() {
+		case lnrpc.Invoice_SETTLED:
 			status = "SETTLED"
-		} else {
+		case lnrpc.Invoice_CANCELED:
+			status = "CANCELED"
+		case lnrpc.Invoice_ACCEPTED:
+			status = "ACCEPTED"
+		case lnrpc.Invoice_OPEN:
+			// LND keeps expired invoices as OPEN;
+			// check expiry client-side.
+			status = "OPEN"
 			now := time.Now().Unix()
-			if (inv.GetCreationDate() + inv.GetExpiry()) < now {
+			expiry := inv.GetExpiry()
+			if expiry > 0 &&
+				(inv.GetCreationDate()+expiry) < now {
 				status = "EXPIRED"
 			}
+		default:
+			status = "OPEN"
 		}
+
 		entries = append(entries, PaymentEntry{
 			PaymentHash:  fmt.Sprintf("%x", inv.GetRHash()),
 			AmountSats:   inv.GetValue(),

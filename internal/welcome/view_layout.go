@@ -20,8 +20,6 @@ func (m Model) View() tea.View {
 			content = m.viewQR()
 		case svFullURL:
 			content = m.viewFullURL()
-		case svSyncthingDeviceQR:
-			content = m.viewSyncthingDeviceQR()
 		case svWalletInfo:
 			content = m.viewWalletInfo()
 		default:
@@ -394,6 +392,14 @@ func (m Model) renderActiveTabContent(
 
 	tab := tabs[idx]
 
+	// L16 new path: delegate to screen component
+	if tab.Screen != nil {
+		m.screenCtx.HasTabs = m.hasDetailTabs()
+		m.screenCtx.ContentFocused = m.contentFocused
+		return tab.Screen.View(w, h)
+	}
+
+	// Legacy path: existing switch on tab.Kind
 	switch tab.Kind {
 	case tabMain:
 		return m.renderContent(w, h)
@@ -438,6 +444,8 @@ func (m Model) renderActiveTabContent(
 			return m.walletReceivePaidPane(w)
 		case svReceiveExpired:
 			return m.walletReceiveExpiredPane(w)
+		case svReceiveError:
+			return m.walletReceiveErrorPane(w)
 		default:
 			return m.walletReceivePane(w)
 		}
@@ -481,8 +489,46 @@ func (m Model) renderActiveTabContent(
 		return m.channelHistoryPane(w, h)
 	case tabSyncthing:
 		return m.renderSyncthingTabContent(w, h)
+	case tabSyncthingDevice:
+		if tab.Index < len(m.cfg.SyncthingDevices) {
+			saved := m.syncCursor
+			m.syncCursor = tab.Index
+			var result string
+			switch m.subview {
+			case svSyncthingRemoveConfirm:
+				result =
+					m.syncthingRemoveConfirmContent(w)
+			default:
+				result =
+					m.syncthingDeviceDetailContent(w)
+			}
+			m.syncCursor = saved
+			return result
+		}
+		return theme.Dim.Render(" Device not found")
+	case tabSyncthingWebUI:
+		return m.syncthingWebUIContent(w)
+	case tabSyncthingPair:
+		return m.renderSyncthingPairTabContent(w, h)
 	case tabLndHub:
 		return m.renderLndHubTabContent(w, h)
+	case tabLndHubAccount:
+		if tab.Index < len(m.cfg.LndHubAccounts) {
+			saved := m.hubCursor
+			m.hubCursor = tab.Index
+			var result string
+			switch m.subview {
+			case svLndHubDeactivateConfirm:
+				result =
+					m.lndhubDeactivateContent(w)
+			default:
+				result =
+					m.lndhubAccountDetailContent(w)
+			}
+			m.hubCursor = saved
+			return result
+		}
+		return theme.Dim.Render(" Account not found")
 	}
 	return m.renderContent(w, h)
 }
@@ -494,81 +540,15 @@ func (m Model) renderContent(w, h int) string {
 	case secChannels:
 		return m.channelsOverview(w, h)
 	case secWallet:
-		return m.renderWalletContent(w, h)
+		return m.walletOverview(w, h)
 	case secOnChain:
-		return m.renderOnChainContent(w, h)
+		return m.onChainOverview(w, h)
 	case secAddons:
-		return m.renderAddonsContent(w, h)
+		return m.addonsOverview(w, h)
 	case secSystem:
 		return m.systemOverview(w, h)
 	}
 	return ""
-}
-
-func (m Model) renderWalletContent(w, h int) string {
-	switch m.subview {
-	case svSend:
-		return m.walletSendPane(w)
-	case svSendConfirm:
-		return m.walletSendConfirmPane(w)
-	case svSendInFlight:
-		return m.walletSendInFlightPane(w)
-	case svSendResult:
-		return m.walletSendResultPane(w)
-	case svReceive:
-		return m.walletReceivePane(w)
-	case svReceiveWaiting:
-		return m.walletReceiveWaitingPane(w)
-	case svReceivePaid:
-		return m.walletReceivePaidPane(w)
-	case svReceiveExpired:
-		return m.walletReceiveExpiredPane(w)
-	case svWalletPairing:
-		return m.pairingContent(w, h)
-	case svPaymentDetail:
-		return m.paymentDetailContent(w)
-	}
-	return m.walletOverview(w, h)
-}
-
-func (m Model) renderOnChainContent(w, h int) string {
-	switch m.subview {
-	case svOnChainReceive:
-		return m.onChainReceivePane(w)
-	case svOnChainResult:
-		return m.onChainResultContent(w)
-	case svOnChainSend:
-		return m.onChainSendPane(w, h)
-	case svOCSendConfirm:
-		return m.onChainSendConfirmPane(w, h)
-	case svOCSendBroadcast:
-		return m.onChainSendBroadcastPane(w)
-	}
-	return m.onChainOverview(w, h)
-}
-
-func (m Model) renderAddonsContent(w, h int) string {
-	switch m.subview {
-	case svSyncthingDetail:
-		return m.syncthingDetailContent(w, h)
-	case svSyncthingPairInput:
-		return m.syncthingPairContent(w)
-	case svSyncthingWebUI:
-		return m.syncthingWebUIContent(w)
-	case svSyncthingDeviceDetail:
-		return m.syncthingDeviceDetailContent(w)
-	case svLndHubManage:
-		return m.lndhubManageContent(w, h)
-	case svLndHubCreateName:
-		return m.lndhubCreateNameContent(w)
-	case svLndHubCreateAccount:
-		return m.lndhubCreatedContent(w)
-	case svLndHubAccountDetail:
-		return m.lndhubAccountDetailContent(w)
-	case svLndHubDeactivateConfirm:
-		return m.lndhubDeactivateContent(w)
-	}
-	return m.addonsOverview(w, h)
 }
 
 func (m Model) viewFullURL() string {

@@ -242,6 +242,78 @@ func (b channelDetailBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }
 
+// ── Addon detail tab bindings ───────────────────────────
+// Parameterized version of channelDetailBindings for
+// addon detail tabs (Syncthing device, LndHub account).
+// actionLabel is the button text ("remove", "deactivate")
+// or empty for view-only (deactivated account).
+
+type addonDetailTabBindings struct {
+	Down    key.Binding
+	Up      key.Binding
+	Enter   key.Binding
+	Sidebar key.Binding
+	Back    key.Binding
+	Quit    key.Binding
+}
+
+func newAddonDetailTabBindings(
+	hasTabs bool, onButton bool,
+	actionLabel string,
+) addonDetailTabBindings {
+	b := addonDetailTabBindings{
+		Down: key.NewBinding(
+			key.WithKeys("down", "tab"),
+			key.WithHelp("↓", actionLabel+" button")),
+		Up: key.NewBinding(
+			key.WithKeys("up"),
+			key.WithHelp("↑", "tab bar")),
+		Enter: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", actionLabel)),
+		Sidebar: kSidebar,
+		Back: key.NewBinding(
+			key.WithKeys("backspace"),
+			key.WithHelp("⌫", "close tab")),
+		Quit: kQuit,
+	}
+	if !hasTabs {
+		b.Up.SetEnabled(false)
+	}
+	if actionLabel == "" {
+		// View-only (e.g. deactivated account):
+		// enter returns, no down to button
+		b.Down.SetEnabled(false)
+		b.Enter = key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "return"))
+	} else if onButton {
+		b.Down.SetEnabled(false)
+	} else {
+		b.Enter.SetEnabled(false)
+	}
+	return b
+}
+
+func (b addonDetailTabBindings) ShortHelp() []key.Binding {
+	var binds []key.Binding
+	if b.Down.Enabled() {
+		binds = append(binds, b.Down)
+	}
+	if b.Up.Enabled() {
+		binds = append(binds, b.Up)
+	}
+	if b.Enter.Enabled() {
+		binds = append(binds, b.Enter)
+	}
+	binds = append(binds, b.Sidebar, b.Back, b.Quit)
+	return binds
+}
+
+func (b addonDetailTabBindings) FullHelp() [][]key.Binding {
+	return [][]key.Binding{b.ShortHelp()}
+}
+
 // ── Wallet home bindings ─────────────────────────────────
 
 type walletHomeBindings struct {
@@ -347,6 +419,7 @@ type systemHomeBindings struct {
 	Restart   key.Binding
 	Stop      key.Binding
 	Start     key.Binding
+	Logs      key.Binding
 	Enter     key.Binding
 	Sidebar   key.Binding
 	TabBar    key.Binding
@@ -372,6 +445,9 @@ func newSystemHomeBindings(
 		Start: key.NewBinding(
 			key.WithKeys("a"),
 			key.WithHelp("a", "start")),
+		Logs: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "logs")),
 		Enter:   kEnter,
 		Sidebar: kSidebar,
 		TabBar: key.NewBinding(
@@ -386,6 +462,7 @@ func newSystemHomeBindings(
 		b.Restart.SetEnabled(false)
 		b.Stop.SetEnabled(false)
 		b.Start.SetEnabled(false)
+		b.Logs.SetEnabled(false)
 		b.UpDown = key.NewBinding(
 			key.WithKeys("up"),
 			key.WithHelp("↑", "services"))
@@ -404,7 +481,7 @@ func (b systemHomeBindings) ShortHelp() []key.Binding {
 	}
 	if b.Restart.Enabled() {
 		binds = append(binds, b.Restart,
-			b.Stop, b.Start)
+			b.Stop, b.Start, b.Logs)
 	}
 	if b.Enter.Enabled() {
 		binds = append(binds, b.Enter)
@@ -658,7 +735,7 @@ func newResultBindings() resultBindings {
 }
 
 func (b resultBindings) ShortHelp() []key.Binding {
-	return []key.Binding{b.Enter, b.Quit}
+	return []key.Binding{b.Enter, b.Back, b.Quit}
 }
 
 func (b resultBindings) FullHelp() [][]key.Binding {

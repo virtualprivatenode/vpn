@@ -49,6 +49,7 @@ const (
 	svReceiveWaiting
 	svReceivePaid
 	svReceiveExpired
+	svReceiveError
 	svPaymentDetail
 	svQR
 	svFullURL
@@ -56,10 +57,12 @@ const (
 	svSyncthingPairInput
 	svSyncthingDeviceDetail
 	svSyncthingWebUI
-	svSyncthingDeviceQR
+	svSyncthingPairQR
+	svSyncthingRemoveConfirm
 	svLndHubManage
 	svLndHubCreateName
 	svLndHubCreateAccount
+	svLndHubCreateQR
 	svLndHubAccountDetail
 	svLndHubDeactivateConfirm
 	// Shell actions
@@ -87,27 +90,32 @@ const (
 type tabKind int
 
 const (
-	tabMain           tabKind = iota // Main view for current section
-	tabChannel                       // Channel detail
-	tabPayment                       // Payment detail
-	tabSend                          // ⚡ Send payment flow
-	tabReceive                       // ⚡ Receive payment flow
-	tabPairing                       // Pairing screen
-	tabOnChain                       // ⛓ On-chain send flow
-	tabOCReceive                     // ⛓ On-chain receive flow
-	tabSyncthing                     //
-	tabLndHub                        //
-	tabOpenChannel                   // Channel open flow
-	tabOnChainTx                     // on-chain transaction detail
-	tabUtxoDetail                    // UTXO detail with label edit
-	tabChannelHistory                // channel history view
+	tabMain            tabKind = iota // Main view for current section
+	tabChannel                        // Channel detail
+	tabPayment                        // Payment detail
+	tabSend                           // ⚡ Send payment flow
+	tabReceive                        // ⚡ Receive payment flow
+	tabPairing                        // Pairing screen
+	tabOnChain                        // ⛓ On-chain send flow
+	tabOCReceive                      // ⛓ On-chain receive flow
+	tabSyncthing                      //
+	tabSyncthingDevice                // Syncthing device detail
+	tabSyncthingWebUI                 // Syncthing Web UI
+	tabSyncthingPair                  // Syncthing pair device flow
+	tabLndHub                         //
+	tabLndHubAccount                  // LndHub account detail
+	tabOpenChannel                    // Channel open flow
+	tabOnChainTx                      // on-chain transaction detail
+	tabUtxoDetail                     // UTXO detail with label edit
+	tabChannelHistory                 // channel history view
 )
 
 type openTab struct {
 	Kind    tabKind
 	Label   string
-	Index   int // channel index, payment index, etc.
-	Section int // which section opened this tab
+	Index   int    // channel index, payment index, etc.
+	Section int    // which section opened this tab
+	Screen  Screen // L16: owns all state for this tab's content (nil = legacy path)
 }
 
 type feeTier struct {
@@ -129,6 +137,7 @@ type lndhubDeactivatedMsg struct {
 	err     error
 }
 type syncthingPairedMsg struct{ err error }
+type syncthingRemovedMsg struct{ err error }
 type channelOpenResultMsg struct {
 	txid string
 	err  error
@@ -279,6 +288,9 @@ type Model struct {
 	width     int
 	height    int
 
+	// L16: shared context for screen components
+	screenCtx *ScreenContext
+
 	shellAction   wSubview
 	status        *statusMsg
 	latestVersion string
@@ -288,7 +300,7 @@ type Model struct {
 	// Button index for content pane buttons
 	btnIdx      int
 	addonBtnIdx int
-	addonFocus  int // 0=buttons, 1=list (syncthing/lndhub)
+	sendBtnIdx  int // 0=Clear, 1=Send (Lightning send)
 
 	// System
 	svcCursor  int
@@ -298,11 +310,15 @@ type Model struct {
 	// Addons
 	lastAccount          *installer.LndHubAccount
 	hubCursor            int
+	hubCreateBtnIdx      int // 0=Clear, 1=Create Account
+	hubDeactivateBtnIdx  int
 	hubDeactivateBalance string
 	syncDeviceLabel      string
 	syncPairError        string
 	syncPairSuccess      bool
 	syncCursor           int
+	syncRemoveBtnIdx     int
+	syncRemoveError      string
 	showSecrets          bool
 
 	// Pairing
@@ -452,12 +468,17 @@ func NewModel(
 	if cfg.HasLND() && cfg.WalletExists() {
 		client = lndrpc.New(cfg.Network)
 	}
-	return Model{
+	m := Model{
 		cfg: cfg, lndClient: client, version: version,
 		subview: svNone, fetchInFlight: true,
 		nav:          NewNavSidebar(),
 		utxoSelected: make(map[int]bool),
 	}
+	m.screenCtx = &ScreenContext{
+		Cfg:       cfg,
+		LndClient: client,
+	}
+	return m
 }
 
 func NewTestModel(
@@ -630,6 +651,15 @@ func pairSyncthingDeviceCmd(
 	return func() tea.Msg {
 		err := installer.PairSyncthingDevice(deviceID)
 		return syncthingPairedMsg{err: err}
+	}
+}
+
+func removeSyncthingDeviceCmd(
+	deviceID string,
+) tea.Cmd {
+	return func() tea.Msg {
+		err := installer.UnpairSyncthingDevice(deviceID)
+		return syncthingRemovedMsg{err: err}
 	}
 }
 

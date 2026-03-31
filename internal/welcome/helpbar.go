@@ -84,8 +84,7 @@ func (m Model) currentBindings() []key.Binding {
 	hasTabs := m.hasDetailTabs()
 
 	// Fullscreen views
-	if m.subview == svQR || m.subview == svFullURL ||
-		m.subview == svSyncthingDeviceQR {
+	if m.subview == svQR || m.subview == svFullURL {
 		return newFullscreenBindings().ShortHelp()
 	}
 
@@ -120,6 +119,15 @@ func (m Model) currentBindings() []key.Binding {
 	tabs := m.effectiveTabs()
 	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
+
+		// L16 new path: delegate to screen component
+		if tab.Screen != nil {
+			m.screenCtx.HasTabs = hasTabs
+			m.screenCtx.ContentFocused = m.contentFocused
+			return tab.Screen.HelpBindings()
+		}
+
+		// Legacy path
 		switch tab.Kind {
 		case tabPayment, tabOnChainTx, tabUtxoDetail:
 			return newDetailTabBindings(hasTabs).
@@ -133,6 +141,28 @@ func (m Model) currentBindings() []key.Binding {
 			}
 			return newChannelDetailBindings(
 				hasTabs, m.contentFocus() == 1).
+				ShortHelp()
+		case tabSyncthingDevice:
+			if m.subview == svSyncthingRemoveConfirm {
+				break // fall through to subview switch
+			}
+			return newAddonDetailTabBindings(
+				hasTabs, m.contentFocus() == 1,
+				"remove").
+				ShortHelp()
+		case tabLndHubAccount:
+			if m.subview == svLndHubDeactivateConfirm {
+				break // fall through to subview switch
+			}
+			actionLabel := ""
+			if m.hubCursor <
+				len(m.cfg.LndHubAccounts) &&
+				m.cfg.LndHubAccounts[m.hubCursor].Active {
+				actionLabel = "deactivate"
+			}
+			return newAddonDetailTabBindings(
+				hasTabs, m.contentFocus() == 1,
+				actionLabel).
 				ShortHelp()
 		}
 	}
@@ -178,6 +208,8 @@ func (m Model) currentBindings() []key.Binding {
 		return newResultBindings().ShortHelp()
 	case svReceiveExpired:
 		return newResultBindings().ShortHelp()
+	case svReceiveError:
+		return newResultBindings().ShortHelp()
 	case svOnChainSend:
 		return newOCSendAmountBindings(hasTabs).
 			ShortHelp()
@@ -201,13 +233,19 @@ func (m Model) currentBindings() []key.Binding {
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svSyncthingPairInput:
-		return newTextInputBindings(hasTabs).
+		return newAddonDetailBindings(hasTabs).
+			ShortHelp()
+	case svSyncthingPairQR:
+		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svSyncthingWebUI:
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svSyncthingDeviceDetail:
-		return newTextInputBindings(hasTabs).
+		return newAddonDetailBindings(hasTabs).
+			ShortHelp()
+	case svSyncthingRemoveConfirm:
+		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svLndHubManage:
 		return newAddonDetailBindings(hasTabs).
@@ -216,13 +254,17 @@ func (m Model) currentBindings() []key.Binding {
 		return newTextInputBindings(hasTabs).
 			ShortHelp()
 	case svLndHubCreateAccount:
-		return newRecvWaitingBindings(hasTabs).
+		return newAddonDetailBindings(hasTabs).
+			ShortHelp()
+	case svLndHubCreateQR:
+		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svLndHubAccountDetail:
-		return newTextInputBindings(hasTabs).
+		return newAddonDetailBindings(hasTabs).
 			ShortHelp()
 	case svLndHubDeactivateConfirm:
-		return newConfirmBindings().ShortHelp()
+		return newAddonDetailBindings(hasTabs).
+			ShortHelp()
 	case svWalletPairing, svZeusPairing:
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()

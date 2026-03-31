@@ -820,9 +820,21 @@ func (m Model) onChainSendPane(w, h int) string {
 	var errLines []string
 	if m.onChainSendError != "" {
 		errLines = append(errLines, "")
-		errLines = append(errLines,
-			" "+theme.Warning.Render(
-				m.onChainSendError))
+		lineW := w - 4
+		if lineW < 16 {
+			lineW = 16
+		}
+		errText := m.onChainSendError
+		for len(errText) > 0 {
+			end := lineW
+			if end > len(errText) {
+				end = len(errText)
+			}
+			errLines = append(errLines,
+				" "+theme.Warning.Render(
+					errText[:end]))
+			errText = errText[end:]
+		}
 	}
 
 	// ── Bottom buttons (step 5) ──────────────────
@@ -1263,9 +1275,21 @@ func (m Model) onChainSendConfirmPane(
 	// Error
 	if m.onChainSendError != "" {
 		lines = append(lines, "")
-		lines = append(lines,
-			" "+theme.Warning.Render(
-				m.onChainSendError))
+		lineW := w - 4
+		if lineW < 16 {
+			lineW = 16
+		}
+		errText := m.onChainSendError
+		for len(errText) > 0 {
+			end := lineW
+			if end > len(errText) {
+				end = len(errText)
+			}
+			lines = append(lines,
+				" "+theme.Warning.Render(
+					errText[:end]))
+			errText = errText[end:]
+		}
 	}
 
 	// ── Bottom buttons, pinned ───────────────────
@@ -1302,7 +1326,7 @@ func (m Model) onChainResultContent(w int) string {
 	if m.onChainSendError != "" {
 		p.title(theme.Warning,
 			"On-Chain Send Failed")
-		p.warn(m.onChainSendError)
+		p.warnWrap(m.onChainSendError)
 	} else {
 		p.title(theme.Success,
 			"Transaction Broadcast")

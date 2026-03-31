@@ -135,7 +135,7 @@ func (m Model) systemOverview(w, h int) string {
 
 		if isSelected {
 			hint := theme.Dim.Render(
-				"  r restart  s stop  a start")
+				"  r restart  s stop  a start  l logs")
 			svcLine += hint
 		}
 
