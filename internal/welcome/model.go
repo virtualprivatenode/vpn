@@ -209,13 +209,6 @@ type labelTxMsg struct {
 	err error
 }
 
-type paymentType int
-
-const (
-	payInvoice paymentType = iota
-	payKeysend
-)
-
 type channelInfo struct {
 	ChanID        uint64
 	ChannelPoint  string
@@ -290,6 +283,7 @@ type Model struct {
 
 	// L16: shared context for screen components
 	screenCtx *ScreenContext
+	ocCtx     *OnChainContext
 
 	shellAction   wSubview
 	status        *statusMsg
@@ -300,7 +294,6 @@ type Model struct {
 	// Button index for content pane buttons
 	btnIdx      int
 	addonBtnIdx int
-	sendBtnIdx  int // 0=Clear, 1=Send (Lightning send)
 
 	// System
 	svcCursor  int
@@ -329,19 +322,7 @@ type Model struct {
 	urlReturnTo      wSubview
 
 	// Channels
-	chanCursor       int
-	chanOpenPeerIdx  int
-	chanOpenAmount   int64
-	chanOpenPrivate  bool
-	chanOpenPubkey   string
-	chanOpenHost     string
-	chanOpenAlias    string
-	chanOpenInFlight bool
-	chanOpenTxid     string
-	chanOpenError    string
-	chanPeerList     []peerOption
-	chanAmountPreset int
-	chanFundAddress  string
+	chanCursor int
 
 	// Channel close
 	closeForce         bool
@@ -377,36 +358,18 @@ type Model struct {
 	tabScrollOffset int
 
 	// Text inputs
-	sendInput       textinput.Model
-	recvAmountInput textinput.Model
-	recvMemoInput   textinput.Model
 	chanPubkeyInput textinput.Model
 	chanHostInput   textinput.Model
 	chanAmountInput textinput.Model
 	hubNameInput    textinput.Model
 	syncDeviceInput textinput.Model
 
-	// Receive state
-	recvButtonIdx   int
-	recvPayReq      string
-	recvPaymentHash string
-	recvAmountSats  int64
-	recvSettled     bool
-	recvExpired     bool
-	recvError       string
-
 	// On-chain state
-	onChainAddress   string
-	onChainBtnIdx    int
-	onChainFocus     int // 0=buttons, 1=utxo table
-	ocSendBtnIdx     int // 0=Clear, 1=Create Transaction
-	onChainSendAddr  string
-	onChainSendAmt   string
-	onChainSendFee   int64
-	onChainSendTxid  string
-	onChainSendError string
-	utxos            []lndrpc.UTXO
-	utxoCursor       int
+	onChainAddress string
+	onChainBtnIdx  int
+	onChainFocus   int // 0=buttons, 1=utxo table
+	utxos          []lndrpc.UTXO
+	utxoCursor     int
 	// UTXO pencil icon + label edit popup
 	utxoPencilFocused bool            // true when ✎ icon is focused
 	utxoLabelEditing  bool            // true when label popup is open
@@ -422,38 +385,12 @@ type Model struct {
 	ocRecvAddress string
 	ocRecvError   string
 
-	// On-chain send flow
-	ocSendAddrInput  textinput.Model
-	ocSendAmtInput   textinput.Model
-	ocSendLabelInput textinput.Model
-	ocCustomFeeInput textinput.Model
-	ocSendAll        bool
-	ocMaxFocused     bool  // true when Max button (not amount input) is focused on step 1
-	ocSendStep       int   // 0=addr, 1=amount, 2=label, 3=fee rate, 4=buttons
-	ocConfirmFee     int64 // precise fee from LND
-	ocConfirmBtnIdx  int   // 0=Go Back, 1=Confirm & Broadcast
-	ocSendAddrVal    string
-	ocSendAmtVal     int64
-	ocSendFeeRate    int64
-	ocSendLabelVal   string
-	sendFeeTiers     [4]feeTier
+	// Fee tiers (used by on-chain send screen + close)
+	sendFeeTiers [4]feeTier
 
 	// On-chain transaction history
 	onChainTxs      []lndrpc.OnChainTx
 	onChainTxCursor int
-
-	// Send state
-	sendDecodedValid bool
-	sendDecodedDesc  string
-	sendDecodedAmt   int64
-	sendDecodedDest  string
-	sendDecodedExp   string
-	sendInFlight     bool
-	sendError        string
-	sendPreimage     string
-	sendRouteHops    []lndrpc.RouteHop
-	sendFeeSats      int64
-	sendType         paymentType
 
 	// Payment history
 	payHistory       []lndrpc.PaymentEntry
@@ -478,6 +415,9 @@ func NewModel(
 		Cfg:       cfg,
 		LndClient: client,
 	}
+	m.ocCtx = &OnChainContext{
+		UtxoSelected: make(map[int]bool),
+	}
 	return m
 }
 
@@ -492,6 +432,9 @@ func NewTestModel(
 	}
 	m.cfgStore = store
 	m.utxoSelected = make(map[int]bool)
+	m.ocCtx = &OnChainContext{
+		UtxoSelected: make(map[int]bool),
+	}
 	return m
 }
 
@@ -665,7 +608,7 @@ func removeSyncthingDeviceCmd(
 
 func openChannelCmd(
 	client *lndrpc.Client, pubkey, host string,
-	amount int64, private bool,
+	amount int64, private bool, taproot bool,
 ) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
@@ -686,7 +629,7 @@ func openChannelCmd(
 					"could not connect: %v", err)}
 		}
 		result, err := client.OpenChannel(
-			pubkey, amount, private)
+			pubkey, amount, private, taproot)
 		if err != nil {
 			return channelOpenResultMsg{err: err}
 		}

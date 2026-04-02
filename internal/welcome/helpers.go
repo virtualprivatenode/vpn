@@ -178,6 +178,35 @@ func parseFeeInputRate(s string) int64 {
 	return n
 }
 
+// parseSendAmount parses a send amount string,
+// stripping commas and whitespace. Returns 0 for
+// empty or invalid input.
+func parseSendAmount(val string) int64 {
+	val = strings.ReplaceAll(val, ",", "")
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return 0
+	}
+	var n int64
+	for _, c := range val {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n
+}
+
+// estimateSimpleFee estimates the transaction fee in
+// sats given the number of inputs, outputs, and the
+// fee rate in sat/vB. Uses simplified vbyte estimation.
+func estimateSimpleFee(
+	numInputs, numOutputs int, satPerVB int64,
+) int64 {
+	vbytes := int64(10 + numInputs*68 + numOutputs*31)
+	return vbytes * satPerVB
+}
+
 // isValidOnChainAddr does a basic prefix check.
 // LND will do full validation on send.
 func isValidOnChainAddr(addr string, network string) bool {

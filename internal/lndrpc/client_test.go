@@ -87,7 +87,7 @@ func TestNilClientSafety(t *testing.T) {
 	if err := c.ConnectPeer("a", "b"); err == nil {
 		t.Error("should error")
 	}
-	if _, err := c.OpenChannel("a", 100000, false); err == nil {
+	if _, err := c.OpenChannel("a", 100000, false, false); err == nil {
 		t.Error("should error")
 	}
 }

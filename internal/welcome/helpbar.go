@@ -169,57 +169,6 @@ func (m Model) currentBindings() []key.Binding {
 
 	// Content focused — dispatch by subview
 	switch m.subview {
-	case svChannelOpen:
-		return newPeerSelectBindings(hasTabs).
-			ShortHelp()
-	case svChannelCustomPeer:
-		return newTwoFieldBindings(hasTabs).
-			ShortHelp()
-	case svChannelAmountSelect:
-		return newAmountSelectBindings(hasTabs).
-			ShortHelp()
-	case svChannelOpenConfirm:
-		return newChanConfirmBindings(hasTabs).
-			ShortHelp()
-	case svChannelOpening:
-		return newWaitingBindings().ShortHelp()
-	case svChannelOpenResult:
-		return newResultBindings().ShortHelp()
-	case svChannelFundWallet:
-		return newTextInputBindings(hasTabs).
-			ShortHelp()
-	case svSend:
-		return newSendInputBindings(hasTabs).
-			ShortHelp()
-	case svSendConfirm:
-		return newPayConfirmBindings(hasTabs).
-			ShortHelp()
-	case svSendInFlight:
-		return newWaitingBindings().ShortHelp()
-	case svSendResult:
-		return newResultBindings().ShortHelp()
-	case svReceive:
-		return newRecvInputBindings(hasTabs).
-			ShortHelp()
-	case svReceiveWaiting:
-		return newRecvWaitingBindings(hasTabs).
-			ShortHelp()
-	case svReceivePaid:
-		return newResultBindings().ShortHelp()
-	case svReceiveExpired:
-		return newResultBindings().ShortHelp()
-	case svReceiveError:
-		return newResultBindings().ShortHelp()
-	case svOnChainSend:
-		return newOCSendAmountBindings(hasTabs).
-			ShortHelp()
-	case svOCSendConfirm:
-		return newOCSendConfirmBindings(hasTabs).
-			ShortHelp()
-	case svOCSendBroadcast:
-		return newWaitingBindings().ShortHelp()
-	case svOnChainResult:
-		return newResultBindings().ShortHelp()
 	case svCloseType:
 		return newCloseTypeBindings().ShortHelp()
 	case svCloseConfirm:
