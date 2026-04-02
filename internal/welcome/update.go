@@ -106,6 +106,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case refreshStatusMsg:
 		return m, fetchStatus(m.cfg, m.lndClient)
+	case clearUtxoSelectionMsg:
+		m.clearUtxoSelection()
+		m.syncOcCtxSelection()
+		return m, nil
 	case openTabMsg:
 		m.tabs = append(m.tabs, openTab{
 			Kind:    msg.Kind,
@@ -234,18 +238,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case channelOpenResultMsg:
-		m.chanOpenInFlight = false
-		if msg.err != nil {
-			m.chanOpenError = msg.err.Error()
-		} else {
-			m.chanOpenTxid = msg.txid
-			m.chanOpenError = ""
+		// L16: route to channel open screen
+		if rm, cmd, ok := m.routeToScreen(
+			tabOpenChannel, msg); ok {
+			return rm, cmd
 		}
-		m.subview = svChannelOpenResult
 		return m, nil
 	case newAddressMsg:
 		if msg.err == nil {
-			m.chanFundAddress = msg.address
 			m.onChainAddress = msg.address
 			if m.subview == svOnChainReceive {
 				m.ocRecvAddress = msg.address
@@ -253,69 +253,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case invoiceCreatedMsg:
-		// L16: route to receive screen if present
-		if rm, cmd, ok := m.routeToScreen(
-			tabReceive, msg); ok {
-			return rm, cmd
-		}
-		if msg.err != nil {
-			m.recvError = msg.err.Error()
-			return m, nil
-		}
-		m.recvPayReq = msg.payReq
-		m.recvPaymentHash = msg.paymentHash
-		m.recvAmountSats = msg.amountSats
-		m.subview = svReceiveWaiting
-		return m, waitForInvoiceCmd(
-			m.lndClient, msg.paymentHash)
+		rm, cmd, _ := m.routeToScreen(
+			tabReceive, msg)
+		return rm, cmd
 	case invoiceSettledMsg:
-		// L16: route to receive screen if present
-		if rm, cmd, ok := m.routeToScreen(
-			tabReceive, msg); ok {
-			return rm, cmd
-		}
-		if msg.err != nil {
-			m.recvError = msg.err.Error()
-			m.subview = svReceiveError
-			return m, nil
-		}
-		if msg.settled {
-			m.recvSettled = true
-			m.subview = svReceivePaid
-		} else if msg.expired {
-			m.recvExpired = true
-			m.subview = svReceiveExpired
-		}
-		return m, nil
+		rm, cmd, _ := m.routeToScreen(
+			tabReceive, msg)
+		return rm, cmd
 	case payReqDecodedMsg:
-		if msg.err != nil {
-			m.sendError = msg.err.Error()
-			return m, nil
-		}
-		if msg.decoded.IsExpired {
-			m.sendError = "This invoice has expired"
-			return m, nil
-		}
-		m.sendDecodedValid = true
-		m.sendDecodedAmt = msg.decoded.AmountSats
-		m.sendDecodedDesc = msg.decoded.Description
-		m.sendDecodedDest = msg.decoded.Destination
-		m.subview = svSendConfirm
-		return m, nil
+		rm, cmd, _ := m.routeToScreen(
+			tabSend, msg)
+		return rm, cmd
 	case sendPaymentResultMsg:
-		m.sendInFlight = false
-		if msg.err != nil {
-			m.sendError = msg.err.Error()
-		} else if msg.result.Status == "SUCCEEDED" {
-			m.sendPreimage = msg.result.Preimage
-			m.sendFeeSats = msg.result.FeeSats
-			m.sendRouteHops = msg.result.Hops
-			m.sendError = ""
-		} else {
-			m.sendError = msg.result.Error
-		}
-		m.subview = svSendResult
-		return m, nil
+		rm, cmd, _ := m.routeToScreen(
+			tabSend, msg)
+		return rm, cmd
 	case paymentHistoryMsg:
 		if msg.err == nil {
 			m.payHistory = msg.entries
@@ -324,6 +276,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case utxoListMsg:
 		if msg.err == nil {
 			m.utxos = msg.utxos
+			m.ocCtx.Utxos = msg.utxos
 			// Prune selections beyond new UTXO range
 			for idx := range m.utxoSelected {
 				if idx >= len(m.utxos) {
@@ -331,28 +284,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.recalcSelectedTotal()
+			m.syncOcCtxSelection()
 		}
 		return m, nil
 	case onChainTxMsg:
 		if msg.err == nil {
 			m.onChainTxs = msg.txs
+			m.ocCtx.OnChainTxs = msg.txs
 		}
 		return m, nil
 	case sendCoinsResultMsg:
-		if msg.err != nil {
-			m.onChainSendError = msg.err.Error()
-		} else {
-			m.onChainSendTxid = msg.txid
-			m.onChainSendError = ""
-			m.clearUtxoSelection()
-		}
-		m.subview = svOnChainResult
-		if msg.err == nil && m.ocSendLabelVal != "" {
-			return m, labelTxCmd(
-				m.lndClient, msg.txid,
-				m.ocSendLabelVal)
-		}
-		return m, nil
+		rm, cmd, _ := m.routeToScreen(
+			tabOnChain, msg)
+		return rm, cmd
 	case closeChannelMsg:
 		m.closeInFlight = false
 		if msg.err != nil {
@@ -380,23 +324,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closeFeeTiers = msg.tiers
 			}
 			m.sendFeeTiers = msg.tiers
-			// Pre-fill send fee input if empty
-			if isOnChainSendSubview(m.subview) &&
-				m.ocCustomFeeInput.Value() == "" &&
-				msg.tiers[0].SatPerVB > 0 {
-				m.ocCustomFeeInput.SetValue(
-					fmt.Sprintf("%.0f",
-						msg.tiers[0].SatPerVB))
+			m.ocCtx.SendFeeTiers = msg.tiers
+			// Route to screen for input pre-fill
+			if rm, cmd, ok := m.routeToScreen(
+				tabOnChain, msg); ok {
+				return rm, cmd
 			}
 		}
 		return m, nil
 	case feeEstimateMsg:
-		if msg.err == nil {
-			m.ocConfirmFee = msg.feeSats
-		} else {
-			m.onChainSendError = msg.err.Error()
-		}
-		return m, nil
+		rm, cmd, _ := m.routeToScreen(
+			tabOnChain, msg)
+		return rm, cmd
 	case tickMsg:
 		if m.fetchInFlight {
 			return m, tickEvery(m.pollInterval())
@@ -486,14 +425,6 @@ func (m Model) handleTabContentKey(
 		return m.handleOnChainTxDetailKey(key)
 	case tabUtxoDetail:
 		return m.handleViewOnlyKey(key, svNone)
-	case tabOpenChannel:
-		return m.handleOpenChannelTabKey(key, msg)
-	case tabSend:
-		return m.handleSendTabKey(key, msg)
-	case tabReceive:
-		return m.handleReceiveTabKey(key, msg)
-	case tabOnChain:
-		return m.handleOnChainTabKey(key, msg)
 	case tabOCReceive:
 		return m.handleOCReceiveTabKey(key)
 	case tabPairing:
@@ -882,6 +813,7 @@ func (m *Model) toggleUtxoSelection(idx int) {
 		m.utxoSelected[idx] = true
 	}
 	m.recalcSelectedTotal()
+	m.syncOcCtxSelection()
 }
 
 func (m *Model) recalcSelectedTotal() {
@@ -906,95 +838,15 @@ func (m *Model) clearUtxoSelection() {
 	m.utxoOutpoints = nil
 }
 
+// syncOcCtxSelection copies current UTXO selection state
+// to the OnChainContext so screens see current data.
+func (m *Model) syncOcCtxSelection() {
+	m.ocCtx.UtxoSelected = m.utxoSelected
+	m.ocCtx.UtxoSelectedTotal = m.utxoSelectedTotal
+	m.ocCtx.UtxoOutpoints = m.utxoOutpoints
+}
+
 // ── Flow tab handlers ────────────────────────────────────
-
-func (m Model) handleOpenChannelTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svChannelOpen:
-		return m.handleChannelOpenKey(key)
-	case svChannelCustomPeer:
-		return m.handleChannelCustomPeerKey(key, msg)
-	case svChannelAmountSelect:
-		return m.handleChannelAmountKey(key, msg)
-	case svChannelOpenConfirm:
-		return m.handleChannelConfirmKey(key)
-	case svChannelOpening:
-		return m.handleChannelOpeningKey(key)
-	case svChannelOpenResult:
-		return m.handleChannelResultKey(key)
-	case svChannelFundWallet:
-		return m.handleChannelFundKey(key)
-	default:
-		m.restoreTabSubview(tabOpenChannel)
-		return m.handleChannelOpenKey(key)
-	}
-}
-
-func (m Model) handleSendTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSend:
-		return m.handleSendKey(key, msg)
-	case svSendConfirm:
-		return m.handleSendConfirmKey(key)
-	case svSendInFlight:
-		return m.handleSendInFlightKey(key)
-	case svSendResult:
-		return m.handleSendResultKey(key)
-	default:
-		m.restoreTabSubview(tabSend)
-		return m.handleSendKey(key, msg)
-	}
-}
-
-func (m Model) handleReceiveTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svReceive:
-		return m.handleReceiveKey(key, msg)
-	case svReceiveWaiting:
-		return m.handleReceiveWaitingKey(key)
-	case svReceivePaid:
-		return m.handleReceivePaidKey(key)
-	case svReceiveExpired:
-		return m.handleReceiveExpiredKey(key)
-	case svReceiveError:
-		return m.handleReceiveErrorKey(key)
-	default:
-		m.restoreTabSubview(tabReceive)
-		return m.handleReceiveKey(key, msg)
-	}
-}
-
-func (m Model) handleOnChainTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svOnChain:
-		return m.handleOnChainContentKey(key, true, msg)
-	case svOnChainResult:
-		return m.handleOnChainContentKey(key, true, msg)
-	case svOnChainSend:
-		return m.handleOCSendKey(key, msg)
-	case svOCSendConfirm:
-		return m.handleOCSendConfirmKey(key)
-	case svOCSendBroadcast:
-		if key == "ctrl+c" {
-			return m, tea.Quit
-		}
-		return m, nil
-	case svNone:
-		m.restoreTabSubview(tabOnChain)
-		return m.handleOCSendKey(key, msg)
-	default:
-		m.restoreTabSubview(tabOnChain)
-		return m.handleOCSendKey(key, msg)
-	}
-}
 
 func (m Model) handlePairingTabKey(
 	key string,
@@ -1561,31 +1413,26 @@ func (m Model) handleWalletHomeKey(
 			case 0:
 				if m.cfg.HasLND() &&
 					m.cfg.WalletExists() {
-					m.resetSendState()
-					cw := min(m.width,
-						theme.ContentWidth+20) -
-						m.nav.Width - 5
-					if cw > 58 {
-						cw = 58
-					}
-					if cw < 20 {
-						cw = 20
-					}
-					m.sendInput.SetWidth(cw)
-					m.subview = svSend
-					m.openFlowTab(tabSend,
-						"⚡ Send", secWallet)
+					screen := NewSendScreen(
+						m.screenCtx)
+					cmd := m.openFlowTabWithScreen(
+						tabSend,
+						"⚡ Send",
+						secWallet,
+						screen)
+					return m, cmd
 				}
 			case 1:
 				if m.cfg.HasLND() &&
 					m.cfg.WalletExists() {
 					screen := NewReceiveScreen(
 						m.screenCtx)
-					m.openFlowTabWithScreen(
+					cmd := m.openFlowTabWithScreen(
 						tabReceive,
 						"⚡ Receive",
 						secWallet,
 						screen)
+					return m, cmd
 				}
 			case 2:
 				m.pairingButtonIdx = 0
@@ -1708,32 +1555,6 @@ func (m *Model) buildChannelHistory(
 func (m Model) handleOnChainContentKey(
 	key string, fromTab bool, msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
-	if m.subview == svOnChainResult {
-		switch key {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "enter", "backspace":
-			if fromTab {
-				m.subview = svOnChain
-			} else {
-				m.subview = svNone
-			}
-			m.onChainSendTxid = ""
-			m.onChainSendError = ""
-			return m, tea.Sequence(
-				listUnspentCmd(m.lndClient),
-				fetchOnChainTxCmd(m.lndClient),
-				fetchStatus(m.cfg, m.lndClient))
-		}
-		return m, nil
-	}
-
-	if !fromTab && isOnChainSendSubview(m.subview) {
-		m.openFlowTab(tabOnChain,
-			"Send", secOnChain)
-		return m, nil
-	}
-
 	// ── UTXO label popup handling ───────────────
 	if m.utxoLabelEditing {
 		return m.handleUtxoLabelPopupKey(key, msg)
@@ -1848,25 +1669,26 @@ func (m Model) handleOnChainContentKey(
 				return m,
 					getNewAddressCmd(m.lndClient)
 			case 1:
-				m.resetOnChainSendState()
+				screen := NewOnChainSendScreen(
+					m.screenCtx, m.ocCtx)
+				// Pre-fill amount from UTXO selection
 				if len(m.utxoSelected) > 0 {
-					m.ocSendAmtInput.SetValue(
+					screen.amtInput.SetValue(
 						fmt.Sprintf("%d",
 							m.utxoSelectedTotal))
 				}
-				// Pre-fill fee input with next-block rate
+				// Pre-fill fee from cached tiers
 				if m.sendFeeTiers[0].SatPerVB > 0 {
-					m.ocCustomFeeInput.SetValue(
+					screen.feeInput.SetValue(
 						fmt.Sprintf("%.0f",
 							m.sendFeeTiers[0].SatPerVB))
 				}
-				m.subview = svOnChainSend
-				if fromTab {
-					return m, fetchFeeTiersCmd(m.cfg)
-				}
-				m.openFlowTab(tabOnChain,
-					"⛓ Send", secOnChain)
-				return m, fetchFeeTiersCmd(m.cfg)
+				cmd := m.openFlowTabWithScreen(
+					tabOnChain,
+					"⛓ Send",
+					secOnChain,
+					screen)
+				return m, cmd
 			}
 		} else if m.contentFocus() == 1 &&
 			m.utxoCursor < len(m.utxos) {
@@ -1999,51 +1821,12 @@ func (m Model) handleUtxoLabelPopupKey(
 	return m, nil
 }
 
-func isOnChainSendSubview(sv wSubview) bool {
-	switch sv {
-	case svOnChainSend, svOCSendConfirm,
-		svOCSendBroadcast:
-		return true
-	}
-	return false
-}
-
 // restoreTabSubview restores the entry subview for a
 // flow tab whose subview was cleared during navigation
 // (e.g. sidebar switch). Returns true if restoration
 // was needed.
 func (m *Model) restoreTabSubview(kind tabKind) bool {
 	switch kind {
-	case tabOnChain:
-		if !isOnChainSendSubview(m.subview) {
-			m.subview = svOnChainSend
-			m.focusSendStep()
-			return true
-		}
-	case tabSend:
-		if m.subview != svSend &&
-			m.subview != svSendConfirm &&
-			m.subview != svSendInFlight &&
-			m.subview != svSendResult {
-			m.subview = svSend
-			m.sendInput.Focus()
-			return true
-		}
-	case tabReceive:
-		if m.subview != svReceive &&
-			m.subview != svReceiveWaiting &&
-			m.subview != svReceivePaid &&
-			m.subview != svReceiveExpired &&
-			m.subview != svReceiveError {
-			m.subview = svReceive
-			m.recvAmountInput.Focus()
-			return true
-		}
-	case tabOpenChannel:
-		if !isChannelSubview(m.subview) {
-			m.subview = svChannelOpen
-			return true
-		}
 	case tabSyncthing:
 		if m.subview != svSyncthingDetail {
 			m.subview = svSyncthingDetail
@@ -2625,22 +2408,16 @@ func (m Model) closeTab(
 	switch closingTab.Kind {
 	case tabOpenChannel:
 		m.subview = svNone
-		m.chanOpenError = ""
-		m.chanOpenTxid = ""
-		m.chanOpenInFlight = false
 	case tabChannelHistory:
 		m.subview = svNone
 	case tabUtxoDetail:
 		m.subview = svNone
 		m.closeLabelPopup()
 	case tabSend:
-		m.resetSendState()
 		m.subview = svNone
 	case tabReceive:
-		m.resetReceiveState()
 		m.subview = svNone
 	case tabOnChain:
-		m.resetOnChainSendState()
 		m.subview = svNone
 	case tabOCReceive:
 		m.ocRecvAddress = ""
@@ -2828,20 +2605,20 @@ func (m Model) startChannelOpenCmd() (
 		!m.cfg.WalletExists() {
 		return m, nil
 	}
+	// Zero balance: redirect to on-chain receive
 	if m.status != nil &&
 		m.status.lndBalance == "0" {
-		m.subview = svChannelFundWallet
-		m.openFlowTab(tabOpenChannel,
-			"Open Channel", secChannels)
+		m.subview = svOnChainReceive
+		m.openFlowTab(tabOCReceive,
+			"Receive", secOnChain)
 		return m, getNewAddressCmd(m.lndClient)
 	}
-	m.chanPeerList = curatedPeers()
-	m.chanOpenPeerIdx = 0
-	m.chanOpenError = ""
-	m.subview = svChannelOpen
-	m.openFlowTab(tabOpenChannel,
-		"Open Channel", secChannels)
-	return m, nil
+	// Normal path: create screen
+	screen := NewChannelOpenScreen(m.screenCtx)
+	cmd := m.openFlowTabWithScreen(
+		tabOpenChannel, "Open Channel",
+		secChannels, screen)
+	return m, cmd
 }
 
 func (m *Model) openFlowTab(
@@ -2869,18 +2646,20 @@ func (m *Model) openFlowTab(
 // openFlowTabWithScreen opens a flow tab backed by a
 // Screen component. If a tab of the same kind already
 // exists in the section, it reuses it (and keeps the
-// existing screen's state).
+// existing screen's state). When a new tab is created,
+// the screen's Init() is called and the resulting
+// command is returned.
 func (m *Model) openFlowTabWithScreen(
 	kind tabKind, label string, section int,
 	screen Screen,
-) {
+) tea.Cmd {
 	tabs := m.effectiveTabs()
 	for i, t := range tabs {
 		if t.Kind == kind && t.Section == section {
 			m.activeTab = i
 			m.focusContent()
 			m.setContentFocus(0)
-			return
+			return nil
 		}
 	}
 	m.tabs = append(m.tabs, openTab{
@@ -2892,31 +2671,19 @@ func (m *Model) openFlowTabWithScreen(
 	m.activeTab = len(m.effectiveTabs()) - 1
 	m.focusContent()
 	m.setContentFocus(0)
+	return screen.Init()
 }
 
 func (m Model) findFlowTab() int {
 	tabs := m.effectiveTabs()
 	var kind tabKind
 	switch {
-	case m.subview == svSend ||
-		m.subview == svSendConfirm ||
-		m.subview == svSendInFlight ||
-		m.subview == svSendResult:
-		kind = tabSend
-	case m.subview == svReceive ||
-		m.subview == svReceiveWaiting ||
-		m.subview == svReceivePaid ||
-		m.subview == svReceiveExpired ||
-		m.subview == svReceiveError:
-		kind = tabReceive
 	case m.subview == svWalletPairing:
 		kind = tabPairing
 	case m.subview == svOnChainReceive:
 		kind = tabOCReceive
 	case isOnChainSubview(m.subview):
 		kind = tabOnChain
-	case isChannelSubview(m.subview):
-		kind = tabOpenChannel
 	case m.subview == svSyncthingDetail:
 		kind = tabSyncthing
 	case m.subview == svSyncthingWebUI:
@@ -2944,17 +2711,6 @@ func (m Model) findFlowTab() int {
 		}
 	}
 	return m.activeTab
-}
-
-func isChannelSubview(sv wSubview) bool {
-	switch sv {
-	case svChannelOpen, svChannelCustomPeer,
-		svChannelAmountSelect, svChannelOpenConfirm,
-		svChannelOpening, svChannelOpenResult,
-		svChannelFundWallet:
-		return true
-	}
-	return false
 }
 
 func isCloseSubview(sv wSubview) bool {
@@ -3109,38 +2865,6 @@ func (m Model) handlePaste(
 	msg tea.PasteMsg,
 ) (tea.Model, tea.Cmd) {
 	switch m.subview {
-	case svSend:
-		var cmd tea.Cmd
-		m.sendInput, cmd = m.sendInput.Update(msg)
-		return m, cmd
-	case svReceive:
-		var cmd tea.Cmd
-		if m.recvAmountInput.Focused() {
-			m.recvAmountInput, cmd =
-				m.recvAmountInput.Update(msg)
-		} else {
-			m.recvMemoInput, cmd =
-				m.recvMemoInput.Update(msg)
-		}
-		return m, cmd
-	case svChannelCustomPeer:
-		var cmd tea.Cmd
-		if m.chanPubkeyInput.Focused() {
-			m.chanPubkeyInput, cmd =
-				m.chanPubkeyInput.Update(msg)
-		} else {
-			m.chanHostInput, cmd =
-				m.chanHostInput.Update(msg)
-		}
-		return m, cmd
-	case svChannelAmountSelect:
-		if m.chanAmountPreset ==
-			len(amountPresets)-1 {
-			var cmd tea.Cmd
-			m.chanAmountInput, cmd =
-				m.chanAmountInput.Update(msg)
-			return m, cmd
-		}
 	case svLndHubCreateName:
 		var cmd tea.Cmd
 		m.hubNameInput, cmd =
@@ -3150,22 +2874,6 @@ func (m Model) handlePaste(
 		var cmd tea.Cmd
 		m.syncDeviceInput, cmd =
 			m.syncDeviceInput.Update(msg)
-		return m, cmd
-	case svOnChainSend:
-		var cmd tea.Cmd
-		if m.ocSendStep == 0 {
-			m.ocSendAddrInput, cmd =
-				m.ocSendAddrInput.Update(msg)
-		} else if m.ocSendStep == 1 && !m.ocSendAll {
-			m.ocSendAmtInput, cmd =
-				m.ocSendAmtInput.Update(msg)
-		} else if m.ocSendStep == 2 {
-			m.ocSendLabelInput, cmd =
-				m.ocSendLabelInput.Update(msg)
-		} else if m.ocSendStep == 3 {
-			m.ocCustomFeeInput, cmd =
-				m.ocCustomFeeInput.Update(msg)
-		}
 		return m, cmd
 	}
 

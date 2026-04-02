@@ -54,6 +54,21 @@ type ScreenContext struct {
 	ContentFocused bool // true when content pane has focus (not tab bar, not sidebar)
 }
 
+// ── OnChainContext ───────────────────────────────────────
+// Shared on-chain state that the on-chain send screen
+// reads. Model owns the data and keeps it synced.
+// Only OnChainSendScreen receives this — other screens
+// don't need it.
+
+type OnChainContext struct {
+	Utxos             []lndrpc.UTXO
+	UtxoSelected      map[int]bool
+	UtxoSelectedTotal int64
+	UtxoOutpoints     []string
+	OnChainTxs        []lndrpc.OnChainTx
+	SendFeeTiers      [4]feeTier
+}
+
 // ── Screen-to-Model messages ────────────────────────────
 // Screens emit these via tea.Cmd. They flow through the
 // Bubble Tea event loop and arrive in Model's Update like
@@ -91,6 +106,10 @@ type showQRMsg struct {
 // data.
 type refreshStatusMsg struct{}
 
+// clearUtxoSelectionMsg tells Model to clear coin control
+// selection after a successful on-chain send.
+type clearUtxoSelectionMsg struct{}
+
 // ── Message emitters ────────────────────────────────────
 // Screens use these as tea.Cmd values. Each is a
 // func() tea.Msg that returns instantly — the message
@@ -110,4 +129,8 @@ func emitFocusTabBar() tea.Msg {
 
 func emitRefreshStatus() tea.Msg {
 	return refreshStatusMsg{}
+}
+
+func emitClearUtxoSelection() tea.Msg {
+	return clearUtxoSelectionMsg{}
 }

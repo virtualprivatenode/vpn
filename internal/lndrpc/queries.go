@@ -430,7 +430,7 @@ func (c *Client) WaitForPeer(pubkey string, timeout time.Duration) error {
 // OpenChannel opens a channel to a peer. This is a fund-moving operation.
 // The caller MUST verify the peer is connected and show a confirmation
 // dialog before calling this.
-func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool) (*ChannelOpenResult, error) {
+func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, taproot bool) (*ChannelOpenResult, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
@@ -444,13 +444,18 @@ func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool) (*C
 	ctx, cancel := c.callCtx(120 * time.Second)
 	defer cancel()
 
-	resp, err := rpc.OpenChannelSync(ctx, &lnrpc.OpenChannelRequest{
+	req := &lnrpc.OpenChannelRequest{
 		NodePubkey:         pubkeyBytes,
 		LocalFundingAmount: localAmount,
 		Private:            private,
 		MinConfs:           1,
 		SpendUnconfirmed:   false,
-	})
+	}
+	if taproot {
+		req.CommitmentType = lnrpc.CommitmentType_SIMPLE_TAPROOT_OVERLAY
+		req.ScidAlias = true
+	}
+	resp, err := rpc.OpenChannelSync(ctx, req)
 	if err != nil {
 		c.handleError(err)
 		return nil, err

@@ -425,45 +425,8 @@ func (m Model) renderActiveTabContent(
 			return result
 		}
 		return theme.Dim.Render(" Payment not found")
-	case tabSend:
-		switch m.subview {
-		case svSendConfirm:
-			return m.walletSendConfirmPane(w)
-		case svSendInFlight:
-			return m.walletSendInFlightPane(w)
-		case svSendResult:
-			return m.walletSendResultPane(w)
-		default:
-			return m.walletSendPane(w)
-		}
-	case tabReceive:
-		switch m.subview {
-		case svReceiveWaiting:
-			return m.walletReceiveWaitingPane(w)
-		case svReceivePaid:
-			return m.walletReceivePaidPane(w)
-		case svReceiveExpired:
-			return m.walletReceiveExpiredPane(w)
-		case svReceiveError:
-			return m.walletReceiveErrorPane(w)
-		default:
-			return m.walletReceivePane(w)
-		}
 	case tabPairing:
 		return m.pairingContent(w, h)
-	case tabOnChain:
-		switch m.subview {
-		case svOnChainSend:
-			return m.onChainSendPane(w, h)
-		case svOCSendConfirm:
-			return m.onChainSendConfirmPane(w, h)
-		case svOCSendBroadcast:
-			return m.onChainSendBroadcastPane(w)
-		case svOnChainResult:
-			return m.onChainResultContent(w)
-		default:
-			return m.onChainSendPane(w, h)
-		}
 	case tabOnChainTx:
 		if tab.Index < len(m.onChainTxs) {
 			return m.onChainTxDetailPane(
@@ -483,8 +446,6 @@ func (m Model) renderActiveTabContent(
 			" UTXO not found")
 	case tabOCReceive:
 		return m.onChainReceivePane(w)
-	case tabOpenChannel:
-		return m.channelOpenContent(w)
 	case tabChannelHistory:
 		return m.channelHistoryPane(w, h)
 	case tabSyncthing:

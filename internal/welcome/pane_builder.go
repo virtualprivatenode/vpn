@@ -167,6 +167,28 @@ func (p *paneBuilder) render() string {
 	return strings.Join(p.lines, "\n")
 }
 
+// renderWithBottomButtons pads the content to fill the
+// available height and pins a button row at the bottom.
+// Use instead of render() when buttons should stick to
+// the bottom of the content area.
+func (p *paneBuilder) renderWithBottomButtons(
+	labels []string, activeIdx int,
+	focused bool, h int,
+) string {
+	btnLine := renderButtons(
+		labels, activeIdx, focused, p.w)
+	contentH := len(p.lines)
+	pad := h - contentH - 1
+	if pad < 1 {
+		pad = 1
+	}
+	for i := 0; i < pad; i++ {
+		p.lines = append(p.lines, "")
+	}
+	p.lines = append(p.lines, btnLine)
+	return strings.Join(p.lines, "\n")
+}
+
 // ── Shared button renderer ───────────────────────────────
 
 func renderButtons(
