@@ -101,8 +101,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case showQRMsg:
 		m.urlTarget = msg.URL
 		m.qrLabel = msg.Label
-		m.urlReturnTo = msg.ReturnTo
 		m.subview = svQR
+		return m, nil
+	case showFullURLMsg:
+		m.urlTarget = msg.URL
+		m.subview = svFullURL
 		return m, nil
 	case refreshStatusMsg:
 		return m, fetchStatus(m.cfg, m.lndClient)
@@ -111,15 +114,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncOcCtxSelection()
 		return m, nil
 	case openTabMsg:
+		// Dedup by kind + index if Index is set
+		if msg.Index != 0 {
+			tabs := m.effectiveTabs()
+			for i, t := range tabs {
+				if t.Kind == msg.Kind &&
+					t.Index == msg.Index {
+					m.activeTab = i
+					if msg.FocusTabBar {
+						m.focusTabBar()
+						m.tabCursorX = 0
+					} else {
+						m.focusContent()
+						m.setContentFocus(0)
+					}
+					return m, nil
+				}
+			}
+		}
 		m.tabs = append(m.tabs, openTab{
 			Kind:    msg.Kind,
 			Label:   msg.Label,
+			Index:   msg.Index,
 			Section: m.nav.ActiveSection(),
 			Screen:  msg.Screen,
 		})
 		m.activeTab = len(m.effectiveTabs()) - 1
-		m.focusContent()
-		m.setContentFocus(0)
+		if msg.FocusTabBar {
+			m.focusTabBar()
+			m.tabCursorX = 0
+		} else {
+			m.focusContent()
+			m.setContentFocus(0)
+		}
 		if msg.Screen != nil {
 			return m, msg.Screen.Init()
 		}
@@ -181,60 +208,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subview = svLndHubAccountDetail
 		return m, nil
 	case syncthingPairedMsg:
-		if msg.err != nil {
-			m.syncPairError = msg.err.Error()
-			m.syncPairSuccess = false
-		} else {
-			m.syncPairError = ""
-			m.syncPairSuccess = true
-			m.addonBtnIdx = 0
-			m.setContentFocus(0)
+		if msg.err == nil {
 			m.cfg.SyncthingDevices = append(
 				m.cfg.SyncthingDevices,
 				config.SyncthingDevice{
-					Name: "Device " + string(
-						rune('0'+len(
-							m.cfg.SyncthingDevices)+1)),
-					DeviceID: syncthingIDValue(
-						m.syncDeviceInput),
+					Name: fmt.Sprintf("Device %d",
+						len(m.cfg.SyncthingDevices)+1),
+					DeviceID: msg.deviceID,
 					PairedAt: time.Now().
 						Format("2006-01-02"),
 				})
 			m.saveCfg()
 		}
+		// Route to screen for step/error state
+		if rm, cmd, ok := m.routeToScreen(
+			tabSyncthingPair, msg); ok {
+			return rm, cmd
+		}
 		return m, nil
 	case syncthingRemovedMsg:
-		if msg.err != nil {
-			m.syncRemoveError = msg.err.Error()
-			m.subview = svSyncthingDeviceDetail
-			m.setContentFocus(0)
-		} else {
-			// Remove device from config
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices) {
-				m.cfg.SyncthingDevices = append(
-					m.cfg.SyncthingDevices[:m.syncCursor],
-					m.cfg.SyncthingDevices[m.syncCursor+1:]...)
-				m.saveCfg()
-			}
-			// Reset cursor
-			if m.syncCursor >=
-				len(m.cfg.SyncthingDevices) &&
-				m.syncCursor > 0 {
-				m.syncCursor--
-			}
-			// Close device detail tab, return to
-			// Syncthing manage
-			m.setContentFocus(0)
-			m.addonBtnIdx = 0
-			m.subview = svSyncthingDetail
-			// Find and close the device tab
-			tabs := m.effectiveTabs()
-			for i, t := range tabs {
-				if t.Kind == tabSyncthingDevice {
-					return m.closeTab(i)
+		if msg.err == nil {
+			// Remove device from config by ID
+			for i, d := range m.cfg.SyncthingDevices {
+				if d.DeviceID == msg.deviceID {
+					m.cfg.SyncthingDevices = append(
+						m.cfg.SyncthingDevices[:i],
+						m.cfg.SyncthingDevices[i+1:]...)
+					m.saveCfg()
+					break
 				}
 			}
+		}
+		// Route to screen — screen emits closeTab
+		// on success, sets error on failure
+		if rm, cmd, ok := m.routeToScreen(
+			tabSyncthingDevice, msg); ok {
+			return rm, cmd
 		}
 		return m, nil
 	case channelOpenResultMsg:
@@ -247,9 +256,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case newAddressMsg:
 		if msg.err == nil {
 			m.onChainAddress = msg.address
-			if m.subview == svOnChainReceive {
-				m.ocRecvAddress = msg.address
-			}
+		}
+		// Route to OCReceiveScreen if open
+		if rm, cmd, ok := m.routeToScreen(
+			tabOCReceive, msg); ok {
+			return rm, cmd
 		}
 		return m, nil
 	case invoiceCreatedMsg:
@@ -409,61 +420,12 @@ func (m Model) handleTabContentKey(
 
 	// Legacy path: existing switch on tab.Kind / m.subview
 	switch tab.Kind {
-	case tabOCReceive:
-		return m.handleOCReceiveTabKey(key)
-	case tabPairing:
-		return m.handlePairingTabKey(key)
-	case tabSyncthing:
-		return m.handleSyncthingTabKey(key, msg)
-	case tabSyncthingDevice:
-		return m.handleSyncthingDeviceTabKey(key)
-	case tabSyncthingWebUI:
-		return m.handleSyncthingWebUITabKey(key)
-	case tabSyncthingPair:
-		return m.handleSyncthingPairTabKey(key, msg)
 	case tabLndHub:
 		return m.handleLndHubTabKey(key, msg)
 	case tabLndHubAccount:
 		return m.handleLndHubAccountTabKey(key)
 	}
 	return m.handleSectionHomeKey(key, msg)
-}
-
-func (m Model) handleOCReceiveTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "right":
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-		return m, nil
-	case "down", "tab":
-		return m, nil
-	case "backspace":
-		m.ocRecvAddress = ""
-		m.ocRecvError = ""
-		m.subview = svNone
-		return m.closeTab(m.activeTab)
-	case "enter":
-		if m.ocRecvAddress != "" {
-			m.ocRecvAddress = ""
-			return m,
-				getNewAddressCmd(m.lndClient)
-		}
-		return m, nil
-	}
-	return m, nil
 }
 
 func labelTxCmd(
@@ -523,196 +485,6 @@ func (m *Model) syncOcCtxSelection() {
 	m.ocCtx.UtxoSelected = m.utxoSelected
 	m.ocCtx.UtxoSelectedTotal = m.utxoSelectedTotal
 	m.ocCtx.UtxoOutpoints = m.utxoOutpoints
-}
-
-// ── Flow tab handlers ────────────────────────────────────
-
-func (m Model) handlePairingTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.pairingButtonIdx > 0 {
-			m.pairingButtonIdx--
-			return m, nil
-		}
-		m.focusSidebar()
-		return m, nil
-	case "right":
-		maxBtn := 1
-		if m.cfg.P2PMode == "hybrid" {
-			maxBtn = 2
-		}
-		if m.pairingButtonIdx < maxBtn {
-			m.pairingButtonIdx++
-		}
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-		return m, nil
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	case "enter":
-		return m.handlePairingEnter()
-	}
-	return m, nil
-}
-
-func (m Model) handlePairingContentKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		if m.pairingButtonIdx > 0 {
-			m.pairingButtonIdx--
-		}
-	case "right":
-		if m.pairingButtonIdx < 3 {
-			m.pairingButtonIdx++
-		}
-	case "down", "tab":
-		return m, nil
-	case "enter":
-		return m.handlePairingEnter()
-	}
-	return m, nil
-}
-
-func (m Model) handleSyncthingTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingDetail:
-		return m.handleSyncDetailKey(key)
-	default:
-		m.restoreTabSubview(tabSyncthing)
-		return m.handleSyncDetailKey(key)
-	}
-}
-
-// ── Syncthing device detail tab ──────────────────────────
-
-func (m Model) handleSyncthingDeviceTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingRemoveConfirm:
-		return m.handleSyncRemoveConfirmKey(key)
-	default:
-		m.subview = svSyncthingDeviceDetail
-		return m.handleSyncDeviceDetailKey(key)
-	}
-}
-
-// ── Syncthing Web UI tab ───────────────────────────────
-
-func (m Model) handleSyncthingWebUITabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	m.subview = svSyncthingWebUI
-	return m.handleSyncWebUIKey(key)
-}
-
-// ── Syncthing pair device tab ──────────────────────────
-
-func (m Model) handleSyncthingPairTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingPairInput:
-		return m.handleSyncthingPairInputKey(key, msg)
-	case svSyncthingPairQR:
-		return m.handleSyncPairQRKey(key)
-	default:
-		m.restoreTabSubview(tabSyncthingPair)
-		return m.handleSyncthingPairInputKey(key, msg)
-	}
-}
-
-func (m Model) handleSyncDeviceDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.setContentFocus(0)
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return m, nil
-		}
-	case "down", "tab":
-		return m, nil
-	case "enter":
-		if m.contentFocus() == 1 {
-			m.subview = svSyncthingRemoveConfirm
-			m.syncRemoveBtnIdx = 0
-			m.syncRemoveError = ""
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
-}
-
-func (m Model) handleSyncRemoveConfirmKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.syncRemoveBtnIdx > 0 {
-			m.syncRemoveBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.syncRemoveBtnIdx < 1 {
-			m.syncRemoveBtnIdx++
-		}
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "enter":
-		switch m.syncRemoveBtnIdx {
-		case 0: // Go Back
-			m.subview = svSyncthingDeviceDetail
-			m.setContentFocus(1)
-			return m, nil
-		case 1: // Remove
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices) {
-				deviceID :=
-					m.cfg.SyncthingDevices[m.syncCursor].
-						DeviceID
-				return m, removeSyncthingDeviceCmd(
-					deviceID)
-			}
-		}
-	case "backspace":
-		m.subview = svSyncthingDeviceDetail
-		m.setContentFocus(1)
-		return m, nil
-	}
-	return m, nil
 }
 
 func (m Model) handleLndHubTabKey(
@@ -1127,11 +899,14 @@ func (m Model) handleWalletHomeKey(
 					return m, cmd
 				}
 			case 2:
-				m.pairingButtonIdx = 0
-				m.subview = svWalletPairing
-				m.openFlowTab(tabPairing,
+				screen := NewPairingScreen(
+					m.screenCtx)
+				cmd := m.openFlowTabWithScreen(
+					tabPairing,
 					"⚡ Zeus — LND REST",
-					secWallet)
+					secWallet,
+					screen)
+				return m, cmd
 			}
 		}
 	}
@@ -1369,13 +1144,14 @@ func (m Model) handleOnChainContentKey(
 		if m.contentFocus() == 0 {
 			switch m.onChainBtnIdx {
 			case 0:
-				m.ocRecvAddress = ""
-				m.ocRecvError = ""
-				m.subview = svOnChainReceive
-				m.findOrOpenTab(tabOCReceive,
-					"⛓ Receive", 0, secOnChain)
-				return m,
-					getNewAddressCmd(m.lndClient)
+				screen := NewOCReceiveScreen(
+					m.screenCtx)
+				cmd := m.openFlowTabWithScreen(
+					tabOCReceive,
+					"⛓ Receive",
+					secOnChain,
+					screen)
+				return m, cmd
 			case 1:
 				screen := NewOnChainSendScreen(
 					m.screenCtx, m.ocCtx)
@@ -1548,28 +1324,6 @@ func (m Model) handleUtxoLabelPopupKey(
 // was needed.
 func (m *Model) restoreTabSubview(kind tabKind) bool {
 	switch kind {
-	case tabSyncthing:
-		if m.subview != svSyncthingDetail {
-			m.subview = svSyncthingDetail
-			return true
-		}
-	case tabSyncthingDevice:
-		if m.subview != svSyncthingDeviceDetail &&
-			m.subview != svSyncthingRemoveConfirm {
-			m.subview = svSyncthingDeviceDetail
-			return true
-		}
-	case tabSyncthingWebUI:
-		if m.subview != svSyncthingWebUI {
-			m.subview = svSyncthingWebUI
-			return true
-		}
-	case tabSyncthingPair:
-		if m.subview != svSyncthingPairInput &&
-			m.subview != svSyncthingPairQR {
-			m.subview = svSyncthingPairInput
-			return true
-		}
 	case tabLndHub:
 		if m.subview != svLndHubManage &&
 			m.subview != svLndHubCreateName &&
@@ -1614,11 +1368,14 @@ func (m Model) handleAddonsHomeKey(
 		switch m.btnIdx {
 		case 0:
 			if m.cfg.SyncthingInstalled {
-				m.subview = svSyncthingDetail
-				m.addonBtnIdx = 0
-				m.setContentFocus(0)
-				m.openFlowTab(tabSyncthing,
-					"Syncthing", secAddons)
+				screen := NewSyncthingDetailScreen(
+					m.screenCtx)
+				cmd := m.openFlowTabWithScreen(
+					tabSyncthing,
+					"Syncthing",
+					secAddons,
+					screen)
+				return m, cmd
 			} else if m.cfg.HasLND() &&
 				m.cfg.WalletExists() {
 				m.shellAction = svSyncthingInstall
@@ -1735,90 +1492,6 @@ func (m Model) handleSystemHomeKey(
 				m.sysConfirm = "Reboot"
 			}
 		}
-	}
-	return m, nil
-}
-
-// ── Syncthing detail keys ────────────────────────────────
-
-func (m Model) handleSyncDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.contentFocus() == 0 && m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.contentFocus() == 0 && m.addonBtnIdx < 1 {
-			m.addonBtnIdx++
-		}
-	case "up":
-		if m.contentFocus() == 1 {
-			if m.syncCursor > 0 {
-				m.syncCursor--
-			} else {
-				m.setContentFocus(0)
-				m.addonBtnIdx = 0
-			}
-		} else if m.contentFocus() == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		}
-	case "down", "tab":
-		if m.contentFocus() == 0 {
-			if len(m.cfg.SyncthingDevices) > 0 {
-				m.setContentFocus(1)
-				m.syncCursor = 0
-			}
-		} else if m.contentFocus() == 1 {
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices)-1 {
-				m.syncCursor++
-			}
-		}
-	case "enter":
-		if m.contentFocus() == 0 {
-			switch m.addonBtnIdx {
-			case 0:
-				m.syncDeviceInput =
-					newSyncthingIDInput()
-				m.subview = svSyncthingPairInput
-				m.syncPairError = ""
-				m.syncPairSuccess = false
-				m.setContentFocus(0)
-				m.addonBtnIdx = 0
-				m.findOrOpenTab(tabSyncthingPair,
-					"Pair Device", 0, secAddons)
-			case 1:
-				m.subview = svSyncthingWebUI
-				m.addonBtnIdx = 0
-				m.findOrOpenTab(tabSyncthingWebUI,
-					"Web UI", 0, secAddons)
-			}
-		} else if m.contentFocus() == 1 {
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices) {
-				dev := m.cfg.SyncthingDevices[m.syncCursor]
-				label := dev.Name
-				if len(label) > 17 {
-					label = label[:17] + "..."
-				}
-				m.findOrOpenTab(tabSyncthingDevice,
-					label, m.syncCursor, secAddons)
-			}
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
 	}
 	return m, nil
 }
@@ -1984,11 +1657,6 @@ func (m Model) handleTabBarKey(
 		if m.activeTab > 0 &&
 			m.activeTab < len(tabs) {
 			switch tabs[m.activeTab].Kind {
-			case tabSyncthingDevice:
-				m.subview = svSyncthingDeviceDetail
-				m.focusContent()
-				m.setContentFocus(1)
-				return m, nil
 			case tabLndHubAccount:
 				m.subview = svLndHubAccountDetail
 				m.focusContent()
@@ -1999,6 +1667,7 @@ func (m Model) handleTabBarKey(
 				tabChannel, tabPayment, tabOnChainTx,
 				tabUtxoDetail, tabChannelHistory,
 				tabSyncthing, tabLndHub,
+				tabSyncthingDevice,
 				tabSyncthingWebUI, tabSyncthingPair:
 				if tabs[m.activeTab].Screen == nil {
 					m.restoreTabSubview(
@@ -2060,11 +1729,6 @@ func (m Model) handleTabBarKey(
 		if m.activeTab > 0 &&
 			m.activeTab < len(tabs) {
 			switch tabs[m.activeTab].Kind {
-			case tabSyncthingDevice:
-				m.subview = svSyncthingDeviceDetail
-				m.focusContent()
-				m.setContentFocus(1)
-				return m, nil
 			case tabLndHubAccount:
 				m.subview = svLndHubAccountDetail
 				m.focusContent()
@@ -2075,6 +1739,7 @@ func (m Model) handleTabBarKey(
 				tabChannel, tabPayment, tabOnChainTx,
 				tabUtxoDetail, tabChannelHistory,
 				tabSyncthing, tabLndHub,
+				tabSyncthingDevice,
 				tabSyncthingWebUI, tabSyncthingPair:
 				if tabs[m.activeTab].Screen == nil {
 					m.restoreTabSubview(
@@ -2135,8 +1800,6 @@ func (m Model) closeTab(
 	case tabOnChain:
 		m.subview = svNone
 	case tabOCReceive:
-		m.ocRecvAddress = ""
-		m.ocRecvError = ""
 		m.subview = svNone
 	case tabPairing:
 		m.subview = svNone
@@ -2144,13 +1807,10 @@ func (m Model) closeTab(
 		m.subview = svNone
 	case tabSyncthingDevice:
 		m.subview = svNone
-		m.syncRemoveError = ""
 	case tabSyncthingWebUI:
 		m.subview = svNone
 	case tabSyncthingPair:
 		m.subview = svNone
-		m.syncPairError = ""
-		m.syncPairSuccess = false
 	case tabLndHub:
 		m.subview = svNone
 	case tabLndHubAccount:
@@ -2260,14 +1920,8 @@ func (m Model) handleGenericSubviewKey(
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if m.urlReturnTo != svNone {
-			m.subview = m.urlReturnTo
-			m.urlReturnTo = svNone
-			return m, nil
-		}
+	case "enter":
 		m.subview = svNone
-		m.btnIdx = 0
 		return m, nil
 	}
 	return m, nil
@@ -2343,10 +1997,12 @@ func (m Model) startChannelOpenCmd() (
 	// Zero balance: redirect to on-chain receive
 	if m.status != nil &&
 		m.status.lndBalance == "0" {
-		m.subview = svOnChainReceive
-		m.openFlowTab(tabOCReceive,
-			"Receive", secOnChain)
-		return m, getNewAddressCmd(m.lndClient)
+		screen := NewOCReceiveScreen(m.screenCtx)
+		cmd := m.openFlowTabWithScreen(
+			tabOCReceive,
+			"Receive", secOnChain,
+			screen)
+		return m, cmd
 	}
 	// Normal path: create screen
 	screen := NewChannelOpenScreen(m.screenCtx)
@@ -2413,22 +2069,8 @@ func (m Model) findFlowTab() int {
 	tabs := m.effectiveTabs()
 	var kind tabKind
 	switch {
-	case m.subview == svWalletPairing:
-		kind = tabPairing
-	case m.subview == svOnChainReceive:
-		kind = tabOCReceive
 	case isOnChainSubview(m.subview):
 		kind = tabOnChain
-	case m.subview == svSyncthingDetail:
-		kind = tabSyncthing
-	case m.subview == svSyncthingWebUI:
-		kind = tabSyncthingWebUI
-	case m.subview == svSyncthingPairInput ||
-		m.subview == svSyncthingPairQR:
-		kind = tabSyncthingPair
-	case m.subview == svSyncthingDeviceDetail ||
-		m.subview == svSyncthingRemoveConfirm:
-		kind = tabSyncthingDevice
 	case m.subview == svLndHubManage ||
 		m.subview == svLndHubCreateName ||
 		m.subview == svLndHubCreateAccount ||
@@ -2452,8 +2094,7 @@ func isOnChainSubview(sv wSubview) bool {
 	switch sv {
 	case svOnChain, svOnChainResult,
 		svOnChainSend, svOCSendConfirm,
-		svOCSendBroadcast,
-		svOnChainReceive:
+		svOCSendBroadcast:
 		return true
 	}
 	return false
@@ -2595,11 +2236,6 @@ func (m Model) handlePaste(
 		var cmd tea.Cmd
 		m.hubNameInput, cmd =
 			m.hubNameInput.Update(msg)
-		return m, cmd
-	case svSyncthingPairInput:
-		var cmd tea.Cmd
-		m.syncDeviceInput, cmd =
-			m.syncDeviceInput.Update(msg)
 		return m, cmd
 	}
 

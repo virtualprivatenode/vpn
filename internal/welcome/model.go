@@ -39,7 +39,6 @@ const (
 	svChannelOpenResult
 	svChannelFundWallet
 	svZeusPairing
-	svWalletPairing
 	svOnChain
 	svSend
 	svSendConfirm
@@ -53,12 +52,6 @@ const (
 	svPaymentDetail
 	svQR
 	svFullURL
-	svSyncthingDetail
-	svSyncthingPairInput
-	svSyncthingDeviceDetail
-	svSyncthingWebUI
-	svSyncthingPairQR
-	svSyncthingRemoveConfirm
 	svLndHubManage
 	svLndHubCreateName
 	svLndHubCreateAccount
@@ -77,8 +70,6 @@ const (
 	svOnChainSend
 	svOCSendConfirm
 	svOCSendBroadcast
-	// On-chain receive flow
-	svOnChainReceive
 )
 
 // Tab types for the top tab bar
@@ -132,8 +123,14 @@ type lndhubDeactivatedMsg struct {
 	balance string
 	err     error
 }
-type syncthingPairedMsg struct{ err error }
-type syncthingRemovedMsg struct{ err error }
+type syncthingPairedMsg struct {
+	deviceID string
+	err      error
+}
+type syncthingRemovedMsg struct {
+	deviceID string
+	err      error
+}
 type channelOpenResultMsg struct {
 	txid string
 	err  error
@@ -302,20 +299,10 @@ type Model struct {
 	hubCreateBtnIdx      int // 0=Clear, 1=Create Account
 	hubDeactivateBtnIdx  int
 	hubDeactivateBalance string
-	syncDeviceLabel      string
-	syncPairError        string
-	syncPairSuccess      bool
-	syncCursor           int
-	syncRemoveBtnIdx     int
-	syncRemoveError      string
-	showSecrets          bool
 
-	// Pairing
-	pairingButtonIdx int
-	urlTarget        string
-	qrMode           string
-	qrLabel          string
-	urlReturnTo      wSubview
+	// QR fullscreen (Model-owned overlay)
+	urlTarget string
+	qrLabel   string
 
 	// Channels
 	chanCursor int
@@ -341,7 +328,6 @@ type Model struct {
 	chanHostInput   textinput.Model
 	chanAmountInput textinput.Model
 	hubNameInput    textinput.Model
-	syncDeviceInput textinput.Model
 
 	// On-chain state
 	onChainAddress string
@@ -359,10 +345,6 @@ type Model struct {
 	utxoSelected      map[int]bool // keyed by UTXO index
 	utxoSelectedTotal int64        // running sat total
 	utxoOutpoints     []string     // "txid:vout" for SendCoins
-
-	// On-chain receive state
-	ocRecvAddress string
-	ocRecvError   string
 
 	// Fee tiers (used by on-chain send screen + close)
 	sendFeeTiers [4]feeTier
@@ -572,7 +554,8 @@ func pairSyncthingDeviceCmd(
 ) tea.Cmd {
 	return func() tea.Msg {
 		err := installer.PairSyncthingDevice(deviceID)
-		return syncthingPairedMsg{err: err}
+		return syncthingPairedMsg{
+			deviceID: deviceID, err: err}
 	}
 }
 
@@ -581,7 +564,8 @@ func removeSyncthingDeviceCmd(
 ) tea.Cmd {
 	return func() tea.Msg {
 		err := installer.UnpairSyncthingDevice(deviceID)
-		return syncthingRemovedMsg{err: err}
+		return syncthingRemovedMsg{
+			deviceID: deviceID, err: err}
 	}
 }
 

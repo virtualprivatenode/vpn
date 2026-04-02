@@ -780,28 +780,6 @@ func (b ocSendConfirmBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }
 
-// ── Fullscreen (QR, URL) bindings ────────────────────────
-
-type fullscreenBindings struct {
-	Back key.Binding
-	Quit key.Binding
-}
-
-func newFullscreenBindings() fullscreenBindings {
-	return fullscreenBindings{
-		Back: kBack,
-		Quit: kQuit,
-	}
-}
-
-func (b fullscreenBindings) ShortHelp() []key.Binding {
-	return []key.Binding{b.Back, b.Quit}
-}
-
-func (b fullscreenBindings) FullHelp() [][]key.Binding {
-	return [][]key.Binding{b.ShortHelp()}
-}
-
 // ── Addon detail bindings ────────────────────────────────
 
 type addonDetailBindings struct {
@@ -988,52 +966,5 @@ func (b detailTabBindings) ShortHelp() []key.Binding {
 }
 
 func (b detailTabBindings) FullHelp() [][]key.Binding {
-	return [][]key.Binding{b.ShortHelp()}
-}
-
-// ── On-chain receive bindings ───────────────────────────
-
-type ocReceiveBindings struct {
-	Enter   key.Binding
-	Sidebar key.Binding
-	Back    key.Binding
-	TabBar  key.Binding
-	Quit    key.Binding
-}
-
-func newOCReceiveBindings(
-	hasTabs bool,
-) ocReceiveBindings {
-	b := ocReceiveBindings{
-		Enter: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "new addr")),
-		Sidebar: kSidebar,
-		Back: key.NewBinding(
-			key.WithKeys("backspace"),
-			key.WithHelp("⌫", "close tab")),
-		TabBar: key.NewBinding(
-			key.WithKeys("up"),
-			key.WithHelp("↑", "tab bar")),
-		Quit: kQuit,
-	}
-	if !hasTabs {
-		b.TabBar.SetEnabled(false)
-	}
-	return b
-}
-
-func (b ocReceiveBindings) ShortHelp() []key.Binding {
-	binds := []key.Binding{
-		b.Enter, b.Sidebar, b.Back,
-	}
-	if b.TabBar.Enabled() {
-		binds = append(binds, b.TabBar)
-	}
-	binds = append(binds, b.Quit)
-	return binds
-}
-
-func (b ocReceiveBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{b.ShortHelp()}
 }

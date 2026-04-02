@@ -455,7 +455,6 @@ func (s *ReceiveScreen) handleWaitingKey(
 					Label: fmt.Sprintf(
 						"Invoice — %s sats",
 						formatSats(s.amountSats)),
-					ReturnTo: svReceiveWaiting,
 				}
 			}
 		}

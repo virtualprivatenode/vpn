@@ -403,33 +403,6 @@ func (m Model) renderActiveTabContent(
 	switch tab.Kind {
 	case tabMain:
 		return m.renderContent(w, h)
-	case tabPairing:
-		return m.pairingContent(w, h)
-	case tabOCReceive:
-		return m.onChainReceivePane(w)
-	case tabSyncthing:
-		return m.renderSyncthingTabContent(w, h)
-	case tabSyncthingDevice:
-		if tab.Index < len(m.cfg.SyncthingDevices) {
-			saved := m.syncCursor
-			m.syncCursor = tab.Index
-			var result string
-			switch m.subview {
-			case svSyncthingRemoveConfirm:
-				result =
-					m.syncthingRemoveConfirmContent(w)
-			default:
-				result =
-					m.syncthingDeviceDetailContent(w)
-			}
-			m.syncCursor = saved
-			return result
-		}
-		return theme.Dim.Render(" Device not found")
-	case tabSyncthingWebUI:
-		return m.syncthingWebUIContent(w)
-	case tabSyncthingPair:
-		return m.renderSyncthingPairTabContent(w, h)
 	case tabLndHub:
 		return m.renderLndHubTabContent(w, h)
 	case tabLndHubAccount:
@@ -475,7 +448,7 @@ func (m Model) viewFullURL() string {
 	title := theme.Header.Render(
 		"Full URL — Copy and paste into Tor Browser")
 	hint := theme.Dim.Render(
-		"Select and copy. Press backspace to go back.")
+		"Select and copy. Press enter to go back.")
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		"", title, "", hint, "", m.urlTarget, "")
 	return lipgloss.Place(m.width, m.height,

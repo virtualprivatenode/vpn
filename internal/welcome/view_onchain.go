@@ -541,49 +541,6 @@ func (m Model) computeTxBalances() []int64 {
 	return balances
 }
 
-// ── On-Chain Receive pane ────────────────────────────────
-
-func (m Model) onChainReceivePane(w int) string {
-	p := newPane(w)
-	p.title(theme.Header, "⛓ Receive On-Chain")
-
-	if m.ocRecvAddress == "" {
-		p.dim("Generating address...")
-		return p.render()
-	}
-
-	p.labelLine("Address:")
-	p.monoWrap(m.ocRecvAddress)
-	p.blank()
-	p.dim("Send Bitcoin to this address.")
-	p.dim("Funds appear after 1 confirmation.")
-	p.blank()
-
-	btnFocused := m.contentFocused && !m.tabFocused
-
-	qr := renderQRCode(m.ocRecvAddress)
-	if qr != "" {
-		for _, line := range strings.Split(
-			qr, "\n") {
-			lineW := lipgloss.Width(line)
-			pad := (w - lineW) / 2
-			if pad < 0 {
-				pad = 0
-			}
-			p.line(strings.Repeat(" ", pad) + line)
-		}
-	}
-	p.blank()
-
-	p.buttons(
-		[]string{"New Address"},
-		0, btnFocused)
-
-	p.appendError(m.ocRecvError)
-
-	return p.render()
-}
-
 // ── UTXO detail pane ────────────────────────────────────
 
 func (m Model) utxoTxLabel(txid string) string {

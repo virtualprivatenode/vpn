@@ -81,9 +81,11 @@ type closeTabMsg struct{}
 // openTabMsg tells Model to open a new tab with the
 // given screen.
 type openTabMsg struct {
-	Kind   tabKind
-	Label  string
-	Screen Screen
+	Kind        tabKind
+	Label       string
+	Index       int // for detail tabs (dedup key)
+	Screen      Screen
+	FocusTabBar bool // true = tab bar focused on open
 }
 
 // focusSidebarMsg tells Model to move focus to the
@@ -96,9 +98,13 @@ type focusTabBarMsg struct{}
 
 // showQRMsg tells Model to show the fullscreen QR view.
 type showQRMsg struct {
-	URL      string
-	Label    string
-	ReturnTo wSubview
+	URL   string
+	Label string
+}
+
+// showFullURLMsg tells Model to show the fullscreen URL view.
+type showFullURLMsg struct {
+	URL string
 }
 
 // refreshStatusMsg tells Model to re-fetch node status.
