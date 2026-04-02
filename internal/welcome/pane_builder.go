@@ -170,7 +170,9 @@ func (p *paneBuilder) render() string {
 // renderWithBottomButtons pads the content to fill the
 // available height and pins a button row at the bottom.
 // Use instead of render() when buttons should stick to
-// the bottom of the content area.
+// the bottom of the content area. If content exceeds
+// the available height, content is truncated (not the
+// button) so the button is always visible.
 func (p *paneBuilder) renderWithBottomButtons(
 	labels []string, activeIdx int,
 	focused bool, h int,
@@ -178,6 +180,18 @@ func (p *paneBuilder) renderWithBottomButtons(
 	btnLine := renderButtons(
 		labels, activeIdx, focused, p.w)
 	contentH := len(p.lines)
+
+	// If content overflows, truncate content lines
+	// to make room for the button row.
+	maxContent := h - 2 // 1 pad + 1 button
+	if maxContent < 1 {
+		maxContent = 1
+	}
+	if contentH > maxContent {
+		p.lines = p.lines[:maxContent]
+		contentH = maxContent
+	}
+
 	pad := h - contentH - 1
 	if pad < 1 {
 		pad = 1

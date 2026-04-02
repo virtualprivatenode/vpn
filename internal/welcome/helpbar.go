@@ -129,19 +129,6 @@ func (m Model) currentBindings() []key.Binding {
 
 		// Legacy path
 		switch tab.Kind {
-		case tabPayment, tabOnChainTx, tabUtxoDetail:
-			return newDetailTabBindings(hasTabs).
-				ShortHelp()
-		case tabChannelHistory:
-			return newChannelHistoryBindings(hasTabs).
-				ShortHelp()
-		case tabChannel:
-			if isCloseSubview(m.subview) {
-				break // fall through to subview switch
-			}
-			return newChannelDetailBindings(
-				hasTabs, m.contentFocus() == 1).
-				ShortHelp()
 		case tabSyncthingDevice:
 			if m.subview == svSyncthingRemoveConfirm {
 				break // fall through to subview switch
@@ -169,15 +156,6 @@ func (m Model) currentBindings() []key.Binding {
 
 	// Content focused — dispatch by subview
 	switch m.subview {
-	case svCloseType:
-		return newCloseTypeBindings().ShortHelp()
-	case svCloseConfirm:
-		return newOCSendConfirmBindings(hasTabs).
-			ShortHelp()
-	case svClosing:
-		return newWaitingBindings().ShortHelp()
-	case svCloseResult:
-		return newResultBindings().ShortHelp()
 	case svSyncthingDetail:
 		return newAddonDetailBindings(hasTabs).
 			ShortHelp()

@@ -403,51 +403,10 @@ func (m Model) renderActiveTabContent(
 	switch tab.Kind {
 	case tabMain:
 		return m.renderContent(w, h)
-	case tabChannel:
-		if isCloseSubview(m.subview) {
-			return m.channelCloseContent(w)
-		}
-		if m.status != nil &&
-			tab.Index < len(m.status.channels) {
-			saved := m.chanCursor
-			m.chanCursor = tab.Index
-			result := m.channelDetailPane(w)
-			m.chanCursor = saved
-			return result
-		}
-		return theme.Dim.Render(" Channel not found")
-	case tabPayment:
-		if tab.Index < len(m.payHistory) {
-			saved := m.payHistoryCursor
-			m.payHistoryCursor = tab.Index
-			result := m.paymentDetailContent(w)
-			m.payHistoryCursor = saved
-			return result
-		}
-		return theme.Dim.Render(" Payment not found")
 	case tabPairing:
 		return m.pairingContent(w, h)
-	case tabOnChainTx:
-		if tab.Index < len(m.onChainTxs) {
-			return m.onChainTxDetailPane(
-				m.onChainTxs[tab.Index], w)
-		}
-		return theme.Dim.Render(
-			" Transaction not found")
-	case tabUtxoDetail:
-		if tab.Index < len(m.utxos) {
-			saved := m.utxoCursor
-			m.utxoCursor = tab.Index
-			result := m.utxoDetailPane(w)
-			m.utxoCursor = saved
-			return result
-		}
-		return theme.Dim.Render(
-			" UTXO not found")
 	case tabOCReceive:
 		return m.onChainReceivePane(w)
-	case tabChannelHistory:
-		return m.channelHistoryPane(w, h)
 	case tabSyncthing:
 		return m.renderSyncthingTabContent(w, h)
 	case tabSyncthingDevice:

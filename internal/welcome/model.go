@@ -79,11 +79,6 @@ const (
 	svOCSendBroadcast
 	// On-chain receive flow
 	svOnChainReceive
-	// Channel close flow
-	svCloseType
-	svCloseConfirm
-	svClosing
-	svCloseResult
 )
 
 // Tab types for the top tab bar
@@ -105,6 +100,7 @@ const (
 	tabLndHub                         //
 	tabLndHubAccount                  // LndHub account detail
 	tabOpenChannel                    // Channel open flow
+	tabCloseChannel                   // Channel close flow
 	tabOnChainTx                      // on-chain transaction detail
 	tabUtxoDetail                     // UTXO detail with label edit
 	tabChannelHistory                 // channel history view
@@ -323,23 +319,6 @@ type Model struct {
 
 	// Channels
 	chanCursor int
-
-	// Channel close
-	closeForce         bool
-	closeChanPoint     string
-	closePeerAlias     string
-	closeCapacity      int64
-	closeLocalBal      int64
-	closeRemoteBal     int64
-	closeFeeTiers      [4]feeTier
-	closeFeeInput      textinput.Model
-	closeFeeIdx        int
-	closeEstFee        int64
-	closeTxid          string
-	closeError         string
-	closeBtnIdx        int
-	closeConfirmBtnIdx int
-	closeInFlight      bool
 
 	// Channel history
 	chanHistory       []channelHistoryEntry
