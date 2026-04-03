@@ -12,6 +12,11 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
+// ── Fullscreen overlays ────────────────────────────────
+// These are Model-owned views that take over the entire
+// screen (not section content). Triggered by setting
+// m.subview to svQR or svFullURL.
+
 func (m Model) viewQR() string {
 	uri := m.urlTarget
 	label := m.qrLabel
@@ -40,6 +45,19 @@ func (m Model) viewQR() string {
 		lipgloss.JoinVertical(
 			lipgloss.Left, lines...))
 }
+
+func (m Model) viewFullURL() string {
+	title := theme.Header.Render(
+		"Full URL — Copy and paste into Tor Browser")
+	hint := theme.Dim.Render(
+		"Select and copy. Press enter to go back.")
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		"", title, "", hint, "", m.urlTarget, "")
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center, content)
+}
+
+// ── QR and encoding utilities ──────────────────────────
 
 func renderQRCode(data string) string {
 	var buf bytes.Buffer

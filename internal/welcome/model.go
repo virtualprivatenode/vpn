@@ -28,48 +28,16 @@ const (
 
 const (
 	svNone wSubview = iota
-	svWalletInfo
-	svChannelList
-	svChannelDetail
-	svChannelOpen
-	svChannelAmountSelect
-	svChannelCustomPeer
-	svChannelOpenConfirm
-	svChannelOpening
-	svChannelOpenResult
-	svChannelFundWallet
-	svZeusPairing
-	svOnChain
-	svSend
-	svSendConfirm
-	svSendInFlight
-	svSendResult
-	svReceive
-	svReceiveWaiting
-	svReceivePaid
-	svReceiveExpired
-	svReceiveError
-	svPaymentDetail
 	svQR
 	svFullURL
-	svLndHubManage
-	svLndHubCreateName
-	svLndHubCreateAccount
-	svLndHubCreateQR
-	svLndHubAccountDetail
-	svLndHubDeactivateConfirm
-	// Shell actions
+	// Shell actions — trigger install/update flows
+	// via the Show() restart loop
 	svWalletCreate
 	svLNDInstall
 	svSyncthingInstall
 	svLndHubInstall
-	svOnChainResult
 	svSelfUpdate
 	svP2PUpgrade
-	// On-chain send flow (single screen)
-	svOnChainSend
-	svOCSendConfirm
-	svOCSendBroadcast
 )
 
 // Tab types for the top tab bar
@@ -90,6 +58,7 @@ const (
 	tabSyncthingPair                  // Syncthing pair device flow
 	tabLndHub                         //
 	tabLndHubAccount                  // LndHub account detail
+	tabLndHubCreate                   // LndHub create account flow
 	tabOpenChannel                    // Channel open flow
 	tabCloseChannel                   // Channel close flow
 	tabOnChainTx                      // on-chain transaction detail
@@ -117,9 +86,11 @@ type latestVersionMsg string
 
 type lndhubAccountCreatedMsg struct {
 	account *installer.LndHubAccount
+	label   string
 	err     error
 }
 type lndhubDeactivatedMsg struct {
+	login   string
 	balance string
 	err     error
 }
@@ -278,34 +249,17 @@ type Model struct {
 	screenCtx *ScreenContext
 	ocCtx     *OnChainContext
 
+	// L16: section home screens (nil = legacy path)
+	sectionScreens [numSections]Screen
+
 	shellAction   wSubview
 	status        *statusMsg
 	latestVersion string
-	updateConfirm bool
 	fetchInFlight bool
-
-	// Button index for content pane buttons
-	btnIdx      int
-	addonBtnIdx int
-
-	// System
-	svcCursor  int
-	svcConfirm string
-	sysConfirm string
-
-	// Addons
-	lastAccount          *installer.LndHubAccount
-	hubCursor            int
-	hubCreateBtnIdx      int // 0=Clear, 1=Create Account
-	hubDeactivateBtnIdx  int
-	hubDeactivateBalance string
 
 	// QR fullscreen (Model-owned overlay)
 	urlTarget string
 	qrLabel   string
-
-	// Channels
-	chanCursor int
 
 	// Channel history
 	chanHistory       []channelHistoryEntry
@@ -314,7 +268,6 @@ type Model struct {
 	// Navigation
 	nav            NavSidebar
 	contentFocused bool
-	sectionFocus   [numSections]int // per-section focus zone
 
 	// Tab bar
 	tabs            []openTab
@@ -327,20 +280,10 @@ type Model struct {
 	chanPubkeyInput textinput.Model
 	chanHostInput   textinput.Model
 	chanAmountInput textinput.Model
-	hubNameInput    textinput.Model
 
 	// On-chain state
 	onChainAddress string
-	onChainBtnIdx  int
-	onChainFocus   int // 0=buttons, 1=utxo table
 	utxos          []lndrpc.UTXO
-	utxoCursor     int
-	// UTXO pencil icon + label edit popup
-	utxoPencilFocused bool            // true when ✎ icon is focused
-	utxoLabelEditing  bool            // true when label popup is open
-	utxoLabelInput    textinput.Model // label edit field in popup
-	utxoLabelOnBtn    bool            // true when on button row
-	utxoLabelBtnIdx   int             // 0=Save, 1=Cancel
 	// Coin control: UTXO selection
 	utxoSelected      map[int]bool // keyed by UTXO index
 	utxoSelectedTotal int64        // running sat total
@@ -350,12 +293,10 @@ type Model struct {
 	sendFeeTiers [4]feeTier
 
 	// On-chain transaction history
-	onChainTxs      []lndrpc.OnChainTx
-	onChainTxCursor int
+	onChainTxs []lndrpc.OnChainTx
 
 	// Payment history
-	payHistory       []lndrpc.PaymentEntry
-	payHistoryCursor int
+	payHistory []lndrpc.PaymentEntry
 }
 
 func NewModel(
@@ -375,10 +316,21 @@ func NewModel(
 	m.screenCtx = &ScreenContext{
 		Cfg:       cfg,
 		LndClient: client,
+		Version:   version,
 	}
 	m.ocCtx = &OnChainContext{
 		UtxoSelected: make(map[int]bool),
 	}
+	m.sectionScreens[secChannels] =
+		NewChannelsHomeScreen(m.screenCtx)
+	m.sectionScreens[secWallet] =
+		NewWalletHomeScreen(m.screenCtx)
+	m.sectionScreens[secOnChain] =
+		NewOnChainHomeScreen(m.screenCtx, m.ocCtx)
+	m.sectionScreens[secAddons] =
+		NewAddonsHomeScreen(m.screenCtx)
+	m.sectionScreens[secSystem] =
+		NewSystemHomeScreen(m.screenCtx)
 	return m
 }
 
@@ -421,18 +373,6 @@ func (m Model) saveCfg() {
 		logger.TUI(
 			"ERROR: failed to save config: %v", err)
 	}
-}
-
-func (m Model) svcCount() int {
-	return len(serviceNames(m.cfg))
-}
-
-func (m Model) svcName(i int) string {
-	names := serviceNames(m.cfg)
-	if i < len(names) {
-		return names[i]
-	}
-	return ""
 }
 
 func (m Model) pollInterval() time.Duration {
@@ -524,28 +464,6 @@ func fetchLatestVersion() tea.Cmd {
 	return func() tea.Msg {
 		return latestVersionMsg(
 			installer.CheckLatestVersion())
-	}
-}
-
-func createLndHubAccountCmd(
-	adminToken string,
-) tea.Cmd {
-	return func() tea.Msg {
-		account, err := installer.CreateLndHubAccount(
-			adminToken)
-		return lndhubAccountCreatedMsg{
-			account: account, err: err}
-	}
-}
-
-func deactivateLndHubAccountCmd(
-	login string,
-) tea.Cmd {
-	return func() tea.Msg {
-		balance, _ := installer.GetUserBalance(login)
-		err := installer.DeactivateUser(login)
-		return lndhubDeactivatedMsg{
-			balance: balance, err: err}
 	}
 }
 

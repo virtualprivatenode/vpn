@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 	"github.com/ripsline/virtual-private-node/internal/config"
+	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/system"
@@ -317,4 +319,376 @@ func renderViewport(
 	}
 
 	return strings.Join(vpLines, "\n")
+}
+
+// ── Balance summary (shared utility) ────────────────────
+// Used by ChannelsHomeScreen and WalletHomeScreen (and
+// their legacy counterparts during migration).
+
+func balanceSummaryLines(
+	status *statusMsg, w int,
+) []string {
+	if status == nil || !status.lndResponding {
+		return nil
+	}
+
+	var totalCap, totalLocal, totalRemote int64
+	activeCount, inactiveCount := 0, 0
+	for _, ch := range status.channels {
+		if ch.Pending {
+			continue
+		}
+		totalCap += ch.Capacity
+		totalLocal += ch.LocalBalance
+		totalRemote += ch.RemoteBalance
+		if ch.Active {
+			activeCount++
+		} else {
+			inactiveCount++
+		}
+	}
+	onchain := "0"
+	if status.lndBalance != "" {
+		onchain = status.lndBalance
+	}
+
+	localPct := 0
+	if totalCap > 0 {
+		localPct = int(
+			float64(totalLocal) * 100 /
+				float64(totalCap))
+	}
+	remotePct := 100 - localPct
+
+	labelW := 11
+	leftColW := labelW + 18
+	boxW := w - leftColW - 2
+	if boxW < 22 {
+		boxW = 22
+	}
+
+	barInnerW := boxW - 4
+	if barInnerW < 8 {
+		barInnerW = 8
+	}
+	localBarW := barInnerW * localPct / 100
+	if localBarW < 0 {
+		localBarW = 0
+	}
+	if localBarW > barInnerW {
+		localBarW = barInnerW
+	}
+	remoteBarW := barInnerW - localBarW
+
+	barLocal := lipgloss.NewStyle().
+		Foreground(theme.ColorChanLocal).
+		Render(strings.Repeat("█", localBarW))
+	barRemote := lipgloss.NewStyle().
+		Foreground(theme.ColorChanRemote).
+		Render(strings.Repeat("█", remoteBarW))
+	barLine := " " + barLocal + barRemote + " "
+
+	barVis := lipgloss.Width(barLine)
+	barPadR := boxW - 2 - barVis
+	if barPadR < 0 {
+		barPadR = 0
+	}
+
+	chLabel := fmt.Sprintf("%d channels",
+		activeCount+inactiveCount)
+	if inactiveCount > 0 {
+		chLabel = fmt.Sprintf("%d on, %d off",
+			activeCount, inactiveCount)
+	}
+
+	pctInner := fmt.Sprintf("Out %d%%    In %d%%",
+		localPct, remotePct)
+	if len(pctInner) > boxW-2 {
+		pctInner = fmt.Sprintf("Out %d%% In %d%%",
+			localPct, remotePct)
+	}
+
+	capStr := formatSats(totalCap) + " sats"
+
+	boxTop := "┌" + strings.Repeat("─", boxW-2) + "┐"
+	boxLabel := "│" +
+		centerPad(chLabel, boxW-2) + "│"
+	boxBar := "│" + barLine +
+		strings.Repeat(" ", barPadR) + "│"
+	boxPct := "│" + theme.Dim.Render(
+		centerPad(pctInner, boxW-2)) + "│"
+	boxCap := "│" + theme.Dim.Render(
+		centerPad(capStr, boxW-2)) + "│"
+	boxBot := "└" + strings.Repeat("─", boxW-2) + "┘"
+
+	boxLines := []string{
+		boxTop, boxLabel, boxBar,
+		boxPct, boxCap, boxBot,
+	}
+
+	leftLines := []string{
+		"",
+		" " + theme.Label.Render("Outbound: ") +
+			theme.Value.Render(
+				formatSats(totalLocal)+" sats"),
+		"",
+		" " + theme.Label.Render("Inbound:  ") +
+			theme.Value.Render(
+				formatSats(totalRemote)+" sats"),
+		"",
+		" " + theme.Label.Render("On-chain: ") +
+			theme.Value.Render(
+				formatSats(parseBalance(onchain))+
+					" sats"),
+	}
+
+	maxH := len(boxLines)
+	if len(leftLines) > maxH {
+		maxH = len(leftLines)
+	}
+	for len(leftLines) < maxH {
+		leftLines = append(leftLines, "")
+	}
+	for len(boxLines) < maxH {
+		boxLines = append(boxLines, "")
+	}
+
+	var result []string
+	for i := 0; i < maxH; i++ {
+		lft := leftLines[i]
+		lftW := lipgloss.Width(lft)
+		if lftW < leftColW {
+			lft += strings.Repeat(" ",
+				leftColW-lftW)
+		}
+		result = append(result, lft+" "+boxLines[i])
+	}
+	return result
+}
+
+// ── Channel formatting ─────────────────────────────────
+
+func renderLiquidityBar(
+	local, remote, capacity int64, width int,
+) string {
+	if capacity <= 0 {
+		return theme.Dim.Render(
+			strings.Repeat("░", width))
+	}
+	lw := int(float64(local) / float64(capacity) *
+		float64(width))
+	if lw < 0 {
+		lw = 0
+	}
+	if lw > width {
+		lw = width
+	}
+	rw := width - lw
+	return lipgloss.NewStyle().
+		Foreground(theme.ColorChanLocal).
+		Render(strings.Repeat("█", lw)) +
+		lipgloss.NewStyle().
+			Foreground(theme.ColorChanRemote).
+			Render(strings.Repeat("█", rw))
+}
+
+func p2pModeLabel(mode string) string {
+	if mode == "hybrid" {
+		return "Tor + clearnet"
+	}
+	return "Tor only"
+}
+
+func truncatePubkey(pubkey string, maxLen int) string {
+	if len(pubkey) <= maxLen {
+		return pubkey
+	}
+	side := (maxLen - 3) / 2
+	return pubkey[:side] + "..." +
+		pubkey[len(pubkey)-side:]
+}
+
+func formatSatsCompact(sats int64) string {
+	if sats >= 100000000 {
+		btc := float64(sats) / 100000000
+		if btc == float64(int64(btc)) {
+			return fmt.Sprintf("%.0fBTC", btc)
+		}
+		return fmt.Sprintf("%.1fBTC", btc)
+	}
+	if sats >= 1000000 {
+		m := float64(sats) / 1000000
+		if m == float64(int64(m)) {
+			return fmt.Sprintf("%.0fM", m)
+		}
+		return fmt.Sprintf("%.1fM", m)
+	}
+	if sats >= 1000 {
+		k := float64(sats) / 1000
+		if k == float64(int64(k)) {
+			return fmt.Sprintf("%.0fk", k)
+		}
+		return fmt.Sprintf("%.1fk", k)
+	}
+	return fmt.Sprintf("%d", sats)
+}
+
+func formatSats(sats int64) string {
+	if sats < 0 {
+		return fmt.Sprintf("%d", sats)
+	}
+	s := fmt.Sprintf("%d", sats)
+	if len(s) <= 3 {
+		return s
+	}
+	var result []byte
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
+}
+
+func parseCustomAmount(s string) (int64, error) {
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty amount")
+	}
+	amt, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid number")
+	}
+	if amt < 20000 {
+		return 0, fmt.Errorf("min 20,000 sats")
+	}
+	if amt > 16777215 {
+		return 0, fmt.Errorf("max 16,777,215 sats")
+	}
+	return amt, nil
+}
+
+// ── Route diagram ──────────────────────────────────────
+
+func renderRouteDiagram(
+	hops []lndrpc.RouteHop, w int,
+) string {
+	if len(hops) == 0 {
+		return ""
+	}
+	var lines []string
+	lines = append(lines, " You")
+	lines = append(lines, "  │")
+	for i, hop := range hops {
+		name := hop.Alias
+		if name == "" {
+			if len(hop.PubKey) > 12 {
+				name = hop.PubKey[:12] + "..."
+			} else {
+				name = hop.PubKey
+			}
+		}
+		if len(name) > 16 {
+			name = name[:16]
+		}
+		feeStr := ""
+		if hop.FeeSats > 0 {
+			feeStr = fmt.Sprintf(" (fee: %s)",
+				formatSats(hop.FeeSats))
+		}
+		if i < len(hops)-1 {
+			lines = append(lines,
+				fmt.Sprintf("  ├── %s%s",
+					theme.Value.Render(name),
+					theme.Dim.Render(feeStr)))
+			lines = append(lines, "  │")
+		} else {
+			lines = append(lines,
+				fmt.Sprintf("  └── %s%s",
+					theme.Success.Render(name),
+					theme.Dim.Render(feeStr)))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ── Timestamp helpers ──────────────────────────────────
+
+func formatTimestampFull(unix int64) string {
+	if unix == 0 {
+		return "—"
+	}
+	return time.Unix(unix, 0).
+		Format("2006-01-02 15:04:05")
+}
+
+func formatTimestampTable(unix int64) string {
+	if unix == 0 {
+		return "—"
+	}
+	return time.Unix(unix, 0).
+		Format("2006-01-02 15:04")
+}
+
+// ── On-chain helpers ───────────────────────────────────
+
+// formatDateShort returns YYYY-MM-DD for a unix timestamp.
+func formatDateShort(unix int64) string {
+	if unix == 0 {
+		return "—"
+	}
+	return time.Unix(unix, 0).Format("2006-01-02")
+}
+
+// confIndicator returns a single-char confirmation
+// progress indicator for the transaction table.
+func confIndicator(confs int32) string {
+	switch {
+	case confs >= 100:
+		return " "
+	case confs == 0:
+		return "○"
+	case confs <= 2:
+		return "◔"
+	case confs <= 4:
+		return "◑"
+	case confs <= 6:
+		return "◕"
+	default:
+		return "●"
+	}
+}
+
+// ── Parse helpers ──────────────────────────────────────
+
+func parseRecvAmount(s string) (int64, error) {
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty amount")
+	}
+	var n int64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid number")
+		}
+		n = n*10 + int64(c-'0')
+	}
+	if n < 1 {
+		return 0, fmt.Errorf("minimum 1 sat")
+	}
+	return n, nil
+}
+
+func cleanPayReq(s string) string {
+	s = strings.ReplaceAll(s, "[", "")
+	s = strings.ReplaceAll(s, "]", "")
+	s = strings.ReplaceAll(s, "\"", "")
+	s = strings.ReplaceAll(s, "'", "")
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "lightning:")
+	s = strings.TrimPrefix(s, "LIGHTNING:")
+	return s
 }

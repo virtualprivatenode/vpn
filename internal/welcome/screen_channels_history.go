@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -68,6 +69,26 @@ func (s *ChannelHistoryScreen) HandleKey(
 func (s *ChannelHistoryScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case closedChannelsMsg:
+		if msg.err == nil {
+			// Rebuild entries with current channel
+			// data from status + closed channels
+			var channels []channelInfo
+			var waiting []lndrpc.WaitingCloseChannel
+			var pending []lndrpc.PendingForceCloseChannel
+			if s.ctx.Status != nil {
+				channels = s.ctx.Status.channels
+				waiting =
+					s.ctx.Status.waitingCloseChannels
+				pending =
+					s.ctx.Status.pendingForceCloseChannels
+			}
+			s.entries = buildChannelHistoryEntries(
+				channels, waiting, pending,
+				msg.channels)
+		}
+	}
 	return s, nil
 }
 

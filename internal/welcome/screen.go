@@ -50,8 +50,10 @@ type ScreenContext struct {
 	Cfg            *config.AppConfig
 	LndClient      *lndrpc.Client
 	Status         *statusMsg
-	HasTabs        bool // varies by section; Model sets before calling View/HelpBindings
-	ContentFocused bool // true when content pane has focus (not tab bar, not sidebar)
+	HasTabs        bool   // varies by section; Model sets before calling View/HelpBindings
+	ContentFocused bool   // true when content pane has focus (not tab bar, not sidebar)
+	Version        string // set once at construction
+	LatestVersion  string // updated by latestVersionMsg handler
 }
 
 // ── OnChainContext ───────────────────────────────────────
@@ -115,6 +117,14 @@ type refreshStatusMsg struct{}
 // clearUtxoSelectionMsg tells Model to clear coin control
 // selection after a successful on-chain send.
 type clearUtxoSelectionMsg struct{}
+
+// shellActionMsg tells Model to set shellAction and quit.
+// Used by screens that need to trigger install flows
+// (Syncthing install, LndHub install, etc.) which require
+// a full TUI restart via the Show() loop.
+type shellActionMsg struct {
+	action wSubview
+}
 
 // ── Message emitters ────────────────────────────────────
 // Screens use these as tea.Cmd values. Each is a

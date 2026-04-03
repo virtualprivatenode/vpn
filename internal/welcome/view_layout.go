@@ -20,8 +20,6 @@ func (m Model) View() tea.View {
 			content = m.viewQR()
 		case svFullURL:
 			content = m.viewFullURL()
-		case svWalletInfo:
-			content = m.viewWalletInfo()
 		default:
 			content = m.viewMain()
 		}
@@ -392,121 +390,24 @@ func (m Model) renderActiveTabContent(
 
 	tab := tabs[idx]
 
-	// L16 new path: delegate to screen component
+	// Tab screens: delegate to screen component
 	if tab.Screen != nil {
 		m.screenCtx.HasTabs = m.hasDetailTabs()
 		m.screenCtx.ContentFocused = m.contentFocused
 		return tab.Screen.View(w, h)
 	}
 
-	// Legacy path: existing switch on tab.Kind
-	switch tab.Kind {
-	case tabMain:
-		return m.renderContent(w, h)
-	case tabLndHub:
-		return m.renderLndHubTabContent(w, h)
-	case tabLndHubAccount:
-		if tab.Index < len(m.cfg.LndHubAccounts) {
-			saved := m.hubCursor
-			m.hubCursor = tab.Index
-			var result string
-			switch m.subview {
-			case svLndHubDeactivateConfirm:
-				result =
-					m.lndhubDeactivateContent(w)
-			default:
-				result =
-					m.lndhubAccountDetailContent(w)
-			}
-			m.hubCursor = saved
-			return result
-		}
-		return theme.Dim.Render(" Account not found")
-	}
-	return m.renderContent(w, h)
-}
-
-func (m Model) renderContent(w, h int) string {
+	// Section home (tab 0 / tabMain): delegate to
+	// section home screen
 	sec := m.nav.ActiveSection()
-
-	switch sec {
-	case secChannels:
-		return m.channelsOverview(w, h)
-	case secWallet:
-		return m.walletOverview(w, h)
-	case secOnChain:
-		return m.onChainOverview(w, h)
-	case secAddons:
-		return m.addonsOverview(w, h)
-	case secSystem:
-		return m.systemOverview(w, h)
+	if sec >= 0 && sec < numSections &&
+		m.sectionScreens[sec] != nil {
+		m.screenCtx.HasTabs = m.hasDetailTabs()
+		m.screenCtx.ContentFocused = m.contentFocused
+		return m.sectionScreens[sec].View(w, h)
 	}
+
 	return ""
-}
-
-func (m Model) viewFullURL() string {
-	title := theme.Header.Render(
-		"Full URL — Copy and paste into Tor Browser")
-	hint := theme.Dim.Render(
-		"Select and copy. Press enter to go back.")
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		"", title, "", hint, "", m.urlTarget, "")
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, content)
-}
-
-func (m Model) viewWalletInfo() string {
-	bw := min(m.width-4, theme.ContentWidth)
-	var lines []string
-	lines = append(lines,
-		theme.Lightning.Render("Wallet & Node Info"), "")
-
-	if m.cfg.WalletExists() {
-		lines = append(lines,
-			"  "+theme.Label.Render("Wallet: ")+
-				theme.Success.Render("created"))
-		if m.cfg.AutoUnlock {
-			lines = append(lines,
-				"  "+theme.Label.Render("Auto-unlock: ")+
-					theme.Success.Render("enabled"))
-		}
-		lines = append(lines,
-			"  "+theme.Label.Render("P2P Mode: ")+
-				theme.Value.Render(
-					p2pModeLabel(m.cfg.P2PMode)))
-		if m.status != nil && m.status.lndResponding {
-			if m.status.lndBalance != "" {
-				lines = append(lines,
-					"  "+theme.Label.Render("Balance: ")+
-						theme.Value.Render(
-							m.status.lndBalance+" sats"))
-			}
-			if m.status.lndPubkey != "" {
-				lines = append(lines, "",
-					"  "+theme.Label.Render("Pubkey:"),
-					"  "+theme.Mono.Render(
-						m.status.lndPubkey))
-			}
-		} else {
-			lines = append(lines, "",
-				"  "+theme.Dim.Render(
-					"Waiting for LND..."))
-		}
-	} else {
-		lines = append(lines,
-			"  "+theme.Warning.Render(
-				"Wallet not created"))
-	}
-
-	content := strings.Join(lines, "\n")
-	box := theme.Box.Width(bw).Padding(1, 2).
-		Render(content)
-	footer := theme.Footer.Render(
-		"  backspace back  q quit  ")
-	full := lipgloss.JoinVertical(lipgloss.Center,
-		"", box, "", footer)
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, full)
 }
 
 // ── Helpers ──────────────────────────────────────────────
