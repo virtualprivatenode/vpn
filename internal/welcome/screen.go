@@ -50,8 +50,10 @@ type ScreenContext struct {
 	Cfg            *config.AppConfig
 	LndClient      *lndrpc.Client
 	Status         *statusMsg
-	HasTabs        bool // varies by section; Model sets before calling View/HelpBindings
-	ContentFocused bool // true when content pane has focus (not tab bar, not sidebar)
+	HasTabs        bool   // varies by section; Model sets before calling View/HelpBindings
+	ContentFocused bool   // true when content pane has focus (not tab bar, not sidebar)
+	Version        string // set once at construction
+	LatestVersion  string // updated by latestVersionMsg handler
 }
 
 // ── OnChainContext ───────────────────────────────────────
@@ -81,9 +83,11 @@ type closeTabMsg struct{}
 // openTabMsg tells Model to open a new tab with the
 // given screen.
 type openTabMsg struct {
-	Kind   tabKind
-	Label  string
-	Screen Screen
+	Kind        tabKind
+	Label       string
+	Index       int // for detail tabs (dedup key)
+	Screen      Screen
+	FocusTabBar bool // true = tab bar focused on open
 }
 
 // focusSidebarMsg tells Model to move focus to the
@@ -96,9 +100,13 @@ type focusTabBarMsg struct{}
 
 // showQRMsg tells Model to show the fullscreen QR view.
 type showQRMsg struct {
-	URL      string
-	Label    string
-	ReturnTo wSubview
+	URL   string
+	Label string
+}
+
+// showFullURLMsg tells Model to show the fullscreen URL view.
+type showFullURLMsg struct {
+	URL string
 }
 
 // refreshStatusMsg tells Model to re-fetch node status.
@@ -109,6 +117,14 @@ type refreshStatusMsg struct{}
 // clearUtxoSelectionMsg tells Model to clear coin control
 // selection after a successful on-chain send.
 type clearUtxoSelectionMsg struct{}
+
+// shellActionMsg tells Model to set shellAction and quit.
+// Used by screens that need to trigger install flows
+// (Syncthing install, LndHub install, etc.) which require
+// a full TUI restart via the Show() loop.
+type shellActionMsg struct {
+	action wSubview
+}
 
 // ── Message emitters ────────────────────────────────────
 // Screens use these as tea.Cmd values. Each is a

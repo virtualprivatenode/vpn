@@ -1,0 +1,750 @@
+package welcome
+
+import (
+	"fmt"
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/ripsline/virtual-private-node/internal/installer"
+	"github.com/ripsline/virtual-private-node/internal/theme"
+)
+
+// ── SyncthingPairScreen steps ──────────────────────────
+
+type syncPairStep int
+
+const (
+	syncPairStepInput    syncPairStep = iota // device ID entry
+	syncPairStepPairing                      // waiting for pair
+	syncPairStepPostPair                     // success + instructions
+	syncPairStepQR                           // node ID QR code
+)
+
+// ── Focus zones for input step ─────────────────────────
+
+const (
+	syncPairZoneInput   = 0
+	syncPairZoneButtons = 1
+)
+
+// ── SyncthingPairScreen ────────────────────────────────
+
+type SyncthingPairScreen struct {
+	ctx       *ScreenContext
+	step      syncPairStep
+	input     textinput.Model
+	focusZone int // 0=input, 1=buttons
+	btnIdx    int
+	pairError string
+}
+
+func NewSyncthingPairScreen(
+	ctx *ScreenContext,
+) *SyncthingPairScreen {
+	return &SyncthingPairScreen{
+		ctx:   ctx,
+		step:  syncPairStepInput,
+		input: newSyncthingIDInput(),
+	}
+}
+
+// ── Screen interface ────────────────────────────────────
+
+func (s *SyncthingPairScreen) Init() tea.Cmd {
+	return nil
+}
+
+func (s *SyncthingPairScreen) HandleKey(
+	keyStr string, msg tea.KeyPressMsg,
+) (Screen, tea.Cmd) {
+	switch s.step {
+	case syncPairStepInput:
+		return s.handleInputKey(keyStr, msg)
+	case syncPairStepPairing:
+		return s.handlePairingKey(keyStr)
+	case syncPairStepPostPair:
+		return s.handlePostPairKey(keyStr)
+	case syncPairStepQR:
+		return s.handleQRKey(keyStr)
+	}
+	return s, nil
+}
+
+func (s *SyncthingPairScreen) HandleMsg(
+	msg tea.Msg,
+) (Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		if s.step == syncPairStepInput &&
+			s.focusZone == syncPairZoneInput {
+			var cmd tea.Cmd
+			s.input, cmd = s.input.Update(msg)
+			return s, cmd
+		}
+	case syncthingPairedMsg:
+		if msg.err != nil {
+			s.pairError = msg.err.Error()
+			s.step = syncPairStepInput
+			return s, nil
+		}
+		// Success — Model already mutated config.
+		// Move to post-pair instructions.
+		s.step = syncPairStepPostPair
+		s.btnIdx = 0
+		s.pairError = ""
+	}
+	return s, nil
+}
+
+func (s *SyncthingPairScreen) View(
+	w, h int,
+) string {
+	switch s.step {
+	case syncPairStepInput:
+		return s.viewInput(w, h)
+	case syncPairStepPairing:
+		return s.viewPairing(w, h)
+	case syncPairStepPostPair:
+		return s.viewPostPair(w, h)
+	case syncPairStepQR:
+		return s.viewQRStep(w, h)
+	}
+	return ""
+}
+
+func (s *SyncthingPairScreen) HelpBindings() []key.Binding {
+	switch s.step {
+	case syncPairStepInput:
+		return s.inputBindings()
+	case syncPairStepPairing:
+		return s.pairingBindings()
+	case syncPairStepPostPair:
+		return s.postPairBindings()
+	case syncPairStepQR:
+		return s.qrBindings()
+	}
+	return nil
+}
+
+// ── Input step ──────────────────────────────────────────
+
+func (s *SyncthingPairScreen) handleInputKey(
+	keyStr string, msg tea.KeyPressMsg,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.focusZone == syncPairZoneButtons {
+			if s.btnIdx > 0 {
+				s.btnIdx--
+			}
+			return s, nil
+		}
+		if s.input.Value() != "" {
+			var cmd tea.Cmd
+			s.input, cmd = s.input.Update(
+				tea.Msg(msg))
+			return s, cmd
+		}
+		return s, emitFocusSidebar
+	case "right":
+		if s.focusZone == syncPairZoneButtons {
+			if s.btnIdx < 1 {
+				s.btnIdx++
+			}
+			return s, nil
+		}
+		if s.input.Value() != "" {
+			var cmd tea.Cmd
+			s.input, cmd = s.input.Update(
+				tea.Msg(msg))
+			return s, cmd
+		}
+		return s, nil
+	case "up":
+		if s.focusZone == syncPairZoneButtons {
+			s.focusZone = syncPairZoneInput
+			s.input.Focus()
+			return s, nil
+		}
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+		return s, nil
+	case "shift+tab":
+		if s.focusZone == syncPairZoneButtons {
+			s.focusZone = syncPairZoneInput
+			s.input.Focus()
+			return s, nil
+		}
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+		return s, nil
+	case "down", "tab":
+		if s.focusZone == syncPairZoneInput {
+			s.focusZone = syncPairZoneButtons
+			s.btnIdx = 1 // default to Pair
+			s.input.Blur()
+		}
+		return s, nil
+	case "backspace":
+		// Clean backspace: only deletes in input
+		if s.focusZone == syncPairZoneInput &&
+			s.input.Value() != "" {
+			var cmd tea.Cmd
+			s.input, cmd = s.input.Update(
+				tea.Msg(msg))
+			return s, cmd
+		}
+		return s, nil
+	case "enter":
+		if s.focusZone == syncPairZoneButtons {
+			switch s.btnIdx {
+			case 0: // Clear
+				s.input = newSyncthingIDInput()
+				s.pairError = ""
+				s.focusZone = syncPairZoneInput
+				return s, nil
+			case 1: // Pair
+				return s.submitPair()
+			}
+			return s, nil
+		}
+		// Enter in input → submit
+		return s.submitPair()
+	default:
+		if s.focusZone == syncPairZoneInput {
+			var cmd tea.Cmd
+			s.input, cmd = s.input.Update(
+				tea.Msg(msg))
+			return s, cmd
+		}
+	}
+	return s, nil
+}
+
+func (s *SyncthingPairScreen) submitPair() (
+	Screen, tea.Cmd,
+) {
+	deviceID := syncthingIDValue(s.input)
+	if deviceID == "" {
+		s.pairError = "Paste a Device ID"
+		return s, nil
+	}
+	parts := strings.Split(deviceID, "-")
+	if len(parts) != 8 {
+		s.pairError =
+			"Invalid format. Expected 8 groups" +
+				" separated by hyphens."
+		return s, nil
+	}
+	for _, p := range parts {
+		if len(p) != 7 {
+			s.pairError =
+				"Invalid format. Each group" +
+					" should be 7 characters."
+			return s, nil
+		}
+	}
+	// Check for duplicate
+	for _, d := range s.ctx.Cfg.SyncthingDevices {
+		if d.DeviceID == deviceID {
+			s.pairError =
+				"Device already paired."
+			return s, nil
+		}
+	}
+	s.pairError = ""
+	s.step = syncPairStepPairing
+	return s, pairSyncthingDeviceCmd(deviceID)
+}
+
+// ── Pairing (in-flight) step ────────────────────────────
+
+func (s *SyncthingPairScreen) handlePairingKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace", "down", "tab":
+		return s, nil
+	}
+	return s, nil
+}
+
+// ── Post-pair step ──────────────────────────────────────
+
+func (s *SyncthingPairScreen) handlePostPairKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.btnIdx > 0 {
+			s.btnIdx--
+			return s, nil
+		}
+		return s, emitFocusSidebar
+	case "right":
+		if s.btnIdx < 1 {
+			s.btnIdx++
+		}
+		return s, nil
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+		return s, nil
+	case "down", "tab":
+		return s, nil
+	case "backspace":
+		// Clean backspace: does nothing
+		return s, nil
+	case "enter":
+		switch s.btnIdx {
+		case 0: // Show QR
+			s.step = syncPairStepQR
+			s.btnIdx = 0
+		case 1: // Done
+			return s, emitCloseTab
+		}
+		return s, nil
+	}
+	return s, nil
+}
+
+// ── QR step ─────────────────────────────────────────────
+
+func (s *SyncthingPairScreen) handleQRKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+		return s, nil
+	case "down", "tab":
+		return s, nil
+	case "backspace":
+		// Clean backspace: does nothing
+		return s, nil
+	case "enter":
+		s.step = syncPairStepPostPair
+		s.btnIdx = 0
+		return s, nil
+	}
+	return s, nil
+}
+
+// ── Views ───────────────────────────────────────────────
+
+func (s *SyncthingPairScreen) viewInput(
+	w, h int,
+) string {
+	isFocused := s.ctx.ContentFocused
+
+	var lines []string
+
+	// Title
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Pair Device"), w))
+	lines = append(lines, "")
+
+	// Instructions
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"Set up Syncthing on your local machine:"))
+	lines = append(lines, "")
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"1. Download & verify Syncthing"))
+	lines = append(lines,
+		"    "+theme.Mono.Render("syncthing.net"))
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"2. \u2699 Actions \u2192"+
+				" \u2699 Settings \u2192"+
+				" Connections \u2192"+
+				" UNCHECK ALL:"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Enable NAT traversal"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Global Discovery"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Local Discovery"))
+	lines = append(lines,
+		"    "+theme.Dim.Render("☐ ")+
+			theme.Value.Render("Enable Relaying"))
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"3. \u2713 Save"))
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"4. \u2699 Actions \u2192"+
+				" Show ID \u2192 Copy"))
+	lines = append(lines,
+		" "+theme.Dim.Render("5. Paste below"))
+	lines = append(lines, "")
+
+	// Input
+	inputFocused := isFocused &&
+		s.focusZone == syncPairZoneInput
+	labelStyle := theme.Label
+	marker := " "
+	if inputFocused {
+		labelStyle = theme.NavActive
+		marker = theme.NavActive.Render("▸")
+	}
+	lines = append(lines,
+		" "+labelStyle.Render("Your Device ID:"))
+	lines = append(lines,
+		marker+s.input.View())
+
+	if s.pairError != "" {
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Warning.Render(
+				s.pairError))
+	}
+
+	// Pad to push buttons to bottom
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	// Buttons at bottom
+	btnFocused := isFocused &&
+		s.focusZone == syncPairZoneButtons
+	lines = append(lines,
+		renderButtons(
+			[]string{"Clear", "Pair"},
+			s.btnIdx, btnFocused, w))
+
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (s *SyncthingPairScreen) viewPairing(
+	w, h int,
+) string {
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Pairing Device..."), w))
+	lines = append(lines, "")
+	lines = append(lines,
+		" "+theme.Value.Render(
+			"Adding device to Syncthing."))
+	lines = append(lines, "")
+	lines = append(lines,
+		" "+theme.Dim.Render(
+			"This may take a moment."))
+
+	// Pad to push button to bottom
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	lines = append(lines,
+		renderButtons(
+			[]string{"Pairing..."}, 0, false, w))
+
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (s *SyncthingPairScreen) viewPostPair(
+	w, h int,
+) string {
+	isFocused := s.ctx.ContentFocused
+
+	var lines []string
+
+	// Title
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Complete Pairing"), w))
+	lines = append(lines, "")
+
+	vpsDeviceID := installer.GetSyncthingDeviceID()
+	if vpsDeviceID != "" {
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Your device was added to the node."))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Now add this node to your local"+
+					" Syncthing:"))
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Label.Render("Node ID:"))
+
+		// monoWrap inline
+		lineW := w - 2
+		if lineW < 16 {
+			lineW = 16
+		}
+		text := vpsDeviceID
+		for len(text) > 0 {
+			end := lineW
+			if end > len(text) {
+				end = len(text)
+			}
+			lines = append(lines,
+				" "+theme.Mono.Render(text[:end]))
+			text = text[end:]
+		}
+
+		lines = append(lines, "")
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"1. Add Remote Device"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"General \u2192 Device ID:"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"paste Node ID above"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"or press Show QR to scan"))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"2. Advanced \u2192"+
+					" Addresses \u2192"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"replace \"dynamic\" with:"))
+		lines = append(lines,
+			"    "+theme.Mono.Render(
+				"tcp://<your-server-ip>:22000"))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"3. Save \u2192"+
+					" wait for connection"))
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"4. Accept the lnd-backup"+
+					" folder share"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"General \u2192"+
+					" set custom Folder Path"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"Advanced \u2192"+
+					" Folder Type \u2192"+
+					" Receive Only"))
+		lines = append(lines,
+			"    "+theme.Dim.Render(
+				"\u2713 Save"))
+	}
+
+	// Pad to push buttons to bottom
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	lines = append(lines,
+		renderButtons(
+			[]string{"Show QR", "Done"},
+			s.btnIdx, isFocused, w))
+
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (s *SyncthingPairScreen) viewQRStep(
+	w, h int,
+) string {
+	isFocused := s.ctx.ContentFocused
+
+	var lines []string
+
+	lines = append(lines, "")
+	lines = append(lines,
+		centerPad(
+			theme.Header.Render(
+				"Node ID — QR Code"), w))
+	lines = append(lines, "")
+
+	vpsDeviceID := installer.GetSyncthingDeviceID()
+	if vpsDeviceID != "" {
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Scan to add this node as a"+
+					" remote device:"))
+		lines = append(lines, "")
+
+		qr := renderQRCode(vpsDeviceID)
+		if qr != "" {
+			for _, line := range strings.Split(
+				qr, "\n") {
+				qrW := lipgloss.Width(line)
+				padN := (w - qrW) / 2
+				if padN < 0 {
+					padN = 0
+				}
+				lines = append(lines,
+					strings.Repeat(" ", padN)+
+						line)
+			}
+		}
+	} else {
+		lines = append(lines,
+			" "+theme.Dim.Render(
+				"Node ID not available yet."))
+	}
+
+	// Pad to push button to bottom
+	targetH := h - 1
+	for len(lines) < targetH {
+		lines = append(lines, "")
+	}
+
+	lines = append(lines,
+		renderButtons(
+			[]string{"Back"}, 0, isFocused, w))
+
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ── Help bindings ───────────────────────────────────────
+
+func (s *SyncthingPairScreen) inputBindings() []key.Binding {
+	var binds []key.Binding
+
+	if s.focusZone == syncPairZoneInput {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "pair")),
+			key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "buttons")),
+			kSidebar)
+	} else {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "select")),
+			key.NewBinding(
+				key.WithKeys("left", "right"),
+				key.WithHelp("←→", "buttons")),
+			key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("⇧tab", "input")))
+	}
+
+	if s.ctx.HasTabs {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("⇧tab", "tab bar")))
+	}
+
+	binds = append(binds, kQuit)
+	return binds
+}
+
+func (s *SyncthingPairScreen) pairingBindings() []key.Binding {
+	var binds []key.Binding
+	binds = append(binds, kSidebar)
+	if s.ctx.HasTabs {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("⇧tab", "tab bar")))
+	}
+	binds = append(binds, kQuit)
+	return binds
+}
+
+func (s *SyncthingPairScreen) postPairBindings() []key.Binding {
+	var binds []key.Binding
+	binds = append(binds,
+		key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select")),
+		key.NewBinding(
+			key.WithKeys("left", "right"),
+			key.WithHelp("←→", "buttons")),
+		kSidebar)
+	if s.ctx.HasTabs {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("⇧tab", "tab bar")))
+	}
+	binds = append(binds, kQuit)
+	return binds
+}
+
+func (s *SyncthingPairScreen) qrBindings() []key.Binding {
+	var binds []key.Binding
+	binds = append(binds,
+		key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "back")),
+		kSidebar)
+	if s.ctx.HasTabs {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("⇧tab", "tab bar")))
+	}
+	binds = append(binds, kQuit)
+	return binds
+}
+
+// ── Helpers ─────────────────────────────────────────────
+
+func (s *SyncthingPairScreen) deviceIDLabel() string {
+	return fmt.Sprintf("Device %d",
+		len(s.ctx.Cfg.SyncthingDevices))
+}

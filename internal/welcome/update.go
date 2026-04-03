@@ -10,7 +10,6 @@ import (
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -34,26 +33,6 @@ func (m *Model) focusContent() {
 	m.contentFocused = true
 }
 
-// contentFocus returns the focus zone for the active
-// section. Each section remembers its own zone
-// independently (0=buttons/top, 1+=content zones).
-func (m *Model) contentFocus() int {
-	sec := m.nav.ActiveSection()
-	if sec >= 0 && sec < numSections {
-		return m.sectionFocus[sec]
-	}
-	return 0
-}
-
-// setContentFocus sets the focus zone for the active
-// section.
-func (m *Model) setContentFocus(v int) {
-	sec := m.nav.ActiveSection()
-	if sec >= 0 && sec < numSections {
-		m.sectionFocus[sec] = v
-	}
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -71,9 +50,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.PasteMsg:
-		// L16: route paste to active tab's screen.
-		// Paste is user-directed (not async), so the
-		// active tab is always the correct target.
+		// Route paste to active tab's screen.
 		tabs := m.effectiveTabs()
 		if m.activeTab > 0 &&
 			m.activeTab < len(tabs) &&
@@ -85,7 +62,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setTabScreen(m.activeTab, newScreen)
 			return m, cmd
 		}
-		return m.handlePaste(msg)
+		// Route paste to section home screen
+		// (e.g. UTXO label popup on on-chain home).
+		sec := m.nav.ActiveSection()
+		if sec >= 0 && sec < numSections &&
+			m.sectionScreens[sec] != nil {
+			m.screenCtx.HasTabs = m.hasDetailTabs()
+			m.screenCtx.ContentFocused = true
+			newScreen, cmd :=
+				m.sectionScreens[sec].HandleMsg(msg)
+			m.sectionScreens[sec] = newScreen
+			return m, cmd
+		}
+		return m, nil
 
 	// ── L16 screen-to-Model messages ────────────────
 	case closeTabMsg:
@@ -96,13 +85,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case focusTabBarMsg:
 		m.focusTabBar()
 		m.tabCursorX = 0
-		m.activeTab = m.findFlowTab()
+		m.activeTab = 1
 		return m, nil
 	case showQRMsg:
 		m.urlTarget = msg.URL
 		m.qrLabel = msg.Label
-		m.urlReturnTo = msg.ReturnTo
 		m.subview = svQR
+		return m, nil
+	case showFullURLMsg:
+		m.urlTarget = msg.URL
+		m.subview = svFullURL
 		return m, nil
 	case refreshStatusMsg:
 		return m, fetchStatus(m.cfg, m.lndClient)
@@ -110,16 +102,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearUtxoSelection()
 		m.syncOcCtxSelection()
 		return m, nil
+	case shellActionMsg:
+		m.shellAction = msg.action
+		return m, tea.Quit
 	case openTabMsg:
+		// Dedup by kind + index if Index is set
+		if msg.Index != 0 {
+			tabs := m.effectiveTabs()
+			for i, t := range tabs {
+				if t.Kind == msg.Kind &&
+					t.Index == msg.Index {
+					m.activeTab = i
+					if msg.FocusTabBar {
+						m.focusTabBar()
+						m.tabCursorX = 0
+					} else {
+						m.focusContent()
+					}
+					return m, nil
+				}
+			}
+		}
+		// Dedup flow tabs by kind + section
+		if msg.Index == 0 {
+			sec := m.nav.ActiveSection()
+			tabs := m.effectiveTabs()
+			for i, t := range tabs {
+				if t.Kind == msg.Kind &&
+					t.Section == sec {
+					m.activeTab = i
+					if msg.FocusTabBar {
+						m.focusTabBar()
+						m.tabCursorX = 0
+					} else {
+						m.focusContent()
+					}
+					return m, nil
+				}
+			}
+		}
 		m.tabs = append(m.tabs, openTab{
 			Kind:    msg.Kind,
 			Label:   msg.Label,
+			Index:   msg.Index,
 			Section: m.nav.ActiveSection(),
 			Screen:  msg.Screen,
 		})
 		m.activeTab = len(m.effectiveTabs()) - 1
-		m.focusContent()
-		m.setContentFocus(0)
+		if msg.FocusTabBar {
+			m.focusTabBar()
+			m.tabCursorX = 0
+		} else {
+			m.focusContent()
+		}
 		if msg.Screen != nil {
 			return m, msg.Screen.Init()
 		}
@@ -138,103 +173,86 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case latestVersionMsg:
 		m.latestVersion = string(msg)
+		m.screenCtx.LatestVersion = string(msg)
 		return m, nil
 	case lndhubAccountCreatedMsg:
-		if msg.err != nil {
-			logger.TUI(
-				"Warning: LndHub create failed: %v",
-				msg.err)
-			m.subview = svLndHubManage
-			return m, nil
-		}
-		if msg.account != nil {
-			m.lastAccount = msg.account
+		if msg.err == nil && msg.account != nil {
 			m.cfg.LndHubAccounts = append(
 				m.cfg.LndHubAccounts,
 				config.LndHubAccount{
-					Label: m.hubNameInput.Value(),
+					Label: msg.label,
 					Login: msg.account.Login,
 					CreatedAt: time.Now().
 						Format("2006-01-02"),
 					Active: true,
 				})
 			m.saveCfg()
-			m.addonBtnIdx = 0
-			m.subview = svLndHubCreateAccount
+		}
+		// Route to screen for step/error state
+		if rm, cmd, ok := m.routeToScreen(
+			tabLndHubCreate, msg); ok {
+			return rm, cmd
 		}
 		return m, nil
 	case lndhubDeactivatedMsg:
-		if m.hubCursor < len(m.cfg.LndHubAccounts) {
-			acct := &m.cfg.LndHubAccounts[m.hubCursor]
-			if msg.err != nil {
-				logger.TUI(
-					"Warning: deactivate failed: %v",
-					msg.err)
-			} else {
-				acct.Active = false
-				acct.DeactivatedAt = time.Now().
-					Format("2006-01-02")
-				acct.BalanceOnDeactivate = msg.balance
-				m.saveCfg()
+		if msg.err == nil {
+			// Find account by login and deactivate
+			for i := range m.cfg.LndHubAccounts {
+				if m.cfg.LndHubAccounts[i].Login ==
+					msg.login {
+					m.cfg.LndHubAccounts[i].Active = false
+					m.cfg.LndHubAccounts[i].DeactivatedAt =
+						time.Now().Format("2006-01-02")
+					m.cfg.LndHubAccounts[i].
+						BalanceOnDeactivate = msg.balance
+					m.saveCfg()
+					break
+				}
 			}
 		}
-		m.subview = svLndHubAccountDetail
+		// Route to screen for state transition
+		if rm, cmd, ok := m.routeToScreen(
+			tabLndHubAccount, msg); ok {
+			return rm, cmd
+		}
 		return m, nil
 	case syncthingPairedMsg:
-		if msg.err != nil {
-			m.syncPairError = msg.err.Error()
-			m.syncPairSuccess = false
-		} else {
-			m.syncPairError = ""
-			m.syncPairSuccess = true
-			m.addonBtnIdx = 0
-			m.setContentFocus(0)
+		if msg.err == nil {
 			m.cfg.SyncthingDevices = append(
 				m.cfg.SyncthingDevices,
 				config.SyncthingDevice{
-					Name: "Device " + string(
-						rune('0'+len(
-							m.cfg.SyncthingDevices)+1)),
-					DeviceID: syncthingIDValue(
-						m.syncDeviceInput),
+					Name: fmt.Sprintf("Device %d",
+						len(m.cfg.SyncthingDevices)+1),
+					DeviceID: msg.deviceID,
 					PairedAt: time.Now().
 						Format("2006-01-02"),
 				})
 			m.saveCfg()
 		}
+		// Route to screen for step/error state
+		if rm, cmd, ok := m.routeToScreen(
+			tabSyncthingPair, msg); ok {
+			return rm, cmd
+		}
 		return m, nil
 	case syncthingRemovedMsg:
-		if msg.err != nil {
-			m.syncRemoveError = msg.err.Error()
-			m.subview = svSyncthingDeviceDetail
-			m.setContentFocus(0)
-		} else {
-			// Remove device from config
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices) {
-				m.cfg.SyncthingDevices = append(
-					m.cfg.SyncthingDevices[:m.syncCursor],
-					m.cfg.SyncthingDevices[m.syncCursor+1:]...)
-				m.saveCfg()
-			}
-			// Reset cursor
-			if m.syncCursor >=
-				len(m.cfg.SyncthingDevices) &&
-				m.syncCursor > 0 {
-				m.syncCursor--
-			}
-			// Close device detail tab, return to
-			// Syncthing manage
-			m.setContentFocus(0)
-			m.addonBtnIdx = 0
-			m.subview = svSyncthingDetail
-			// Find and close the device tab
-			tabs := m.effectiveTabs()
-			for i, t := range tabs {
-				if t.Kind == tabSyncthingDevice {
-					return m.closeTab(i)
+		if msg.err == nil {
+			// Remove device from config by ID
+			for i, d := range m.cfg.SyncthingDevices {
+				if d.DeviceID == msg.deviceID {
+					m.cfg.SyncthingDevices = append(
+						m.cfg.SyncthingDevices[:i],
+						m.cfg.SyncthingDevices[i+1:]...)
+					m.saveCfg()
+					break
 				}
 			}
+		}
+		// Route to screen — screen emits closeTab
+		// on success, sets error on failure
+		if rm, cmd, ok := m.routeToScreen(
+			tabSyncthingDevice, msg); ok {
+			return rm, cmd
 		}
 		return m, nil
 	case channelOpenResultMsg:
@@ -247,9 +265,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case newAddressMsg:
 		if msg.err == nil {
 			m.onChainAddress = msg.address
-			if m.subview == svOnChainReceive {
-				m.ocRecvAddress = msg.address
-			}
+		}
+		// Route to OCReceiveScreen if open
+		if rm, cmd, ok := m.routeToScreen(
+			tabOCReceive, msg); ok {
+			return rm, cmd
 		}
 		return m, nil
 	case invoiceCreatedMsg:
@@ -271,6 +291,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case paymentHistoryMsg:
 		if msg.err == nil {
 			m.payHistory = msg.entries
+		}
+		// Route to wallet home screen
+		if rm, cmd, ok := m.routeToSectionScreen(
+			secWallet, msg); ok {
+			return rm, cmd
 		}
 		return m, nil
 	case utxoListMsg:
@@ -298,34 +323,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabOnChain, msg)
 		return rm, cmd
 	case closeChannelMsg:
-		m.closeInFlight = false
-		if msg.err != nil {
-			m.closeError = msg.err.Error()
-		} else {
-			m.closeTxid = msg.txid
-			m.closeError = ""
-		}
-		m.subview = svCloseResult
-		return m, nil
+		rm, cmd, _ := m.routeToScreen(
+			tabCloseChannel, msg)
+		return rm, cmd
 	case closedChannelsMsg:
 		if msg.err == nil {
 			m.buildChannelHistory(msg.channels)
 		}
+		// Route to history screen so it gets the data
+		if rm, cmd, ok := m.routeToScreen(
+			tabChannelHistory, msg); ok {
+			return rm, cmd
+		}
 		return m, nil
 	case labelTxMsg:
+		// Route to on-chain home screen
+		if rm, cmd, ok := m.routeToSectionScreen(
+			secOnChain, msg); ok {
+			return rm, cmd
+		}
 		if msg.err == nil {
-			m.closeLabelPopup()
 			return m, fetchOnChainTxCmd(m.lndClient)
 		}
 		return m, nil
 	case feeTiersMsg:
 		if msg.err == nil {
-			if isCloseSubview(m.subview) {
-				m.closeFeeTiers = msg.tiers
-			}
 			m.sendFeeTiers = msg.tiers
 			m.ocCtx.SendFeeTiers = msg.tiers
-			// Route to screen for input pre-fill
+			// Route to close screen
+			m.routeToScreen(
+				tabCloseChannel, msg)
+			// Route to channel detail screen
+			m.routeToScreen(
+				tabChannel, msg)
+			// Route to on-chain send screen
 			if rm, cmd, ok := m.routeToScreen(
 				tabOnChain, msg); ok {
 				return rm, cmd
@@ -359,18 +390,7 @@ func (m Model) handleKey(
 		return m, tea.Suspend
 	}
 
-	// 1. Confirm dialogs
-	if m.svcConfirm != "" {
-		return m.handleSvcConfirmKey(key)
-	}
-	if m.sysConfirm != "" {
-		return m.handleSysConfirmKey(key)
-	}
-	if m.updateConfirm {
-		return m.handleUpdateConfirmKey(key)
-	}
-
-	// 2. Fullscreen views
+	// 1. Fullscreen views
 	if m.subview == svQR || m.subview == svFullURL {
 		return m.handleGenericSubviewKey(key)
 	}
@@ -389,402 +409,30 @@ func (m Model) handleKey(
 	tabs := m.effectiveTabs()
 	if m.activeTab > 0 && m.activeTab < len(tabs) {
 		tab := tabs[m.activeTab]
-		return m.handleTabContentKey(tab, key, msg)
+		if tab.Screen != nil {
+			m.screenCtx.HasTabs = m.hasDetailTabs()
+			m.screenCtx.ContentFocused = true
+			newScreen, cmd :=
+				tab.Screen.HandleKey(key, msg)
+			m.setTabScreen(m.activeTab, newScreen)
+			return m, cmd
+		}
+		return m, nil
 	}
 
-	// 6. Section home
-	return m.handleSectionHomeKey(key, msg)
-}
-
-// ── Tab content dispatch ─────────────────────────────────
-
-func (m Model) handleTabContentKey(
-	tab openTab, key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	// L16 new path: delegate to screen component
-	if tab.Screen != nil {
+	// 6. Section home — all sections are screen-backed
+	sec := m.nav.ActiveSection()
+	if sec >= 0 && sec < numSections &&
+		m.sectionScreens[sec] != nil {
 		m.screenCtx.HasTabs = m.hasDetailTabs()
 		m.screenCtx.ContentFocused = true
-		newScreen, cmd := tab.Screen.HandleKey(key, msg)
-		m.setTabScreen(m.activeTab, newScreen)
+		newScreen, cmd :=
+			m.sectionScreens[sec].HandleKey(key, msg)
+		m.sectionScreens[sec] = newScreen
 		return m, cmd
 	}
 
-	// Legacy path: existing switch on tab.Kind / m.subview
-	switch tab.Kind {
-	case tabChannelHistory:
-		return m.handleChannelHistoryKey(key)
-	case tabChannel:
-		if isCloseSubview(m.subview) {
-			return m.handleCloseFlowKey(key, msg)
-		}
-		return m.handleChannelDetailKey(key)
-	case tabPayment:
-		return m.handlePaymentDetailKey(key)
-	case tabOnChainTx:
-		return m.handleOnChainTxDetailKey(key)
-	case tabUtxoDetail:
-		return m.handleViewOnlyKey(key, svNone)
-	case tabOCReceive:
-		return m.handleOCReceiveTabKey(key)
-	case tabPairing:
-		return m.handlePairingTabKey(key)
-	case tabSyncthing:
-		return m.handleSyncthingTabKey(key, msg)
-	case tabSyncthingDevice:
-		return m.handleSyncthingDeviceTabKey(key)
-	case tabSyncthingWebUI:
-		return m.handleSyncthingWebUITabKey(key)
-	case tabSyncthingPair:
-		return m.handleSyncthingPairTabKey(key, msg)
-	case tabLndHub:
-		return m.handleLndHubTabKey(key, msg)
-	case tabLndHubAccount:
-		return m.handleLndHubAccountTabKey(key)
-	}
-	return m.handleSectionHomeKey(key, msg)
-}
-
-func (m Model) handleChannelHistoryKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.chanHistoryCursor > 0 {
-			m.chanHistoryCursor--
-		} else if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "down", "tab":
-		if m.chanHistoryCursor <
-			len(m.chanHistory)-1 {
-			m.chanHistoryCursor++
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
 	return m, nil
-}
-
-func (m Model) handleOCReceiveTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "right":
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-		return m, nil
-	case "down", "tab":
-		return m, nil
-	case "backspace":
-		m.ocRecvAddress = ""
-		m.ocRecvError = ""
-		m.subview = svNone
-		return m.closeTab(m.activeTab)
-	case "enter":
-		if m.ocRecvAddress != "" {
-			m.ocRecvAddress = ""
-			return m,
-				getNewAddressCmd(m.lndClient)
-		}
-		return m, nil
-	}
-	return m, nil
-}
-
-// ── View-only tab handlers ───────────────────────────────
-
-func (m Model) handleChannelDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.setContentFocus(0)
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return m, nil
-		}
-	case "down", "tab":
-		return m, nil
-	case "enter":
-		if m.contentFocus() == 1 {
-			return m.startCloseFlow()
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
-}
-
-func (m Model) startCloseFlow() (
-	tea.Model, tea.Cmd,
-) {
-	if m.status == nil ||
-		m.chanCursor >= len(m.status.channels) {
-		return m, nil
-	}
-	ch := m.status.channels[m.chanCursor]
-	if ch.Pending {
-		return m, nil
-	}
-
-	m.closeChanPoint = ch.ChannelPoint
-	m.closePeerAlias = ch.PeerAlias
-	m.closeCapacity = ch.Capacity
-	m.closeLocalBal = ch.LocalBalance
-	m.closeRemoteBal = ch.RemoteBalance
-	m.closeForce = false
-	m.closeFeeIdx = 0
-	m.closeEstFee = 0
-	m.closeTxid = ""
-	m.closeError = ""
-	m.closeBtnIdx = 0
-	m.closeInFlight = false
-
-	m.subview = svCloseType
-	return m, fetchFeeTiersCmd(m.cfg)
-}
-
-func (m Model) handleCloseFlowKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svCloseType:
-		return m.handleCloseTypeKey(key)
-	case svCloseConfirm:
-		return m.handleCloseConfirmKey(key, msg)
-	case svClosing:
-		if key == "ctrl+c" {
-			return m, tea.Quit
-		}
-		return m, nil
-	case svCloseResult:
-		return m.handleCloseResultKey(key)
-	}
-	return m, nil
-}
-
-func (m Model) handleCloseTypeKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.closeBtnIdx > 0 {
-			m.closeBtnIdx--
-		} else if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "down", "tab":
-		if m.closeBtnIdx < 1 {
-			m.closeBtnIdx++
-		}
-	case "backspace":
-		m.subview = svNone
-		m.setContentFocus(0)
-		return m, nil
-	case "enter":
-		m.closeForce = m.closeBtnIdx == 1
-		m.closeError = ""
-		m.closeConfirmBtnIdx = 0
-
-		// Initialize fee input for cooperative close
-		if !m.closeForce {
-			m.closeFeeInput = newCloseFeeInput()
-			// Pre-fill with next-block rate
-			if m.closeFeeTiers[0].SatPerVB > 0 {
-				m.closeFeeInput.SetValue(
-					fmt.Sprintf("%.0f",
-						m.closeFeeTiers[0].SatPerVB))
-			}
-		}
-
-		m.subview = svCloseConfirm
-		return m, nil
-	}
-	return m, nil
-}
-
-func (m Model) handleCloseConfirmKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	// Force close: no fee input, just buttons
-	if m.closeForce {
-		return m.handleCloseConfirmBtnKey(key)
-	}
-
-	// Cooperative close: fee input + buttons
-	if m.closeFeeInput.Focused() {
-		switch key {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "backspace":
-			if m.closeFeeInput.Value() != "" {
-				var cmd tea.Cmd
-				m.closeFeeInput, cmd =
-					m.closeFeeInput.Update(
-						tea.Msg(msg))
-				return m, cmd
-			}
-			m.subview = svCloseType
-			m.closeError = ""
-			return m, nil
-		case "down", "tab", "enter":
-			m.closeFeeInput.Blur()
-			m.closeConfirmBtnIdx = 0
-			return m, nil
-		case "up":
-			if m.hasDetailTabs() {
-				m.closeFeeInput.Blur()
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		case "left":
-			m.closeFeeInput.Blur()
-			m.focusSidebar()
-			return m, nil
-		}
-		// Pass to text input
-		var cmd tea.Cmd
-		m.closeFeeInput, cmd =
-			m.closeFeeInput.Update(tea.Msg(msg))
-		return m, cmd
-	}
-
-	// On buttons
-	return m.handleCloseConfirmBtnKey(key)
-}
-
-func (m Model) handleCloseConfirmBtnKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.closeConfirmBtnIdx > 0 {
-			m.closeConfirmBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.closeConfirmBtnIdx < 1 {
-			m.closeConfirmBtnIdx++
-		}
-		return m, nil
-	case "up":
-		if !m.closeForce {
-			m.closeFeeInput.Focus()
-			return m, nil
-		}
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "backspace":
-		m.subview = svCloseType
-		m.closeError = ""
-		return m, nil
-	case "enter":
-		switch m.closeConfirmBtnIdx {
-		case 0: // Go Back
-			m.subview = svCloseType
-			m.closeError = ""
-			return m, nil
-		case 1: // Confirm
-			if m.closeInFlight {
-				return m, nil
-			}
-			m.closeInFlight = true
-			m.closeError = ""
-			m.subview = svClosing
-
-			var feeRate uint64
-			if !m.closeForce {
-				r := parseFeeInputRate(
-					m.closeFeeInput.Value())
-				if r > 0 {
-					feeRate = uint64(r)
-				}
-			}
-
-			return m, closeChannelCmd(
-				m.lndClient,
-				m.closeChanPoint,
-				m.closeForce,
-				feeRate)
-		}
-	}
-	return m, nil
-}
-
-func (m Model) handleCloseResultKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "enter", "backspace":
-		m.subview = svNone
-		m.closeError = ""
-		m.closeTxid = ""
-		m.closeInFlight = false
-		m.setContentFocus(0)
-		m.nav.SetActive(secChannels)
-		cm, cmd := m.closeTab(m.activeTab)
-		return cm, tea.Batch(cmd,
-			fetchStatus(m.cfg, m.lndClient))
-	}
-	return m, nil
-}
-
-func (m Model) handlePaymentDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	return m.handleViewOnlyKey(key, svNone)
-}
-
-func (m Model) handleOnChainTxDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	return m.handleViewOnlyKey(key, svNone)
 }
 
 func labelTxCmd(
@@ -846,676 +494,92 @@ func (m *Model) syncOcCtxSelection() {
 	m.ocCtx.UtxoOutpoints = m.utxoOutpoints
 }
 
-// ── Flow tab handlers ────────────────────────────────────
-
-func (m Model) handlePairingTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.pairingButtonIdx > 0 {
-			m.pairingButtonIdx--
-			return m, nil
-		}
-		m.focusSidebar()
-		return m, nil
-	case "right":
-		maxBtn := 1
-		if m.cfg.P2PMode == "hybrid" {
-			maxBtn = 2
-		}
-		if m.pairingButtonIdx < maxBtn {
-			m.pairingButtonIdx++
-		}
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-		return m, nil
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	case "enter":
-		return m.handlePairingEnter()
-	}
-	return m, nil
-}
-
-func (m Model) handlePairingContentKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		if m.pairingButtonIdx > 0 {
-			m.pairingButtonIdx--
-		}
-	case "right":
-		if m.pairingButtonIdx < 3 {
-			m.pairingButtonIdx++
-		}
-	case "down", "tab":
-		return m, nil
-	case "enter":
-		return m.handlePairingEnter()
-	}
-	return m, nil
-}
-
-func (m Model) handleSyncthingTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingDetail:
-		return m.handleSyncDetailKey(key)
-	default:
-		m.restoreTabSubview(tabSyncthing)
-		return m.handleSyncDetailKey(key)
-	}
-}
-
-// ── Syncthing device detail tab ──────────────────────────
-
-func (m Model) handleSyncthingDeviceTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingRemoveConfirm:
-		return m.handleSyncRemoveConfirmKey(key)
-	default:
-		m.subview = svSyncthingDeviceDetail
-		return m.handleSyncDeviceDetailKey(key)
-	}
-}
-
-// ── Syncthing Web UI tab ───────────────────────────────
-
-func (m Model) handleSyncthingWebUITabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	m.subview = svSyncthingWebUI
-	return m.handleSyncWebUIKey(key)
-}
-
-// ── Syncthing pair device tab ──────────────────────────
-
-func (m Model) handleSyncthingPairTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svSyncthingPairInput:
-		return m.handleSyncthingPairInputKey(key, msg)
-	case svSyncthingPairQR:
-		return m.handleSyncPairQRKey(key)
-	default:
-		m.restoreTabSubview(tabSyncthingPair)
-		return m.handleSyncthingPairInputKey(key, msg)
-	}
-}
-
-func (m Model) handleSyncDeviceDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.setContentFocus(0)
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return m, nil
-		}
-	case "down", "tab":
-		return m, nil
-	case "enter":
-		if m.contentFocus() == 1 {
-			m.subview = svSyncthingRemoveConfirm
-			m.syncRemoveBtnIdx = 0
-			m.syncRemoveError = ""
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
-}
-
-func (m Model) handleSyncRemoveConfirmKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.syncRemoveBtnIdx > 0 {
-			m.syncRemoveBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.syncRemoveBtnIdx < 1 {
-			m.syncRemoveBtnIdx++
-		}
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "enter":
-		switch m.syncRemoveBtnIdx {
-		case 0: // Go Back
-			m.subview = svSyncthingDeviceDetail
-			m.setContentFocus(1)
-			return m, nil
-		case 1: // Remove
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices) {
-				deviceID :=
-					m.cfg.SyncthingDevices[m.syncCursor].
-						DeviceID
-				return m, removeSyncthingDeviceCmd(
-					deviceID)
-			}
-		}
-	case "backspace":
-		m.subview = svSyncthingDeviceDetail
-		m.setContentFocus(1)
-		return m, nil
-	}
-	return m, nil
-}
-
-func (m Model) handleLndHubTabKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svLndHubManage:
-		return m.handleLndhubManageKey(key)
-	case svLndHubCreateName:
-		return m.handleLndHubCreateNameKey(key, msg)
-	case svLndHubCreateAccount:
-		return m.handleLndHubCreatedKey(key)
-	case svLndHubCreateQR:
-		return m.handleLndHubCreateQRKey(key)
-	default:
-		m.restoreTabSubview(tabLndHub)
-		return m.handleLndhubManageKey(key)
-	}
-}
-
-// Handler for LndHub created screen (Show QR + Done)
-func (m Model) handleLndHubCreatedKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.addonBtnIdx < 1 {
-			m.addonBtnIdx++
-		}
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-		return m, nil
-	case "enter":
-		switch m.addonBtnIdx {
-		case 0: // Show QR
-			m.subview = svLndHubCreateQR
-		case 1: // Done
-			m.addonBtnIdx = 0
-			m.subview = svLndHubManage
-		}
-		return m, nil
-	case "backspace":
-		m.addonBtnIdx = 0
-		m.subview = svLndHubManage
-		return m, nil
-	}
-	return m, nil
-}
-
-// Handler for LndHub create QR subview
-func (m Model) handleLndHubCreateQRKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "enter", "backspace":
-		m.subview = svLndHubCreateAccount
-		return m, nil
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	}
-	return m, nil
-}
-
-// ── LndHub account detail tab ───────────────────────────
-
-func (m Model) handleLndHubAccountTabKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svLndHubDeactivateConfirm:
-		return m.handleLndHubDeactivateKey(key)
-	default:
-		m.subview = svLndHubAccountDetail
-		return m.handleLndHubAccountDetailKey(key)
-	}
-}
-
-func (m Model) handleLndHubAccountDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	// Check if account is active (has button)
-	hasButton := false
-	if m.hubCursor < len(m.cfg.LndHubAccounts) {
-		hasButton =
-			m.cfg.LndHubAccounts[m.hubCursor].Active
-	}
-
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.setContentFocus(0)
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return m, nil
-		}
-	case "down", "tab":
-		return m, nil
-	case "enter":
-		if hasButton && m.contentFocus() == 1 {
-			m.hubDeactivateBtnIdx = 0
-			m.subview = svLndHubDeactivateConfirm
-		} else if !hasButton {
-			// Deactivated account: enter returns
-			// (same as channel close result)
-			return m.closeTab(m.activeTab)
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
-}
-
-func (m Model) handleLndHubDeactivateKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.hubDeactivateBtnIdx > 0 {
-			m.hubDeactivateBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.hubDeactivateBtnIdx < 1 {
-			m.hubDeactivateBtnIdx++
-		}
-		return m, nil
-	case "up":
-		if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = m.findFlowTab()
-			return m, nil
-		}
-	case "enter":
-		switch m.hubDeactivateBtnIdx {
-		case 0: // Go Back
-			m.subview = svLndHubAccountDetail
-			m.setContentFocus(1)
-			return m, nil
-		case 1: // Deactivate
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts) {
-				login :=
-					m.cfg.LndHubAccounts[m.hubCursor].Login
-				return m, deactivateLndHubAccountCmd(login)
-			}
-		}
-	case "backspace":
-		m.subview = svLndHubAccountDetail
-		m.setContentFocus(1)
-		return m, nil
-	}
-	return m, nil
-}
-
-// ── Section home key dispatch ────────────────────────────
-
-func (m Model) handleSectionHomeKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	// UTXO label popup intercepts ALL keys
-	// before any other handling.
-	if m.utxoLabelEditing {
-		return m.handleUtxoLabelPopupKey(key, msg)
-	}
-
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "backspace":
-		m.focusSidebar()
-		return m, nil
-	}
-
-	sec := m.nav.ActiveSection()
-	switch sec {
-	case secChannels:
-		return m.handleChannelsHomeKey(key)
-	case secWallet:
-		return m.handleWalletHomeKey(key)
-	case secOnChain:
-		return m.handleOnChainContentKey(key, false, msg)
-	case secAddons:
-		return m.handleAddonsHomeKey(key)
-	case secSystem:
-		return m.handleSystemHomeKey(key)
-	}
-	return m, nil
-}
-
-// ── Channels home ────────────────────────────────────────
-
-func (m Model) handleChannelsHomeKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		if m.contentFocus() == 0 && m.btnIdx > 0 {
-			m.btnIdx--
-			return m, nil
-		}
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.contentFocus() == 1 {
-			if m.chanCursor > 0 {
-				m.chanCursor--
-			} else {
-				m.setContentFocus(0)
-				m.btnIdx = 0
-			}
-		} else if m.contentFocus() == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = 1
-			}
-		}
-	case "down", "tab":
-		if m.contentFocus() == 0 {
-			if m.status != nil &&
-				len(m.status.channels) > 0 {
-				m.setContentFocus(1)
-				m.chanCursor = 0
-			}
-		} else if m.contentFocus() == 1 {
-			if m.status != nil &&
-				m.chanCursor <
-					len(m.status.channels)-1 {
-				m.chanCursor++
-			}
-		}
-	case "right":
-		if m.contentFocus() == 0 && m.btnIdx < 1 {
-			m.btnIdx++
-		}
-	case "enter":
-		if m.contentFocus() == 1 {
-			if m.status != nil &&
-				len(m.status.channels) > 0 &&
-				m.chanCursor <
-					len(m.status.channels) &&
-				!m.status.channels[m.chanCursor].
-					Pending {
-				ch := m.status.channels[m.chanCursor]
-				label := ch.PeerAlias
-				if label == "" {
-					label =
-						ch.RemotePubkey[:12] + ".."
-				}
-				if len(label) > 17 {
-					label = label[:17] + "..."
-				}
-				m.findOrOpenTab(tabChannel, label,
-					m.chanCursor, secChannels)
-			}
-		} else if m.contentFocus() == 0 {
-			switch m.btnIdx {
-			case 0:
-				return m.startChannelOpenCmd()
-			case 1:
-				m.chanHistoryCursor = 0
-				m.openFlowTab(tabChannelHistory,
-					"History", secChannels)
-				return m,
-					fetchClosedChannelsCmd(
-						m.lndClient)
-			}
-		}
-	}
-	return m, nil
-}
-
-// ── Wallet home ──────────────────────────────────────────
-
-func (m Model) handleWalletHomeKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		if m.contentFocus() == 0 {
-			if m.btnIdx > 0 {
-				m.btnIdx--
-				return m, nil
-			}
-		}
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.contentFocus() == 1 {
-			if m.payHistoryCursor > 0 {
-				m.payHistoryCursor--
-			} else {
-				m.setContentFocus(0)
-				m.btnIdx = 0
-			}
-		} else if m.contentFocus() == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = 1
-				return m, nil
-			}
-		}
-	case "down", "tab":
-		if m.contentFocus() == 0 {
-			m.setContentFocus(1)
-			m.payHistoryCursor = 0
-		} else if m.contentFocus() == 1 {
-			if m.payHistoryCursor <
-				len(m.payHistory)-1 {
-				m.payHistoryCursor++
-			}
-		}
-	case "right":
-		if m.contentFocus() == 0 {
-			if m.btnIdx < 2 {
-				m.btnIdx++
-			}
-		}
-	case "enter":
-		if m.contentFocus() == 1 &&
-			len(m.payHistory) > 0 {
-			entry :=
-				m.payHistory[m.payHistoryCursor]
-			label := entry.Memo
-			if label == "" {
-				if entry.IsIncoming {
-					label = "↓ " + formatSats(
-						entry.AmountSats)
-				} else {
-					label = "↑ " + formatSats(
-						entry.AmountSats)
-				}
-			}
-			if len(label) > 14 {
-				label = label[:12] + ".."
-			}
-			m.findOrOpenTab(tabPayment, label,
-				m.payHistoryCursor, secWallet)
-		} else if m.contentFocus() == 0 {
-			switch m.btnIdx {
-			case 0:
-				if m.cfg.HasLND() &&
-					m.cfg.WalletExists() {
-					screen := NewSendScreen(
-						m.screenCtx)
-					cmd := m.openFlowTabWithScreen(
-						tabSend,
-						"⚡ Send",
-						secWallet,
-						screen)
-					return m, cmd
-				}
-			case 1:
-				if m.cfg.HasLND() &&
-					m.cfg.WalletExists() {
-					screen := NewReceiveScreen(
-						m.screenCtx)
-					cmd := m.openFlowTabWithScreen(
-						tabReceive,
-						"⚡ Receive",
-						secWallet,
-						screen)
-					return m, cmd
-				}
-			case 2:
-				m.pairingButtonIdx = 0
-				m.subview = svWalletPairing
-				m.openFlowTab(tabPairing,
-					"⚡ Zeus — LND REST",
-					secWallet)
-			}
-		}
-	}
-	return m, nil
-}
-
 func (m *Model) buildChannelHistory(
 	closed []lndrpc.ClosedChannel,
 ) {
+	var channels []channelInfo
+	var waiting []lndrpc.WaitingCloseChannel
+	var pending []lndrpc.PendingForceCloseChannel
+	if m.status != nil {
+		channels = m.status.channels
+		waiting = m.status.waitingCloseChannels
+		pending = m.status.pendingForceCloseChannels
+	}
+	m.chanHistory = buildChannelHistoryEntries(
+		channels, waiting, pending, closed)
+}
+
+func buildChannelHistoryEntries(
+	channels []channelInfo,
+	waiting []lndrpc.WaitingCloseChannel,
+	pending []lndrpc.PendingForceCloseChannel,
+	closed []lndrpc.ClosedChannel,
+) []channelHistoryEntry {
 	var entries []channelHistoryEntry
 
 	// Active and inactive channels
-	if m.status != nil {
-		for _, ch := range m.status.channels {
-			if ch.Pending {
-				entries = append(entries,
-					channelHistoryEntry{
-						PeerAlias:    ch.PeerAlias,
-						RemotePubkey: ch.RemotePubkey,
-						Capacity:     ch.Capacity,
-						LocalBalance: ch.LocalBalance,
-						Status:       "pending open",
-						CloseType:    "—",
-						Active:       false,
-					})
-				continue
-			}
-			status := "active"
-			if !ch.Active {
-				status = "inactive"
-			}
+	for _, ch := range channels {
+		if ch.Pending {
 			entries = append(entries,
 				channelHistoryEntry{
 					PeerAlias:    ch.PeerAlias,
 					RemotePubkey: ch.RemotePubkey,
 					Capacity:     ch.Capacity,
 					LocalBalance: ch.LocalBalance,
-					Status:       status,
+					Status:       "pending open",
 					CloseType:    "—",
-					Active:       ch.Active,
-				})
-		}
-
-		// Waiting close channels (close tx broadcast,
-		// not yet confirmed)
-		for _, wc := range m.status.waitingCloseChannels {
-			entries = append(entries,
-				channelHistoryEntry{
-					PeerAlias:    wc.PeerAlias,
-					RemotePubkey: wc.RemotePubkey,
-					Capacity:     wc.Capacity,
-					LocalBalance: wc.LocalBalance,
-					LimboBalance: wc.LimboBalance,
-					Status:       "waiting close",
-					CloseType:    "closing",
-					ClosingTxid:  wc.ClosingTxid,
 					Active:       false,
 				})
+			continue
 		}
+		status := "active"
+		if !ch.Active {
+			status = "inactive"
+		}
+		entries = append(entries,
+			channelHistoryEntry{
+				PeerAlias:    ch.PeerAlias,
+				RemotePubkey: ch.RemotePubkey,
+				Capacity:     ch.Capacity,
+				LocalBalance: ch.LocalBalance,
+				Status:       status,
+				CloseType:    "—",
+				Active:       ch.Active,
+			})
+	}
 
-		// Pending force close channels
-		for _, fc := range m.status.pendingForceCloseChannels {
-			entries = append(entries,
-				channelHistoryEntry{
-					PeerAlias:       fc.PeerAlias,
-					RemotePubkey:    fc.RemotePubkey,
-					Capacity:        fc.Capacity,
-					LocalBalance:    fc.LocalBalance,
-					LimboBalance:    fc.LimboBalance,
-					Status:          "force close",
-					CloseType:       "force",
-					ClosingTxid:     fc.ClosingTxid,
-					BlocksRemaining: fc.BlocksRemaining,
-					Active:          false,
-				})
-		}
+	// Waiting close channels (close tx broadcast,
+	// not yet confirmed)
+	for _, wc := range waiting {
+		entries = append(entries,
+			channelHistoryEntry{
+				PeerAlias:    wc.PeerAlias,
+				RemotePubkey: wc.RemotePubkey,
+				Capacity:     wc.Capacity,
+				LocalBalance: wc.LocalBalance,
+				LimboBalance: wc.LimboBalance,
+				Status:       "waiting close",
+				CloseType:    "closing",
+				ClosingTxid:  wc.ClosingTxid,
+				Active:       false,
+			})
+	}
+
+	// Pending force close channels
+	for _, fc := range pending {
+		entries = append(entries,
+			channelHistoryEntry{
+				PeerAlias:       fc.PeerAlias,
+				RemotePubkey:    fc.RemotePubkey,
+				Capacity:        fc.Capacity,
+				LocalBalance:    fc.LocalBalance,
+				LimboBalance:    fc.LimboBalance,
+				Status:          "force close",
+				CloseType:       "force",
+				ClosingTxid:     fc.ClosingTxid,
+				BlocksRemaining: fc.BlocksRemaining,
+				Active:          false,
+			})
 	}
 
 	// Closed channels
@@ -1547,627 +611,7 @@ func (m *Model) buildChannelHistory(
 			})
 	}
 
-	m.chanHistory = entries
-}
-
-// ── On-Chain content (merged home + tab handler) ────────
-
-func (m Model) handleOnChainContentKey(
-	key string, fromTab bool, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	// ── UTXO label popup handling ───────────────
-	if m.utxoLabelEditing {
-		return m.handleUtxoLabelPopupKey(key, msg)
-	}
-
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "backspace":
-		if fromTab {
-			return m.closeTab(m.activeTab)
-		}
-	case "up":
-		switch m.contentFocus() {
-		case 2:
-			if m.onChainTxCursor > 0 {
-				m.onChainTxCursor--
-			} else {
-				m.setContentFocus(1)
-				if len(m.utxos) > 0 {
-					m.utxoCursor =
-						len(m.utxos) - 1
-				}
-			}
-		case 1:
-			if m.utxoCursor > 0 {
-				m.utxoCursor--
-				m.utxoPencilFocused = false
-			} else {
-				m.setContentFocus(0)
-				m.onChainBtnIdx = 0
-				m.utxoPencilFocused = false
-			}
-		case 0:
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				if fromTab {
-					m.activeTab = m.findFlowTab()
-				} else {
-					m.activeTab = 1
-				}
-				return m, nil
-			}
-		}
-	case "down", "tab":
-		switch m.contentFocus() {
-		case 0:
-			if len(m.utxos) > 0 {
-				m.setContentFocus(1)
-				m.utxoCursor = 0
-				m.utxoPencilFocused = false
-			} else if len(m.onChainTxs) > 0 {
-				m.setContentFocus(2)
-				m.onChainTxCursor = 0
-			}
-		case 1:
-			if m.utxoCursor < len(m.utxos)-1 {
-				m.utxoCursor++
-				m.utxoPencilFocused = false
-			} else if len(m.onChainTxs) > 0 {
-				m.setContentFocus(2)
-				m.onChainTxCursor = 0
-				m.utxoPencilFocused = false
-			}
-		case 2:
-			if m.onChainTxCursor < len(m.onChainTxs)-1 {
-				m.onChainTxCursor++
-			}
-		}
-	case "right":
-		if m.contentFocus() == 0 &&
-			m.onChainBtnIdx < 1 {
-			m.onChainBtnIdx++
-		}
-		// UTXO row: right arrow focuses pencil icon
-		if m.contentFocus() == 1 &&
-			m.utxoCursor < len(m.utxos) &&
-			!m.utxoPencilFocused {
-			m.utxoPencilFocused = true
-			return m, nil
-		}
-	case "left":
-		// UTXO row: left arrow unfocuses pencil
-		if m.contentFocus() == 1 &&
-			m.utxoPencilFocused {
-			m.utxoPencilFocused = false
-			return m, nil
-		}
-		if m.contentFocus() == 0 &&
-			m.onChainBtnIdx > 0 {
-			m.onChainBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "space":
-		if m.contentFocus() == 1 &&
-			m.utxoCursor < len(m.utxos) {
-			m.toggleUtxoSelection(m.utxoCursor)
-		}
-		return m, nil
-	case "enter":
-		if m.contentFocus() == 0 {
-			switch m.onChainBtnIdx {
-			case 0:
-				m.ocRecvAddress = ""
-				m.ocRecvError = ""
-				m.subview = svOnChainReceive
-				m.findOrOpenTab(tabOCReceive,
-					"⛓ Receive", 0, secOnChain)
-				return m,
-					getNewAddressCmd(m.lndClient)
-			case 1:
-				screen := NewOnChainSendScreen(
-					m.screenCtx, m.ocCtx)
-				// Pre-fill amount from UTXO selection
-				if len(m.utxoSelected) > 0 {
-					screen.amtInput.SetValue(
-						fmt.Sprintf("%d",
-							m.utxoSelectedTotal))
-				}
-				// Pre-fill fee from cached tiers
-				if m.sendFeeTiers[0].SatPerVB > 0 {
-					screen.feeInput.SetValue(
-						fmt.Sprintf("%.0f",
-							m.sendFeeTiers[0].SatPerVB))
-				}
-				cmd := m.openFlowTabWithScreen(
-					tabOnChain,
-					"⛓ Send",
-					secOnChain,
-					screen)
-				return m, cmd
-			}
-		} else if m.contentFocus() == 1 &&
-			m.utxoCursor < len(m.utxos) {
-			if m.utxoPencilFocused {
-				// Open label edit popup
-				m.openLabelPopup()
-				return m, nil
-			}
-			// Open view-only detail tab
-			u := m.utxos[m.utxoCursor]
-			label := u.Address
-			if len(label) > 14 {
-				label = label[:12] + ".."
-			}
-			m.setContentFocus(0)
-			m.findOrOpenTab(tabUtxoDetail, label,
-				m.utxoCursor, secOnChain)
-		} else if m.contentFocus() == 2 &&
-			m.onChainTxCursor < len(m.onChainTxs) {
-			tx := m.onChainTxs[m.onChainTxCursor]
-			label := tx.Label
-			if len(label) > 14 {
-				label = label[:12] + ".."
-			}
-			m.findOrOpenTab(tabOnChainTx, label,
-				m.onChainTxCursor, secOnChain)
-		}
-	}
-	return m, nil
-}
-
-// ── UTXO label popup keys ───────────────────────────────
-
-func (m Model) handleUtxoLabelPopupKey(
-	key string, msg tea.KeyPressMsg,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-
-	case "up":
-		if m.utxoLabelOnBtn {
-			m.utxoLabelOnBtn = false
-			m.utxoLabelInput.Focus()
-			return m, nil
-		}
-		return m, nil
-
-	case "down", "tab":
-		if !m.utxoLabelOnBtn {
-			m.utxoLabelOnBtn = true
-			m.utxoLabelBtnIdx = 0
-			m.utxoLabelInput.Blur()
-			return m, nil
-		}
-		return m, nil
-
-	case "left":
-		if m.utxoLabelOnBtn {
-			if m.utxoLabelBtnIdx > 0 {
-				m.utxoLabelBtnIdx--
-			}
-			return m, nil
-		}
-		// In label field — cursor left
-		var cmd tea.Cmd
-		m.utxoLabelInput, cmd =
-			m.utxoLabelInput.Update(tea.Msg(msg))
-		return m, cmd
-
-	case "right":
-		if m.utxoLabelOnBtn {
-			if m.utxoLabelBtnIdx < 1 {
-				m.utxoLabelBtnIdx++
-			}
-			return m, nil
-		}
-		// In label field — cursor right
-		var cmd tea.Cmd
-		m.utxoLabelInput, cmd =
-			m.utxoLabelInput.Update(tea.Msg(msg))
-		return m, cmd
-
-	case "enter":
-		if m.utxoLabelOnBtn {
-			switch m.utxoLabelBtnIdx {
-			case 0: // Save
-				if m.utxoCursor < len(m.utxos) {
-					txid :=
-						m.utxos[m.utxoCursor].Txid
-					label :=
-						m.utxoLabelInput.Value()
-					return m, labelTxCmd(
-						m.lndClient, txid, label)
-				}
-				m.closeLabelPopup()
-				return m, nil
-			case 1: // Cancel
-				m.closeLabelPopup()
-				return m, nil
-			}
-		}
-		// On label field — move to buttons
-		m.utxoLabelOnBtn = true
-		m.utxoLabelBtnIdx = 0
-		m.utxoLabelInput.Blur()
-		return m, nil
-
-	case "backspace":
-		// Always delete in label field
-		if !m.utxoLabelOnBtn {
-			var cmd tea.Cmd
-			m.utxoLabelInput, cmd =
-				m.utxoLabelInput.Update(
-					tea.Msg(msg))
-			return m, cmd
-		}
-		return m, nil
-
-	default:
-		// Pass all other keys to label field
-		if !m.utxoLabelOnBtn {
-			var cmd tea.Cmd
-			m.utxoLabelInput, cmd =
-				m.utxoLabelInput.Update(
-					tea.Msg(msg))
-			return m, cmd
-		}
-	}
-	return m, nil
-}
-
-// restoreTabSubview restores the entry subview for a
-// flow tab whose subview was cleared during navigation
-// (e.g. sidebar switch). Returns true if restoration
-// was needed.
-func (m *Model) restoreTabSubview(kind tabKind) bool {
-	switch kind {
-	case tabSyncthing:
-		if m.subview != svSyncthingDetail {
-			m.subview = svSyncthingDetail
-			return true
-		}
-	case tabSyncthingDevice:
-		if m.subview != svSyncthingDeviceDetail &&
-			m.subview != svSyncthingRemoveConfirm {
-			m.subview = svSyncthingDeviceDetail
-			return true
-		}
-	case tabSyncthingWebUI:
-		if m.subview != svSyncthingWebUI {
-			m.subview = svSyncthingWebUI
-			return true
-		}
-	case tabSyncthingPair:
-		if m.subview != svSyncthingPairInput &&
-			m.subview != svSyncthingPairQR {
-			m.subview = svSyncthingPairInput
-			return true
-		}
-	case tabLndHub:
-		if m.subview != svLndHubManage &&
-			m.subview != svLndHubCreateName &&
-			m.subview != svLndHubCreateAccount &&
-			m.subview != svLndHubCreateQR {
-			m.subview = svLndHubManage
-			return true
-		}
-	case tabLndHubAccount:
-		if m.subview != svLndHubAccountDetail &&
-			m.subview != svLndHubDeactivateConfirm {
-			m.subview = svLndHubAccountDetail
-			return true
-		}
-	}
-	return false
-}
-
-// ── Addons home ──────────────────────────────────────────
-
-func (m Model) handleAddonsHomeKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "left":
-		m.focusSidebar()
-		return m, nil
-	case "up":
-		if m.btnIdx > 0 {
-			m.btnIdx--
-		} else if m.hasDetailTabs() {
-			m.focusTabBar()
-			m.tabCursorX = 0
-			m.activeTab = 1
-			return m, nil
-		}
-	case "down", "tab":
-		if m.btnIdx < 1 {
-			m.btnIdx++
-		}
-	case "enter":
-		switch m.btnIdx {
-		case 0:
-			if m.cfg.SyncthingInstalled {
-				m.subview = svSyncthingDetail
-				m.addonBtnIdx = 0
-				m.setContentFocus(0)
-				m.openFlowTab(tabSyncthing,
-					"Syncthing", secAddons)
-			} else if m.cfg.HasLND() &&
-				m.cfg.WalletExists() {
-				m.shellAction = svSyncthingInstall
-				return m, tea.Quit
-			}
-		case 1:
-			if m.cfg.LndHubInstalled {
-				m.hubCursor = 0
-				m.subview = svLndHubManage
-				m.addonBtnIdx = 0
-				m.setContentFocus(0)
-				m.openFlowTab(tabLndHub,
-					"LndHub", secAddons)
-			} else if m.cfg.HasLND() &&
-				m.cfg.WalletExists() {
-				m.shellAction = svLndHubInstall
-				return m, tea.Quit
-			}
-		}
-	}
-	return m, nil
-}
-
-// ── System home ──────────────────────────────────────────
-
-func (m Model) handleSystemHomeKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	hasUpdate := m.latestVersion != "" &&
-		m.latestVersion != m.version
-
-	maxBtn := 1
-	if m.status != nil && m.status.rebootRequired {
-		maxBtn = 2
-	}
-
-	switch key {
-	case "left":
-		if m.contentFocus() == 0 && m.btnIdx > 0 {
-			m.btnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "up":
-		if m.contentFocus() == 1 {
-			if m.svcCursor > 0 {
-				m.svcCursor--
-			} else {
-				m.setContentFocus(0)
-				m.btnIdx = 0
-			}
-		} else if m.contentFocus() == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = 1
-				return m, nil
-			}
-		}
-	case "down", "tab":
-		if m.contentFocus() == 0 {
-			if m.svcCount() > 0 {
-				m.setContentFocus(1)
-				m.svcCursor = 0
-			}
-		} else if m.contentFocus() == 1 {
-			if m.svcCursor < m.svcCount()-1 {
-				m.svcCursor++
-			}
-		}
-	case "right":
-		if m.contentFocus() == 0 {
-			if m.btnIdx < maxBtn {
-				m.btnIdx++
-			}
-		}
-	case "r":
-		if m.contentFocus() == 1 {
-			m.svcConfirm = "Restart"
-		}
-	case "s":
-		if m.contentFocus() == 1 {
-			m.svcConfirm = "Stop"
-		}
-	case "a":
-		if m.contentFocus() == 1 {
-			m.svcConfirm = "Start"
-		}
-	case "l":
-		if m.contentFocus() == 1 {
-			svc := m.svcName(m.svcCursor)
-			c := exec.Command("bash", "-c",
-				"clear && sudo journalctl -u "+svc+
-					" -n 100 --no-pager"+
-					" && echo && echo "+
-					"'  Press Enter to return...'"+
-					" && read")
-			return m, tea.ExecProcess(c,
-				func(err error) tea.Msg {
-					return svcActionDoneMsg{}
-				})
-		}
-	case "enter":
-		if m.contentFocus() == 0 {
-			switch m.btnIdx {
-			case 0:
-				m.sysConfirm = "Update packages"
-			case 1:
-				if hasUpdate {
-					m.updateConfirm = true
-				}
-			case 2:
-				m.sysConfirm = "Reboot"
-			}
-		}
-	}
-	return m, nil
-}
-
-// ── Syncthing detail keys ────────────────────────────────
-
-func (m Model) handleSyncDetailKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.contentFocus() == 0 && m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		if m.contentFocus() == 0 && m.addonBtnIdx < 1 {
-			m.addonBtnIdx++
-		}
-	case "up":
-		if m.contentFocus() == 1 {
-			if m.syncCursor > 0 {
-				m.syncCursor--
-			} else {
-				m.setContentFocus(0)
-				m.addonBtnIdx = 0
-			}
-		} else if m.contentFocus() == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		}
-	case "down", "tab":
-		if m.contentFocus() == 0 {
-			if len(m.cfg.SyncthingDevices) > 0 {
-				m.setContentFocus(1)
-				m.syncCursor = 0
-			}
-		} else if m.contentFocus() == 1 {
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices)-1 {
-				m.syncCursor++
-			}
-		}
-	case "enter":
-		if m.contentFocus() == 0 {
-			switch m.addonBtnIdx {
-			case 0:
-				m.syncDeviceInput =
-					newSyncthingIDInput()
-				m.subview = svSyncthingPairInput
-				m.syncPairError = ""
-				m.syncPairSuccess = false
-				m.setContentFocus(0)
-				m.addonBtnIdx = 0
-				m.findOrOpenTab(tabSyncthingPair,
-					"Pair Device", 0, secAddons)
-			case 1:
-				m.subview = svSyncthingWebUI
-				m.addonBtnIdx = 0
-				m.findOrOpenTab(tabSyncthingWebUI,
-					"Web UI", 0, secAddons)
-			}
-		} else if m.contentFocus() == 1 {
-			if m.syncCursor <
-				len(m.cfg.SyncthingDevices) {
-				dev := m.cfg.SyncthingDevices[m.syncCursor]
-				label := dev.Name
-				if len(label) > 17 {
-					label = label[:17] + "..."
-				}
-				m.findOrOpenTab(tabSyncthingDevice,
-					label, m.syncCursor, secAddons)
-			}
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
-}
-
-// ── LndHub manage keys ──────────────────────────────────
-
-func (m Model) handleLndhubManageKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "left":
-		if m.contentFocus() == 0 && m.addonBtnIdx > 0 {
-			m.addonBtnIdx--
-		} else {
-			m.focusSidebar()
-		}
-		return m, nil
-	case "right":
-		// Single button — no right navigation
-	case "up":
-		if m.contentFocus() == 1 {
-			if m.hubCursor > 0 {
-				m.hubCursor--
-			} else {
-				m.setContentFocus(0)
-				m.addonBtnIdx = 0
-			}
-		} else if m.contentFocus() == 0 {
-			if m.hasDetailTabs() {
-				m.focusTabBar()
-				m.tabCursorX = 0
-				m.activeTab = m.findFlowTab()
-				return m, nil
-			}
-		}
-	case "down", "tab":
-		if m.contentFocus() == 0 {
-			if len(m.cfg.LndHubAccounts) > 0 {
-				m.setContentFocus(1)
-				m.hubCursor = 0
-			}
-		} else if m.contentFocus() == 1 {
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts)-1 {
-				m.hubCursor++
-			}
-		}
-	case "enter":
-		if m.contentFocus() == 0 {
-			// Create
-			m.hubNameInput = newHubNameInput()
-			m.subview = svLndHubCreateName
-		} else if m.contentFocus() == 1 {
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts) {
-				acct := m.cfg.LndHubAccounts[m.hubCursor]
-				label := acct.Label
-				if len(label) > 17 {
-					label = label[:17] + "..."
-				}
-				m.findOrOpenTab(tabLndHubAccount,
-					label, m.hubCursor, secAddons)
-			}
-		}
-	case "backspace":
-		return m.closeTab(m.activeTab)
-	}
-	return m, nil
+	return entries
 }
 
 // ── Sidebar keys ─────────────────────────────────────────
@@ -2205,31 +649,11 @@ func (m Model) handleSidebarKey(
 		sec := m.nav.Activate()
 		m.focusContent()
 		m.activeTab = 0
-		m.btnIdx = 0
 		m.tabFocused = false
 		m.tabCursorX = 0
-		m.ensureContentCursor()
 		return m.previewSection(sec)
 	}
 	return m, nil
-}
-
-func (m *Model) ensureContentCursor() {
-	sec := m.nav.ActiveSection()
-	switch sec {
-	case secChannels:
-		if m.status != nil &&
-			len(m.status.channels) > 0 {
-			if m.chanCursor >=
-				len(m.status.channels) {
-				m.chanCursor = 0
-			}
-		}
-	case secWallet:
-	case secOnChain:
-	case secAddons:
-	case secSystem:
-	}
 }
 
 func (m Model) previewSection(
@@ -2259,47 +683,10 @@ func (m Model) handleTabBarKey(
 		return m, tea.Quit
 
 	case "down", "tab":
-		// Don't enter content on view-only tabs
-		if m.activeTab > 0 &&
-			m.activeTab < len(tabs) {
-			switch tabs[m.activeTab].Kind {
-			case tabPayment, tabOnChainTx,
-				tabUtxoDetail:
-				return m, nil
-			case tabChannel:
-				// Skip dead detail area, go straight
-				// to Close Channel button.
-				if !isCloseSubview(m.subview) {
-					m.focusContent()
-					m.setContentFocus(1)
-					return m, nil
-				}
-			case tabSyncthingDevice:
-				m.subview = svSyncthingDeviceDetail
-				m.focusContent()
-				m.setContentFocus(1)
-				return m, nil
-			case tabLndHubAccount:
-				m.subview = svLndHubAccountDetail
-				m.focusContent()
-				m.setContentFocus(1)
-				return m, nil
-			case tabOnChain, tabSend, tabReceive,
-				tabOpenChannel, tabSyncthing, tabLndHub,
-				tabSyncthingWebUI, tabSyncthingPair:
-				if tabs[m.activeTab].Screen == nil {
-					m.restoreTabSubview(
-						tabs[m.activeTab].Kind)
-				}
-				m.focusContent()
-				return m, nil
-			}
-		}
 		m.focusContent()
 		if m.activeTab == 0 {
 			m.subview = svNone
 		}
-		m.ensureContentCursor()
 		return m, nil
 
 	case "left":
@@ -2343,45 +730,11 @@ func (m Model) handleTabBarKey(
 		if m.tabCursorX == 1 && m.activeTab > 0 {
 			return m.closeTab(m.activeTab)
 		}
-		// Don't enter content on view-only tabs
-		if m.activeTab > 0 &&
-			m.activeTab < len(tabs) {
-			switch tabs[m.activeTab].Kind {
-			case tabPayment, tabOnChainTx,
-				tabUtxoDetail:
-				return m, nil
-			case tabChannel:
-				if !isCloseSubview(m.subview) {
-					m.focusContent()
-					m.setContentFocus(1)
-					return m, nil
-				}
-			case tabSyncthingDevice:
-				m.subview = svSyncthingDeviceDetail
-				m.focusContent()
-				m.setContentFocus(1)
-				return m, nil
-			case tabLndHubAccount:
-				m.subview = svLndHubAccountDetail
-				m.focusContent()
-				m.setContentFocus(1)
-				return m, nil
-			case tabOnChain, tabSend, tabReceive,
-				tabOpenChannel, tabSyncthing, tabLndHub,
-				tabSyncthingWebUI, tabSyncthingPair:
-				if tabs[m.activeTab].Screen == nil {
-					m.restoreTabSubview(
-						tabs[m.activeTab].Kind)
-				}
-				m.focusContent()
-				return m, nil
-			}
-		}
+		// Enter on tab label: focus content
 		m.focusContent()
 		if m.activeTab == 0 {
 			m.subview = svNone
 		}
-		m.ensureContentCursor()
 		return m, nil
 
 	case "backspace":
@@ -2405,42 +758,9 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 
-	switch closingTab.Kind {
-	case tabOpenChannel:
-		m.subview = svNone
-	case tabChannelHistory:
-		m.subview = svNone
-	case tabUtxoDetail:
-		m.subview = svNone
-		m.closeLabelPopup()
-	case tabSend:
-		m.subview = svNone
-	case tabReceive:
-		m.subview = svNone
-	case tabOnChain:
-		m.subview = svNone
-	case tabOCReceive:
-		m.ocRecvAddress = ""
-		m.ocRecvError = ""
-		m.subview = svNone
-	case tabPairing:
-		m.subview = svNone
-	case tabSyncthing:
-		m.subview = svNone
-	case tabSyncthingDevice:
-		m.subview = svNone
-		m.syncRemoveError = ""
-	case tabSyncthingWebUI:
-		m.subview = svNone
-	case tabSyncthingPair:
-		m.subview = svNone
-		m.syncPairError = ""
-		m.syncPairSuccess = false
-	case tabLndHub:
-		m.subview = svNone
-	case tabLndHubAccount:
-		m.subview = svNone
-	}
+	// Screens own all subview state; just clear the
+	// Model-level subview flag on any tab close.
+	m.subview = svNone
 
 	var newTabs []openTab
 	for _, t := range m.tabs {
@@ -2462,7 +782,6 @@ func (m Model) closeTab(
 	m.tabCursorX = 0
 
 	m.focusContent()
-	m.setContentFocus(0)
 
 	// Addon detail tabs: return to parent manage tab.
 	// All other tabs: return to section home (tab 0).
@@ -2472,6 +791,8 @@ func (m Model) closeTab(
 		tabSyncthingPair:
 		parentKind = tabSyncthing
 	case tabLndHubAccount:
+		parentKind = tabLndHub
+	case tabLndHubCreate:
 		parentKind = tabLndHub
 	}
 	m.activeTab = 0
@@ -2483,8 +804,6 @@ func (m Model) closeTab(
 			}
 		}
 	}
-
-	m.ensureContentCursor()
 
 	if m.tabScrollOffset >
 		len(m.effectiveTabs())-2 {
@@ -2498,239 +817,17 @@ func (m Model) closeTab(
 	return m, nil
 }
 
-// ── Confirm keys ─────────────────────────────────────────
-
-func (m Model) handleSvcConfirmKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	action := m.svcConfirm
-	m.svcConfirm = ""
-	if key == "y" {
-		svc := m.svcName(m.svcCursor)
-		if svc != "" {
-			return m, runSvcActionCmd(action, svc)
-		}
-	}
-	return m, nil
-}
-
-func (m Model) handleSysConfirmKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	action := m.sysConfirm
-	m.sysConfirm = ""
-	if key == "y" {
-		if action == "Reboot" {
-			return m, runRebootCmd()
-		}
-		return m, runUpdatePackagesCmd()
-	}
-	return m, nil
-}
-
-func (m Model) handleUpdateConfirmKey(
-	key string,
-) (tea.Model, tea.Cmd) {
-	m.updateConfirm = false
-	if key == "y" {
-		m.shellAction = svSelfUpdate
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
 func (m Model) handleGenericSubviewKey(
 	key string,
 ) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "backspace":
-		if m.urlReturnTo != svNone {
-			m.subview = m.urlReturnTo
-			m.urlReturnTo = svNone
-			return m, nil
-		}
+	case "enter":
 		m.subview = svNone
-		m.btnIdx = 0
 		return m, nil
 	}
 	return m, nil
-}
-
-// ── View-only tab handler (shared) ──────────────────────
-
-func (m Model) handleViewOnlyKey(
-	key string, backSubview wSubview,
-) (tea.Model, tea.Cmd) {
-	// View-only tabs: user stays on tab bar,
-	// no content navigation. If we somehow get
-	// content focus, bounce back to tab bar.
-	m.focusTabBar()
-	m.tabCursorX = 0
-	m.activeTab = m.findFlowTab()
-	return m, nil
-}
-
-// ── findOrOpenTab (shared) ──────────────────────────────
-
-func (m *Model) findOrOpenTab(
-	kind tabKind, label string,
-	index, section int,
-) {
-	tabs := m.effectiveTabs()
-	for i, t := range tabs {
-		if t.Kind == kind && t.Index == index {
-			m.activeTab = i
-			m.focusTabBar()
-			m.tabCursorX = 0
-			return
-		}
-	}
-	m.tabs = append(m.tabs, openTab{
-		Kind: kind, Label: label,
-		Index: index, Section: section,
-	})
-	m.activeTab = len(m.effectiveTabs()) - 1
-	m.focusTabBar()
-	m.tabCursorX = 0
-}
-
-// ── Channel open entry ───────────────────────────────────
-
-func (m Model) startChannelOpenCmd() (
-	tea.Model, tea.Cmd,
-) {
-	if m.lndClient == nil || !m.cfg.HasLND() ||
-		!m.cfg.WalletExists() {
-		return m, nil
-	}
-	// Zero balance: redirect to on-chain receive
-	if m.status != nil &&
-		m.status.lndBalance == "0" {
-		m.subview = svOnChainReceive
-		m.openFlowTab(tabOCReceive,
-			"Receive", secOnChain)
-		return m, getNewAddressCmd(m.lndClient)
-	}
-	// Normal path: create screen
-	screen := NewChannelOpenScreen(m.screenCtx)
-	cmd := m.openFlowTabWithScreen(
-		tabOpenChannel, "Open Channel",
-		secChannels, screen)
-	return m, cmd
-}
-
-func (m *Model) openFlowTab(
-	kind tabKind, label string, section int,
-) {
-	tabs := m.effectiveTabs()
-	for i, t := range tabs {
-		if t.Kind == kind && t.Section == section {
-			m.activeTab = i
-			m.focusContent()
-			m.setContentFocus(0)
-			return
-		}
-	}
-	m.tabs = append(m.tabs, openTab{
-		Kind:    kind,
-		Label:   label,
-		Section: section,
-	})
-	m.activeTab = len(m.effectiveTabs()) - 1
-	m.focusContent()
-	m.setContentFocus(0)
-}
-
-// openFlowTabWithScreen opens a flow tab backed by a
-// Screen component. If a tab of the same kind already
-// exists in the section, it reuses it (and keeps the
-// existing screen's state). When a new tab is created,
-// the screen's Init() is called and the resulting
-// command is returned.
-func (m *Model) openFlowTabWithScreen(
-	kind tabKind, label string, section int,
-	screen Screen,
-) tea.Cmd {
-	tabs := m.effectiveTabs()
-	for i, t := range tabs {
-		if t.Kind == kind && t.Section == section {
-			m.activeTab = i
-			m.focusContent()
-			m.setContentFocus(0)
-			return nil
-		}
-	}
-	m.tabs = append(m.tabs, openTab{
-		Kind:    kind,
-		Label:   label,
-		Section: section,
-		Screen:  screen,
-	})
-	m.activeTab = len(m.effectiveTabs()) - 1
-	m.focusContent()
-	m.setContentFocus(0)
-	return screen.Init()
-}
-
-func (m Model) findFlowTab() int {
-	tabs := m.effectiveTabs()
-	var kind tabKind
-	switch {
-	case m.subview == svWalletPairing:
-		kind = tabPairing
-	case m.subview == svOnChainReceive:
-		kind = tabOCReceive
-	case isOnChainSubview(m.subview):
-		kind = tabOnChain
-	case m.subview == svSyncthingDetail:
-		kind = tabSyncthing
-	case m.subview == svSyncthingWebUI:
-		kind = tabSyncthingWebUI
-	case m.subview == svSyncthingPairInput ||
-		m.subview == svSyncthingPairQR:
-		kind = tabSyncthingPair
-	case m.subview == svSyncthingDeviceDetail ||
-		m.subview == svSyncthingRemoveConfirm:
-		kind = tabSyncthingDevice
-	case m.subview == svLndHubManage ||
-		m.subview == svLndHubCreateName ||
-		m.subview == svLndHubCreateAccount ||
-		m.subview == svLndHubCreateQR:
-		kind = tabLndHub
-	case m.subview == svLndHubAccountDetail ||
-		m.subview == svLndHubDeactivateConfirm:
-		kind = tabLndHubAccount
-	default:
-		return m.activeTab
-	}
-	for i, t := range tabs {
-		if t.Kind == kind {
-			return i
-		}
-	}
-	return m.activeTab
-}
-
-func isCloseSubview(sv wSubview) bool {
-	switch sv {
-	case svCloseType, svCloseConfirm,
-		svClosing, svCloseResult:
-		return true
-	}
-	return false
-}
-
-func isOnChainSubview(sv wSubview) bool {
-	switch sv {
-	case svOnChain, svOnChainResult,
-		svOnChainSend, svOCSendConfirm,
-		svOCSendBroadcast,
-		svOnChainReceive:
-		return true
-	}
-	return false
 }
 
 // ── L16 screen dispatch helpers ──────────────────────────
@@ -2776,6 +873,25 @@ func (m Model) routeToScreen(
 		}
 	}
 	return m, nil, false
+}
+
+// routeToSectionScreen delivers a message to the section
+// home screen at the given index. Same pattern as
+// routeToScreen but keyed on section index instead of
+// tab kind. Returns (model, cmd, true) if routed, or
+// (model, nil, false) if no screen is mounted.
+func (m Model) routeToSectionScreen(
+	sec int, msg tea.Msg,
+) (Model, tea.Cmd, bool) {
+	if sec < 0 || sec >= numSections ||
+		m.sectionScreens[sec] == nil {
+		return m, nil, false
+	}
+	m.screenCtx.HasTabs = m.hasDetailTabs()
+	newScreen, cmd :=
+		m.sectionScreens[sec].HandleMsg(msg)
+	m.sectionScreens[sec] = newScreen
+	return m, cmd, true
 }
 
 // ── Shell commands ───────────────────────────────────────
@@ -2857,45 +973,4 @@ func runRebootCmd() tea.Cmd {
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return svcActionDoneMsg{}
 	})
-}
-
-// ── Paste handling ───────────────────────────────────────
-
-func (m Model) handlePaste(
-	msg tea.PasteMsg,
-) (tea.Model, tea.Cmd) {
-	switch m.subview {
-	case svLndHubCreateName:
-		var cmd tea.Cmd
-		m.hubNameInput, cmd =
-			m.hubNameInput.Update(msg)
-		return m, cmd
-	case svSyncthingPairInput:
-		var cmd tea.Cmd
-		m.syncDeviceInput, cmd =
-			m.syncDeviceInput.Update(msg)
-		return m, cmd
-	}
-
-	// Tab-based paste routing (no subview set)
-	tabs := m.effectiveTabs()
-	idx := m.activeTab
-	if idx > 0 && idx < len(tabs) {
-		tab := tabs[idx]
-		switch tab.Kind {
-		case tabUtxoDetail:
-			// Legacy — keep for safety
-			return m, nil
-		}
-	}
-
-	// UTXO label popup paste
-	if m.utxoLabelEditing && !m.utxoLabelOnBtn {
-		var cmd tea.Cmd
-		m.utxoLabelInput, cmd =
-			m.utxoLabelInput.Update(msg)
-		return m, cmd
-	}
-
-	return m, nil
 }

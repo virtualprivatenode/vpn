@@ -85,13 +85,12 @@ func (m Model) currentBindings() []key.Binding {
 
 	// Fullscreen views
 	if m.subview == svQR || m.subview == svFullURL {
-		return newFullscreenBindings().ShortHelp()
-	}
-
-	// Confirm dialogs
-	if m.svcConfirm != "" || m.sysConfirm != "" ||
-		m.updateConfirm {
-		return newConfirmBindings().ShortHelp()
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "back")),
+			kQuit,
+		}
 	}
 
 	// Sidebar focused
@@ -126,123 +125,17 @@ func (m Model) currentBindings() []key.Binding {
 			m.screenCtx.ContentFocused = m.contentFocused
 			return tab.Screen.HelpBindings()
 		}
-
-		// Legacy path
-		switch tab.Kind {
-		case tabPayment, tabOnChainTx, tabUtxoDetail:
-			return newDetailTabBindings(hasTabs).
-				ShortHelp()
-		case tabChannelHistory:
-			return newChannelHistoryBindings(hasTabs).
-				ShortHelp()
-		case tabChannel:
-			if isCloseSubview(m.subview) {
-				break // fall through to subview switch
-			}
-			return newChannelDetailBindings(
-				hasTabs, m.contentFocus() == 1).
-				ShortHelp()
-		case tabSyncthingDevice:
-			if m.subview == svSyncthingRemoveConfirm {
-				break // fall through to subview switch
-			}
-			return newAddonDetailTabBindings(
-				hasTabs, m.contentFocus() == 1,
-				"remove").
-				ShortHelp()
-		case tabLndHubAccount:
-			if m.subview == svLndHubDeactivateConfirm {
-				break // fall through to subview switch
-			}
-			actionLabel := ""
-			if m.hubCursor <
-				len(m.cfg.LndHubAccounts) &&
-				m.cfg.LndHubAccounts[m.hubCursor].Active {
-				actionLabel = "deactivate"
-			}
-			return newAddonDetailTabBindings(
-				hasTabs, m.contentFocus() == 1,
-				actionLabel).
-				ShortHelp()
-		}
-	}
-
-	// Content focused — dispatch by subview
-	switch m.subview {
-	case svCloseType:
-		return newCloseTypeBindings().ShortHelp()
-	case svCloseConfirm:
-		return newOCSendConfirmBindings(hasTabs).
-			ShortHelp()
-	case svClosing:
-		return newWaitingBindings().ShortHelp()
-	case svCloseResult:
-		return newResultBindings().ShortHelp()
-	case svSyncthingDetail:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svSyncthingPairInput:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svSyncthingPairQR:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svSyncthingWebUI:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svSyncthingDeviceDetail:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svSyncthingRemoveConfirm:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svLndHubManage:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svLndHubCreateName:
-		return newTextInputBindings(hasTabs).
-			ShortHelp()
-	case svLndHubCreateAccount:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svLndHubCreateQR:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svLndHubAccountDetail:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svLndHubDeactivateConfirm:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svWalletPairing, svZeusPairing:
-		return newAddonDetailBindings(hasTabs).
-			ShortHelp()
-	case svOnChainReceive:
-		return newOCReceiveBindings(hasTabs).
-			ShortHelp()
 	}
 
 	// Section home views
 	sec := m.nav.ActiveSection()
-	switch sec {
-	case secChannels:
-		return newChannelsHomeBindings(
-			hasTabs,
-			m.contentFocus() == 0).ShortHelp()
-	case secWallet:
-		return newWalletHomeBindings(
-			hasTabs,
-			m.contentFocus() == 0).ShortHelp()
-	case secOnChain:
-		return newOnChainHomeBindings(hasTabs,
-			m.contentFocus(),
-			m.utxoPencilFocused).ShortHelp()
-	case secAddons:
-		return newAddonsHomeBindings(hasTabs).
-			ShortHelp()
-	case secSystem:
-		return newSystemHomeBindings(hasTabs,
-			m.contentFocus() == 1).ShortHelp()
+
+	// L16: delegate to section home screen if present
+	if sec >= 0 && sec < numSections &&
+		m.sectionScreens[sec] != nil {
+		m.screenCtx.HasTabs = hasTabs
+		m.screenCtx.ContentFocused = m.contentFocused
+		return m.sectionScreens[sec].HelpBindings()
 	}
 
 	return []key.Binding{kQuit}

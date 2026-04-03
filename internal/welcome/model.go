@@ -28,62 +28,16 @@ const (
 
 const (
 	svNone wSubview = iota
-	svWalletInfo
-	svChannelList
-	svChannelDetail
-	svChannelOpen
-	svChannelAmountSelect
-	svChannelCustomPeer
-	svChannelOpenConfirm
-	svChannelOpening
-	svChannelOpenResult
-	svChannelFundWallet
-	svZeusPairing
-	svWalletPairing
-	svOnChain
-	svSend
-	svSendConfirm
-	svSendInFlight
-	svSendResult
-	svReceive
-	svReceiveWaiting
-	svReceivePaid
-	svReceiveExpired
-	svReceiveError
-	svPaymentDetail
 	svQR
 	svFullURL
-	svSyncthingDetail
-	svSyncthingPairInput
-	svSyncthingDeviceDetail
-	svSyncthingWebUI
-	svSyncthingPairQR
-	svSyncthingRemoveConfirm
-	svLndHubManage
-	svLndHubCreateName
-	svLndHubCreateAccount
-	svLndHubCreateQR
-	svLndHubAccountDetail
-	svLndHubDeactivateConfirm
-	// Shell actions
+	// Shell actions — trigger install/update flows
+	// via the Show() restart loop
 	svWalletCreate
 	svLNDInstall
 	svSyncthingInstall
 	svLndHubInstall
-	svOnChainResult
 	svSelfUpdate
 	svP2PUpgrade
-	// On-chain send flow (single screen)
-	svOnChainSend
-	svOCSendConfirm
-	svOCSendBroadcast
-	// On-chain receive flow
-	svOnChainReceive
-	// Channel close flow
-	svCloseType
-	svCloseConfirm
-	svClosing
-	svCloseResult
 )
 
 // Tab types for the top tab bar
@@ -104,7 +58,9 @@ const (
 	tabSyncthingPair                  // Syncthing pair device flow
 	tabLndHub                         //
 	tabLndHubAccount                  // LndHub account detail
+	tabLndHubCreate                   // LndHub create account flow
 	tabOpenChannel                    // Channel open flow
+	tabCloseChannel                   // Channel close flow
 	tabOnChainTx                      // on-chain transaction detail
 	tabUtxoDetail                     // UTXO detail with label edit
 	tabChannelHistory                 // channel history view
@@ -130,14 +86,22 @@ type latestVersionMsg string
 
 type lndhubAccountCreatedMsg struct {
 	account *installer.LndHubAccount
+	label   string
 	err     error
 }
 type lndhubDeactivatedMsg struct {
+	login   string
 	balance string
 	err     error
 }
-type syncthingPairedMsg struct{ err error }
-type syncthingRemovedMsg struct{ err error }
+type syncthingPairedMsg struct {
+	deviceID string
+	err      error
+}
+type syncthingRemovedMsg struct {
+	deviceID string
+	err      error
+}
 type channelOpenResultMsg struct {
 	txid string
 	err  error
@@ -285,61 +249,17 @@ type Model struct {
 	screenCtx *ScreenContext
 	ocCtx     *OnChainContext
 
+	// L16: section home screens (nil = legacy path)
+	sectionScreens [numSections]Screen
+
 	shellAction   wSubview
 	status        *statusMsg
 	latestVersion string
-	updateConfirm bool
 	fetchInFlight bool
 
-	// Button index for content pane buttons
-	btnIdx      int
-	addonBtnIdx int
-
-	// System
-	svcCursor  int
-	svcConfirm string
-	sysConfirm string
-
-	// Addons
-	lastAccount          *installer.LndHubAccount
-	hubCursor            int
-	hubCreateBtnIdx      int // 0=Clear, 1=Create Account
-	hubDeactivateBtnIdx  int
-	hubDeactivateBalance string
-	syncDeviceLabel      string
-	syncPairError        string
-	syncPairSuccess      bool
-	syncCursor           int
-	syncRemoveBtnIdx     int
-	syncRemoveError      string
-	showSecrets          bool
-
-	// Pairing
-	pairingButtonIdx int
-	urlTarget        string
-	qrMode           string
-	qrLabel          string
-	urlReturnTo      wSubview
-
-	// Channels
-	chanCursor int
-
-	// Channel close
-	closeForce         bool
-	closeChanPoint     string
-	closePeerAlias     string
-	closeCapacity      int64
-	closeLocalBal      int64
-	closeRemoteBal     int64
-	closeFeeTiers      [4]feeTier
-	closeFeeInput      textinput.Model
-	closeFeeIdx        int
-	closeEstFee        int64
-	closeTxid          string
-	closeError         string
-	closeBtnIdx        int
-	closeConfirmBtnIdx int
-	closeInFlight      bool
+	// QR fullscreen (Model-owned overlay)
+	urlTarget string
+	qrLabel   string
 
 	// Channel history
 	chanHistory       []channelHistoryEntry
@@ -348,7 +268,6 @@ type Model struct {
 	// Navigation
 	nav            NavSidebar
 	contentFocused bool
-	sectionFocus   [numSections]int // per-section focus zone
 
 	// Tab bar
 	tabs            []openTab
@@ -361,40 +280,23 @@ type Model struct {
 	chanPubkeyInput textinput.Model
 	chanHostInput   textinput.Model
 	chanAmountInput textinput.Model
-	hubNameInput    textinput.Model
-	syncDeviceInput textinput.Model
 
 	// On-chain state
 	onChainAddress string
-	onChainBtnIdx  int
-	onChainFocus   int // 0=buttons, 1=utxo table
 	utxos          []lndrpc.UTXO
-	utxoCursor     int
-	// UTXO pencil icon + label edit popup
-	utxoPencilFocused bool            // true when ✎ icon is focused
-	utxoLabelEditing  bool            // true when label popup is open
-	utxoLabelInput    textinput.Model // label edit field in popup
-	utxoLabelOnBtn    bool            // true when on button row
-	utxoLabelBtnIdx   int             // 0=Save, 1=Cancel
 	// Coin control: UTXO selection
 	utxoSelected      map[int]bool // keyed by UTXO index
 	utxoSelectedTotal int64        // running sat total
 	utxoOutpoints     []string     // "txid:vout" for SendCoins
 
-	// On-chain receive state
-	ocRecvAddress string
-	ocRecvError   string
-
 	// Fee tiers (used by on-chain send screen + close)
 	sendFeeTiers [4]feeTier
 
 	// On-chain transaction history
-	onChainTxs      []lndrpc.OnChainTx
-	onChainTxCursor int
+	onChainTxs []lndrpc.OnChainTx
 
 	// Payment history
-	payHistory       []lndrpc.PaymentEntry
-	payHistoryCursor int
+	payHistory []lndrpc.PaymentEntry
 }
 
 func NewModel(
@@ -414,10 +316,21 @@ func NewModel(
 	m.screenCtx = &ScreenContext{
 		Cfg:       cfg,
 		LndClient: client,
+		Version:   version,
 	}
 	m.ocCtx = &OnChainContext{
 		UtxoSelected: make(map[int]bool),
 	}
+	m.sectionScreens[secChannels] =
+		NewChannelsHomeScreen(m.screenCtx)
+	m.sectionScreens[secWallet] =
+		NewWalletHomeScreen(m.screenCtx)
+	m.sectionScreens[secOnChain] =
+		NewOnChainHomeScreen(m.screenCtx, m.ocCtx)
+	m.sectionScreens[secAddons] =
+		NewAddonsHomeScreen(m.screenCtx)
+	m.sectionScreens[secSystem] =
+		NewSystemHomeScreen(m.screenCtx)
 	return m
 }
 
@@ -460,18 +373,6 @@ func (m Model) saveCfg() {
 		logger.TUI(
 			"ERROR: failed to save config: %v", err)
 	}
-}
-
-func (m Model) svcCount() int {
-	return len(serviceNames(m.cfg))
-}
-
-func (m Model) svcName(i int) string {
-	names := serviceNames(m.cfg)
-	if i < len(names) {
-		return names[i]
-	}
-	return ""
 }
 
 func (m Model) pollInterval() time.Duration {
@@ -566,34 +467,13 @@ func fetchLatestVersion() tea.Cmd {
 	}
 }
 
-func createLndHubAccountCmd(
-	adminToken string,
-) tea.Cmd {
-	return func() tea.Msg {
-		account, err := installer.CreateLndHubAccount(
-			adminToken)
-		return lndhubAccountCreatedMsg{
-			account: account, err: err}
-	}
-}
-
-func deactivateLndHubAccountCmd(
-	login string,
-) tea.Cmd {
-	return func() tea.Msg {
-		balance, _ := installer.GetUserBalance(login)
-		err := installer.DeactivateUser(login)
-		return lndhubDeactivatedMsg{
-			balance: balance, err: err}
-	}
-}
-
 func pairSyncthingDeviceCmd(
 	deviceID string,
 ) tea.Cmd {
 	return func() tea.Msg {
 		err := installer.PairSyncthingDevice(deviceID)
-		return syncthingPairedMsg{err: err}
+		return syncthingPairedMsg{
+			deviceID: deviceID, err: err}
 	}
 }
 
@@ -602,7 +482,8 @@ func removeSyncthingDeviceCmd(
 ) tea.Cmd {
 	return func() tea.Msg {
 		err := installer.UnpairSyncthingDevice(deviceID)
-		return syncthingRemovedMsg{err: err}
+		return syncthingRemovedMsg{
+			deviceID: deviceID, err: err}
 	}
 }
 
