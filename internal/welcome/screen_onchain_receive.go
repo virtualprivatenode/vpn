@@ -125,6 +125,15 @@ func (s *OCReceiveScreen) viewReady(
 	p.blank()
 	p.dim("Send Bitcoin to this address.")
 	p.dim("Funds appear after 1 confirmation.")
+
+	if s.ctx.Status != nil && !s.ctx.Status.btcSynced {
+		p.blank()
+		p.line(" " + theme.Warn.Render(
+			"Bitcoin Core is syncing. Funds will not"))
+		p.line(" " + theme.Warn.Render(
+			"appear until sync is complete."))
+	}
+
 	p.blank()
 
 	qr := renderQRCode(s.address)

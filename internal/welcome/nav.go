@@ -39,8 +39,8 @@ type NavSidebar struct {
 func NewNavSidebar() NavSidebar {
 	items := []NavItem{
 		{"Channels", secChannels},
-		{"Wallet", secWallet},
-		{"On-Chain", secOnChain},
+		{"Lightning", secWallet},
+		{"Bitcoin", secOnChain},
 		{"Add-ons", secAddons},
 		{"System", secSystem},
 		{theme.ThemeIcon(), secThemeToggle},

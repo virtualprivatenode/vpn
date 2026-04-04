@@ -125,8 +125,6 @@ func (m installModel) View() tea.View {
 		return v
 	}
 	bw := min(m.width-4, theme.ContentWidth)
-	title := theme.ProgTitle.Width(bw).Align(lipgloss.Center).
-		Render(fmt.Sprintf(" Virtual Private Node v%s ", m.version))
 	var lines []string
 	for i, s := range m.steps {
 		var sty lipgloss.Style
@@ -160,7 +158,7 @@ func (m installModel) View() tea.View {
 		footer = theme.Dim.Render("  Installing... please wait  ")
 	}
 	full := lipgloss.JoinVertical(lipgloss.Center,
-		"", title, "", box, "", footer)
+		"", box, "", footer)
 	content := lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center, full)
 	v := tea.NewView(content)
@@ -309,67 +307,113 @@ func Run() error {
 
 func buildSteps(cfg *config.AppConfig) []installStep {
 	return []installStep{
-		{name: "Creating system user",
-			fn: func() error { return createSystemUser(systemUser) }},
-		{name: "Creating directories",
-			fn: func() error { return createBitcoinDirs(systemUser) }},
+		{name: "Creating system user and directories",
+			fn: func() error {
+				if err := createSystemUser(systemUser); err != nil {
+					return err
+				}
+				return createBitcoinDirs(systemUser)
+			}},
 		{name: "Disabling IPv6", fn: disableIPv6},
-		{name: "Checking Tor + torsocks", fn: installTor},
-		{name: "Configuring Tor",
-			fn: func() error { return RebuildTorConfig(cfg) }},
-		{name: "Adding user to debian-tor group",
-			fn: func() error { return addUserToTorGroup(systemUser) }},
-		{name: "Starting Tor", fn: restartTor},
-		{name: "Verifying Tor routing", fn: logTorStatus},
-		{name: "Configuring apt for Tor", fn: configureAptTor},
-		{name: "Installing GPG", fn: ensureGPG},
+		{name: "Installing Tor",
+			fn: func() error {
+				if err := installTor(); err != nil {
+					return err
+				}
+				if err := RebuildTorConfig(cfg); err != nil {
+					return err
+				}
+				if err := addUserToTorGroup(systemUser); err != nil {
+					return err
+				}
+				if err := restartTor(); err != nil {
+					return err
+				}
+				return logTorStatus()
+			}},
+		{name: "Configuring apt for Tor",
+			fn: func() error {
+				if err := configureAptTor(); err != nil {
+					return err
+				}
+				return ensureGPG()
+			}},
 		{name: "Configuring firewall",
 			fn: func() error { return configureFirewall(cfg) }},
-		{name: "Importing Bitcoin Core signing keys",
-			fn: importBitcoinCoreKeys},
 		{name: "Downloading Bitcoin Core " + bitcoinVersion,
-			fn: func() error { return downloadBitcoin(bitcoinVersion) }},
-		{name: "Verifying Bitcoin Core signatures (2/5)",
-			fn: func() error { return verifyBitcoinCoreSigs(2) }},
-		{name: "Verifying Bitcoin Core checksum", fn: verifyBitcoin},
+			fn: func() error {
+				if err := importBitcoinCoreKeys(); err != nil {
+					return err
+				}
+				return downloadBitcoin(bitcoinVersion)
+			}},
+		{name: "Verifying Bitcoin Core",
+			fn: func() error {
+				if err := verifyBitcoinCoreSigs(2); err != nil {
+					return err
+				}
+				return verifyBitcoin()
+			}},
 		{name: "Installing Bitcoin Core",
 			fn: func() error {
-				return extractAndInstallBitcoin(bitcoinVersion)
-			}},
-		{name: "Configuring Bitcoin Core",
-			fn: func() error { return writeBitcoinConfig(cfg) }},
-		{name: "Creating bitcoind service",
-			fn: func() error {
+				if err := extractAndInstallBitcoin(bitcoinVersion); err != nil {
+					return err
+				}
+				if err := writeBitcoinConfig(cfg); err != nil {
+					return err
+				}
 				return writeBitcoindService(systemUser)
 			}},
 		{name: "Starting Bitcoin Core", fn: startBitcoind},
-		{name: "Installing unattended-upgrades",
-			fn: installUnattendedUpgrades},
-		{name: "Configuring auto-security-updates",
-			fn: configureUnattendedUpgrades},
-		{name: "Installing fail2ban", fn: installFail2ban},
-		{name: "Configuring fail2ban", fn: configureFail2ban},
+		{name: "Configuring security",
+			fn: func() error {
+				if err := installUnattendedUpgrades(); err != nil {
+					return err
+				}
+				if err := configureUnattendedUpgrades(); err != nil {
+					return err
+				}
+				if err := installFail2ban(); err != nil {
+					return err
+				}
+				return configureFail2ban()
+			}},
 
 		// ── LND (Tor-only, non-interactive) ─────────
-		{name: "Importing LND signing key", fn: importLNDKey},
-		{name: "Downloading LND " + lndVersion,
-			fn: func() error { return downloadLND(lndVersion) }},
-		{name: "Verifying LND signature",
-			fn: func() error { return verifyLNDSig(lndVersion) }},
-		{name: "Verifying LND checksum", fn: verifyLND},
-		{name: "Installing LND",
-			fn: func() error { return extractAndInstallLND(lndVersion) }},
-		{name: "Creating LND directories",
-			fn: func() error { return createLNDDirs(systemUser) }},
-		{name: "Configuring LND",
-			fn: func() error { return writeLNDConfig(cfg, "") }},
-		{name: "Creating LND service",
+		{name: "Downloading LND",
 			fn: func() error {
+				if err := importLNDKey(); err != nil {
+					return err
+				}
+				return downloadLND(lndVersion)
+			}},
+		{name: "Verifying LND",
+			fn: func() error {
+				if err := verifyLNDSig(lndVersion); err != nil {
+					return err
+				}
+				return verifyLND()
+			}},
+		{name: "Installing LND",
+			fn: func() error {
+				if err := extractAndInstallLND(lndVersion); err != nil {
+					return err
+				}
+				if err := createLNDDirs(systemUser); err != nil {
+					return err
+				}
+				if err := writeLNDConfig(cfg, ""); err != nil {
+					return err
+				}
 				return writeLNDServiceInitial(systemUser)
 			}},
-		{name: "Rebuilding Tor config",
-			fn: func() error { return RebuildTorConfig(cfg) }},
-		{name: "Restarting Tor", fn: restartTor},
+		{name: "Configuring Tor for LND",
+			fn: func() error {
+				if err := RebuildTorConfig(cfg); err != nil {
+					return err
+				}
+				return restartTor()
+			}},
 		{name: "Starting LND", fn: startLND},
 	}
 }

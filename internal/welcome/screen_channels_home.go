@@ -288,6 +288,15 @@ func (s *ChannelsHomeScreen) View(
 		p.dim("  on-chain Bitcoin. Send Bitcoin to your")
 		p.dim("  on-chain address first, then return")
 		p.dim("  here to open a channel.")
+		if !status.btcSynced {
+			p.blank()
+			p.line("  " + theme.Warn.Render(
+				"Bitcoin Core is syncing. If you have"))
+			p.line("  " + theme.Warn.Render(
+				"already sent funds, they will appear"))
+			p.line("  " + theme.Warn.Render(
+				"once sync is complete."))
+		}
 		p.blank()
 		p.line(renderButtons(
 			[]string{"Fund Wallet", "Go Back"},

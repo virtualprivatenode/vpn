@@ -527,6 +527,23 @@ func (s *OnChainHomeScreen) View(
 			theme.Dim.Render(
 				fmt.Sprintf("  (%d UTXOs)",
 					len(utxos))))
+
+	if !status.btcSynced {
+		headerLines = append(headerLines, "")
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"Bitcoin Core is syncing. Funds you have"))
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"received will not appear until sync reaches"))
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"that block. Funds cannot be spent until"))
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"sync is complete."))
+	}
+
 	headerLines = append(headerLines, "")
 
 	sendLabel := "Send"
