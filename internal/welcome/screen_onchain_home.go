@@ -494,18 +494,17 @@ func (s *OnChainHomeScreen) View(
 	// ── Fixed header ─────────────────────────────
 	var headerLines []string
 	headerLines = append(headerLines, "")
+
+	if !cfg.HasLND() || !cfg.WalletExists() {
+		return renderWalletPrompt(
+			w, h, s.ctx.ContentFocused)
+	}
+
 	headerLines = append(headerLines,
 		centerPad(
 			theme.Header.Render("On-Chain Wallet"),
 			w))
 	headerLines = append(headerLines, "")
-
-	if !cfg.HasLND() || !cfg.WalletExists() {
-		headerLines = append(headerLines,
-			theme.Dim.Render(
-				" Create LND wallet. Press enter."))
-		return strings.Join(headerLines, "\n")
-	}
 	if status == nil || !status.lndResponding {
 		headerLines = append(headerLines,
 			theme.Dim.Render(" Waiting for LND..."))

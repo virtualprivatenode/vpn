@@ -692,3 +692,119 @@ func cleanPayReq(s string) string {
 	s = strings.TrimPrefix(s, "LIGHTNING:")
 	return s
 }
+
+// ── Wallet creation prompt ──────────────────────────────
+// Shared across all three section home screens when no
+// wallet exists. Renders a centered call-to-action with
+// a focusable "Create Wallet" button.
+
+func renderWalletPrompt(
+	w, h int, focused bool,
+) string {
+	boxW := w - 8
+	if boxW > 50 {
+		boxW = 50
+	}
+	if boxW < 30 {
+		boxW = 30
+	}
+
+	border := theme.AddonBorderNormal
+
+	var lines []string
+	lines = append(lines,
+		border.Render(
+			"┌"+strings.Repeat("─", boxW-2)+"┐"))
+
+	padLine := border.Render("│") +
+		strings.Repeat(" ", boxW-2) +
+		border.Render("│")
+	lines = append(lines, padLine)
+
+	msg1 := "Create your Lightning wallet"
+	msg2 := "to start sending and receiving"
+	msg3 := "Bitcoin over the Lightning Network."
+
+	centerInBox := func(text string) string {
+		rendered := theme.Value.Render(text)
+		vis := lipgloss.Width(rendered)
+		pad := boxW - 2 - vis
+		lp := pad / 2
+		rp := pad - lp
+		if lp < 0 {
+			lp = 0
+		}
+		if rp < 0 {
+			rp = 0
+		}
+		return border.Render("│") +
+			strings.Repeat(" ", lp) +
+			rendered +
+			strings.Repeat(" ", rp) +
+			border.Render("│")
+	}
+
+	lines = append(lines, centerInBox(msg1))
+	lines = append(lines, centerInBox(msg2))
+	lines = append(lines, centerInBox(msg3))
+	lines = append(lines, padLine)
+
+	// Button
+	btnLabel := "Create Wallet"
+	var btnRendered string
+	if focused {
+		btnRendered = theme.BtnFocused.
+			Render(" " + btnLabel + " ")
+	} else {
+		btnRendered = theme.BtnNormal.
+			Render(" " + btnLabel + " ")
+	}
+	btnVis := lipgloss.Width(btnRendered)
+	btnPad := boxW - 2 - btnVis
+	btnLP := btnPad / 2
+	btnRP := btnPad - btnLP
+	if btnLP < 0 {
+		btnLP = 0
+	}
+	if btnRP < 0 {
+		btnRP = 0
+	}
+	btnLine := border.Render("│") +
+		strings.Repeat(" ", btnLP) +
+		btnRendered +
+		strings.Repeat(" ", btnRP) +
+		border.Render("│")
+	lines = append(lines, btnLine)
+
+	lines = append(lines, padLine)
+	lines = append(lines,
+		border.Render(
+			"└"+strings.Repeat("─", boxW-2)+"┘"))
+
+	// Center vertically in available space
+	content := strings.Join(lines, "\n")
+	contentH := len(lines)
+	topPad := (h - contentH) / 2
+	if topPad < 1 {
+		topPad = 1
+	}
+
+	var out []string
+	for i := 0; i < topPad; i++ {
+		out = append(out, "")
+	}
+
+	// Center horizontally
+	boxVis := lipgloss.Width(lines[0])
+	leftPad := (w - boxVis) / 2
+	if leftPad < 1 {
+		leftPad = 1
+	}
+	prefix := strings.Repeat(" ", leftPad)
+	for _, l := range lines {
+		out = append(out, prefix+l)
+	}
+
+	_ = content // suppress unused
+	return strings.Join(out, "\n")
+}

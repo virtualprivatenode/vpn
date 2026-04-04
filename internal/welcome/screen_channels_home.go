@@ -30,6 +30,10 @@ type ChannelsHomeScreen struct {
 	btnIdx    int // 0=Open Channel, 1=History
 	focusZone int // 0=buttons, 1=channel list
 	cursor    int // position in channel list
+
+	// Zero balance interstitial
+	zeroBalanceMsg bool
+	fundBtnIdx     int // 0=Fund Wallet, 1=Go Back
 }
 
 func NewChannelsHomeScreen(
@@ -49,6 +53,11 @@ func (s *ChannelsHomeScreen) Init() tea.Cmd {
 func (s *ChannelsHomeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
+	// Zero-balance interstitial intercepts all keys
+	if s.zeroBalanceMsg {
+		return s.handleZeroBalanceKey(keyStr)
+	}
+
 	channels := s.channels()
 	s.clampCursor()
 
@@ -171,17 +180,12 @@ func (s *ChannelsHomeScreen) openChannel() (
 		!cfg.WalletExists() {
 		return s, nil
 	}
-	// Zero balance: redirect to on-chain receive
+	// Zero balance: show educational message
 	if s.ctx.Status != nil &&
 		s.ctx.Status.lndBalance == "0" {
-		screen := NewOCReceiveScreen(s.ctx)
-		return s, func() tea.Msg {
-			return openTabMsg{
-				Kind:   tabOCReceive,
-				Label:  "Receive",
-				Screen: screen,
-			}
-		}
+		s.zeroBalanceMsg = true
+		s.fundBtnIdx = 0
+		return s, nil
 	}
 	// Normal path: channel open
 	screen := NewChannelOpenScreen(s.ctx)
@@ -210,6 +214,45 @@ func (s *ChannelsHomeScreen) openHistory() (
 		fetchClosedChannelsCmd(s.ctx.LndClient))
 }
 
+func (s *ChannelsHomeScreen) handleZeroBalanceKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.fundBtnIdx > 0 {
+			s.fundBtnIdx--
+		}
+		return s, nil
+	case "right":
+		if s.fundBtnIdx < 1 {
+			s.fundBtnIdx++
+		}
+		return s, nil
+	case "backspace":
+		s.zeroBalanceMsg = false
+		return s, nil
+	case "enter":
+		if s.fundBtnIdx == 0 {
+			// Fund Wallet → open on-chain receive
+			s.zeroBalanceMsg = false
+			screen := NewOCReceiveScreen(s.ctx)
+			return s, func() tea.Msg {
+				return openTabMsg{
+					Kind:   tabOCReceive,
+					Label:  "⛓ Receive",
+					Screen: screen,
+				}
+			}
+		}
+		// Go Back
+		s.zeroBalanceMsg = false
+		return s, nil
+	}
+	return s, nil
+}
+
 func (s *ChannelsHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
@@ -225,20 +268,31 @@ func (s *ChannelsHomeScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
-	if !cfg.HasLND() {
-		p := newPane(w)
-		p.dim("Create LND wallet. Press enter.")
-		return p.render()
-	}
-
-	if !cfg.WalletExists() {
-		p := newPane(w)
-		p.dim("Create LND wallet. Press enter.")
-		return p.render()
+	if !cfg.HasLND() || !cfg.WalletExists() {
+		return renderWalletPrompt(
+			w, h, s.ctx.ContentFocused)
 	}
 
 	if status == nil || !status.lndResponding {
 		return theme.Dim.Render(" Waiting for LND...")
+	}
+
+	// Zero-balance educational message
+	if s.zeroBalanceMsg {
+		p := newPane(w)
+		p.blank()
+		p.line(centerPad(
+			theme.Header.Render("Fund Your Wallet"), w))
+		p.blank()
+		p.dim("  Opening a Lightning channel requires")
+		p.dim("  on-chain Bitcoin. Send Bitcoin to your")
+		p.dim("  on-chain address first, then return")
+		p.dim("  here to open a channel.")
+		p.blank()
+		p.line(renderButtons(
+			[]string{"Fund Wallet", "Go Back"},
+			s.fundBtnIdx, true, w))
+		return p.render()
 	}
 
 	isFocused := s.ctx.ContentFocused
@@ -419,6 +473,20 @@ func (s *ChannelsHomeScreen) HelpBindings() []key.Binding {
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "create wallet")),
 			kSidebar,
+			kQuit,
+		}
+	}
+	if s.zeroBalanceMsg {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("left", "right"),
+				key.WithHelp("←→", "buttons")),
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "select")),
+			key.NewBinding(
+				key.WithKeys("backspace"),
+				key.WithHelp("⌫", "back")),
 			kQuit,
 		}
 	}

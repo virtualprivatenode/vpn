@@ -175,6 +175,10 @@ func (s *AddonsHomeScreen) View(
 		syncStat1 = theme.RedDot.Render("●") +
 			" " + theme.Dim.Render("Not installed")
 		syncStat2 = ""
+		if !cfg.WalletExists() {
+			syncStat2 = theme.Warn.Render(
+				"Requires LND wallet")
+		}
 	}
 
 	syncLines := renderSection(
@@ -203,6 +207,10 @@ func (s *AddonsHomeScreen) View(
 		hubStat1 = theme.RedDot.Render("●") +
 			" " + theme.Dim.Render("Not installed")
 		hubStat2 = ""
+		if !cfg.WalletExists() {
+			hubStat2 = theme.Warn.Render(
+				"Requires LND wallet")
+		}
 	}
 
 	hubLines := renderSection(

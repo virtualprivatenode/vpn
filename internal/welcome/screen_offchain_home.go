@@ -240,9 +240,8 @@ func (s *WalletHomeScreen) View(
 	status := s.ctx.Status
 
 	if !cfg.HasLND() || !cfg.WalletExists() {
-		p := newPane(w)
-		p.dim("Create LND wallet. Press enter.")
-		return p.render()
+		return renderWalletPrompt(
+			w, h, s.ctx.ContentFocused)
 	}
 
 	if status == nil || !status.lndResponding {
