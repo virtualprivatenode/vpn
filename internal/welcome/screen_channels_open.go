@@ -883,7 +883,7 @@ func (s *ChannelOpenScreen) viewInput(
 
 	if !s.ctx.Cfg.HasLND() ||
 		!s.ctx.Cfg.WalletExists() {
-		p.dim("Install LND and create wallet first.")
+		p.dim("Create wallet first.")
 		return p.render()
 	}
 	if s.ctx.Status == nil ||

@@ -109,6 +109,14 @@ func (s *WalletHomeScreen) HandleKey(
 	case "backspace":
 		return s, emitFocusSidebar
 	case "enter":
+		// No wallet → trigger wallet creation flow
+		if !s.ctx.Cfg.WalletExists() {
+			return s, func() tea.Msg {
+				return shellActionMsg{
+					action: svWalletCreate,
+				}
+			}
+		}
 		return s.handleEnter()
 	}
 	return s, nil
@@ -233,13 +241,7 @@ func (s *WalletHomeScreen) View(
 
 	if !cfg.HasLND() || !cfg.WalletExists() {
 		p := newPane(w)
-		p.dim("Install LND and create wallet.")
-		p.blank()
-		isOnButton := s.ctx.ContentFocused &&
-			s.focusZone == walletHomeZoneButtons
-		p.line(renderButtons(
-			[]string{"Send", "Receive", "Pairing"},
-			s.btnIdx, isOnButton, w))
+		p.dim("Create LND wallet. Press enter.")
 		return p.render()
 	}
 
@@ -459,6 +461,15 @@ func (s *WalletHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *WalletHomeScreen) HelpBindings() []key.Binding {
+	if !s.ctx.Cfg.WalletExists() {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "create wallet")),
+			kSidebar,
+			kQuit,
+		}
+	}
 	if s.focusZone == walletHomeZoneList {
 		return s.listBindings()
 	}

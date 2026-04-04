@@ -96,6 +96,14 @@ func (s *OnChainHomeScreen) HandleKey(
 		}
 		return s, nil
 	case "enter":
+		// No wallet → trigger wallet creation flow
+		if !s.ctx.Cfg.WalletExists() {
+			return s, func() tea.Msg {
+				return shellActionMsg{
+					action: svWalletCreate,
+				}
+			}
+		}
 		return s.handleEnter()
 	}
 	return s, nil
@@ -495,7 +503,7 @@ func (s *OnChainHomeScreen) View(
 	if !cfg.HasLND() || !cfg.WalletExists() {
 		headerLines = append(headerLines,
 			theme.Dim.Render(
-				" Install LND and create wallet."))
+				" Create LND wallet. Press enter."))
 		return strings.Join(headerLines, "\n")
 	}
 	if status == nil || !status.lndResponding {
@@ -941,6 +949,15 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
+	if !s.ctx.Cfg.WalletExists() {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "create wallet")),
+			kSidebar,
+			kQuit,
+		}
+	}
 	if s.labelEditing {
 		return s.labelPopupBindings()
 	}

@@ -160,6 +160,17 @@ func (s *SystemHomeScreen) HandleKey(
 				})
 		}
 		return s, nil
+	case "p":
+		if s.focusZone == sysHomeZoneServices &&
+			s.svcName(s.svcCursor) == "lnd" &&
+			s.ctx.Cfg.P2PMode == "tor" {
+			return s, func() tea.Msg {
+				return shellActionMsg{
+					action: svP2PUpgrade,
+				}
+			}
+		}
+		return s, nil
 	case "enter":
 		if s.focusZone == sysHomeZoneButtons {
 			switch s.btnIdx {
@@ -358,6 +369,11 @@ func (s *SystemHomeScreen) View(
 		if isSelected {
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
+			if name == "lnd" &&
+				s.ctx.Cfg.P2PMode == "tor" {
+				hint += theme.Dim.Render(
+					"  p upgrade p2p")
+			}
 			svcLine += hint
 		}
 
@@ -638,11 +654,20 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 		key.NewBinding(
 			key.WithKeys("l"),
 			key.WithHelp("l", "logs")),
+	}
+	if s.svcName(s.svcCursor) == "lnd" &&
+		s.ctx.Cfg.P2PMode == "tor" {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("p"),
+				key.WithHelp("p", "upgrade p2p")))
+	}
+	binds = append(binds,
 		key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("⇧tab", "buttons")),
 		kSidebar,
-	}
+	)
 	binds = append(binds, kQuit)
 	return binds
 }

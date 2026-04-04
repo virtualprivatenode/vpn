@@ -33,7 +33,6 @@ const (
 	// Shell actions — trigger install/update flows
 	// via the Show() restart loop
 	svWalletCreate
-	svLNDInstall
 	svSyncthingInstall
 	svLndHubInstall
 	svSelfUpdate
@@ -411,18 +410,6 @@ func Show(cfg *config.AppConfig, version string) {
 			installer.RunWalletCreation(cfg)
 			if u, e := config.Load(); e == nil {
 				cfg = u
-			}
-			continue
-		case svLNDInstall:
-			installer.RunLNDInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			if err := installer.AppendLNCLIToShell(
-				cfg); err != nil {
-				logger.TUI(
-					"Warning: lncli wrapper: %v",
-					err)
 			}
 			continue
 		case svSyncthingInstall:

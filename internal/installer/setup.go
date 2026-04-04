@@ -286,6 +286,13 @@ func Run() error {
 		cfg = preCfg
 	}
 
+	// LND is now installed during initial setup (Tor-only default).
+	// Set config fields before buildSteps so Tor config and firewall
+	// rules include LND hidden services and ports.
+	cfg.P2PMode = "tor"
+	cfg.LNDInstalled = true
+	cfg.Components = "bitcoin+lnd"
+
 	steps := buildSteps(cfg)
 
 	if err := RunInstallTUI(steps, appVersion); err != nil {
@@ -342,6 +349,28 @@ func buildSteps(cfg *config.AppConfig) []installStep {
 			fn: configureUnattendedUpgrades},
 		{name: "Installing fail2ban", fn: installFail2ban},
 		{name: "Configuring fail2ban", fn: configureFail2ban},
+
+		// ── LND (Tor-only, non-interactive) ─────────
+		{name: "Importing LND signing key", fn: importLNDKey},
+		{name: "Downloading LND " + lndVersion,
+			fn: func() error { return downloadLND(lndVersion) }},
+		{name: "Verifying LND signature",
+			fn: func() error { return verifyLNDSig(lndVersion) }},
+		{name: "Verifying LND checksum", fn: verifyLND},
+		{name: "Installing LND",
+			fn: func() error { return extractAndInstallLND(lndVersion) }},
+		{name: "Creating LND directories",
+			fn: func() error { return createLNDDirs(systemUser) }},
+		{name: "Configuring LND",
+			fn: func() error { return writeLNDConfig(cfg, "") }},
+		{name: "Creating LND service",
+			fn: func() error {
+				return writeLNDServiceInitial(systemUser)
+			}},
+		{name: "Rebuilding Tor config",
+			fn: func() error { return RebuildTorConfig(cfg) }},
+		{name: "Restarting Tor", fn: restartTor},
+		{name: "Starting LND", fn: startLND},
 	}
 }
 
@@ -489,79 +518,6 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 	return nil
 }
 
-// ── LND installation ─────────────────────────────────────
-
-func RunLNDInstall(cfg *config.AppConfig) error {
-	confirmMsg := theme.Header.Render("Install LND "+lndVersion) + "\n\n" +
-		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  * Download and verify LND v"+lndVersion) + "\n" +
-		theme.Value.Render("  * Configure LND for "+cfg.Network) + "\n" +
-		theme.Value.Render("  * Create Tor hidden services for LND") + "\n" +
-		theme.Value.Render("  * Restart Tor") + "\n\n" +
-		theme.Dim.Render("Enter to proceed -- backspace to cancel")
-	if !ShowConfirmBox(confirmMsg) {
-		return nil
-	}
-
-	p2pMode := "tor"
-	p2pMsg := theme.Header.Render("LND P2P Mode") + "\n\n" +
-		theme.Value.Render("  [1] Tor only -- Maximum privacy") + "\n" +
-		theme.Value.Render("  [2] Hybrid  -- Tor + clearnet, better routing") + "\n\n" +
-		theme.Dim.Render("Press 1 or 2 -- backspace to cancel")
-	p2pChoice := showChoiceBox(p2pMsg, []string{"1", "2"})
-	if p2pChoice == "" {
-		return nil
-	}
-	if p2pChoice == "2" {
-		p2pMode = "hybrid"
-	}
-
-	publicIPv4 := ""
-	if p2pMode == "hybrid" {
-		publicIPv4 = system.PublicIPv4()
-		if publicIPv4 == "" {
-			p2pMode = "tor"
-		}
-	}
-
-	cfg.P2PMode = p2pMode
-	cfg.LNDInstalled = true
-	cfg.Components = "bitcoin+lnd"
-
-	steps := []installStep{
-		{name: "Importing LND signing key", fn: importLNDKey},
-		{name: "Downloading LND " + lndVersion,
-			fn: func() error { return downloadLND(lndVersion) }},
-		{name: "Verifying LND signature",
-			fn: func() error { return verifyLNDSig(lndVersion) }},
-		{name: "Verifying LND checksum", fn: verifyLND},
-		{name: "Installing LND",
-			fn: func() error { return extractAndInstallLND(lndVersion) }},
-		{name: "Creating LND directories",
-			fn: func() error { return createLNDDirs(systemUser) }},
-		{name: "Configuring LND",
-			fn: func() error { return writeLNDConfig(cfg, publicIPv4) }},
-		{name: "Creating LND service",
-			fn: func() error {
-				return writeLNDServiceInitial(systemUser)
-			}},
-		{name: "Configuring firewall",
-			fn: func() error { return configureFirewall(cfg) }},
-		{name: "Rebuilding Tor config",
-			fn: func() error { return RebuildTorConfig(cfg) }},
-		{name: "Restarting Tor", fn: restartTor},
-		{name: "Starting LND", fn: startLND},
-	}
-	if err := RunInstallTUI(steps, appVersion); err != nil {
-		cfg.LNDInstalled = false
-		cfg.Components = "bitcoin"
-		RebuildTorConfig(cfg)
-		restartTor()
-		return err
-	}
-	return config.Save(cfg)
-}
-
 func RunP2PModeUpgrade(cfg *config.AppConfig) error {
 	if cfg.P2PMode == "hybrid" {
 		return nil
@@ -577,25 +533,52 @@ func RunP2PModeUpgrade(cfg *config.AppConfig) error {
 		return nil
 	}
 
-	confirmMsg := theme.Header.Render("Upgrade to Hybrid P2P Mode") + "\n\n" +
-		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  * Expose your server IP to the Lightning Network") + "\n" +
-		theme.Value.Render("  * Open ports 9735 and 8080 in the firewall") + "\n" +
-		theme.Value.Render("  * Allow Zeus to connect over clearnet") + "\n" +
-		theme.Value.Render("  * Regenerate LND TLS certificate") + "\n" +
-		theme.Value.Render("  * Restart LND") + "\n\n"
-
+	// ── Privacy warning — requires typed confirmation ────
+	fmt.Print("\033[2J\033[H")
+	fmt.Println()
+	fmt.Println("  ═══════════════════════════════════════════")
+	fmt.Println("    Upgrade to Clearnet + Tor (Hybrid P2P)")
+	fmt.Println("  ═══════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("  Your server IP: " + publicIPv4)
+	fmt.Println()
+	fmt.Println("  This will permanently change your node's privacy:")
+	fmt.Println()
+	fmt.Println("  • Your server IP will be published to the")
+	fmt.Println("    Lightning Network gossip protocol")
+	fmt.Println("  • Every node on the network will learn your IP")
+	fmt.Println("  • This links your IP to your Lightning node identity")
+	fmt.Println("  • This CANNOT be undone — once published,")
+	fmt.Println("    your IP cannot be retracted from network gossip")
+	fmt.Println()
+	fmt.Println("  It will also:")
+	fmt.Println("  • Open ports 9735 and 8080 in the firewall")
+	fmt.Println("  • Allow Zeus to connect over clearnet")
+	fmt.Println("  • Regenerate the LND TLS certificate")
+	fmt.Println("  • Restart LND")
 	if cfg.LndHubInstalled {
-		confirmMsg += theme.Value.Render("  * Install TLS proxy for LndHub clearnet") + "\n" +
-			theme.Value.Render("  * Open port 3000 for encrypted LndHub access") + "\n\n"
+		fmt.Println("  • Install TLS proxy for LndHub clearnet")
+		fmt.Println("  • Open port 3000 for encrypted LndHub access")
 	}
+	fmt.Println()
+	fmt.Println("  ═══════════════════════════════════════════")
+	fmt.Println()
+	fmt.Print("  Type 'PUBLISH MY IP' to proceed (or press Enter to cancel): ")
 
-	confirmMsg += theme.Warning.Render("Your IP: "+publicIPv4) + "\n" +
-		theme.Warning.Render("This cannot be undone -- your IP will be public.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed -- backspace to cancel")
-	if !ShowConfirmBox(confirmMsg) {
+	reader := bufio.NewReader(os.Stdin)
+	confirmation, _ := reader.ReadString('\n')
+	confirmation = strings.TrimSpace(confirmation)
+	if confirmation != "PUBLISH MY IP" {
+		fmt.Println()
+		fmt.Println("  Cancelled.")
+		fmt.Println()
+		time.Sleep(1 * time.Second)
 		return nil
 	}
+
+	fmt.Println()
+	fmt.Println("  ✓ Confirmed. Upgrading to hybrid P2P mode...")
+	fmt.Println()
 
 	cfg.P2PMode = "hybrid"
 
@@ -1048,18 +1031,19 @@ func readFileOrDefault(path, def string) string {
 
 func setupShellEnvironment(cfg *config.AppConfig) error {
 	bashrc := paths.AdminBashrc
-	data, err := os.ReadFile(bashrc)
-	if err == nil && strings.Contains(string(data), "bitcoin-cli()") {
-		return nil
-	}
+	data, _ := os.ReadFile(bashrc)
+	existing := string(data)
 
-	net := cfg.NetworkConfig()
-	btcNetFlag := ""
-	if net.Name == "testnet4" {
-		btcNetFlag = "\n        -testnet4 \\"
-	}
+	var content string
 
-	content := fmt.Sprintf(`
+	// bitcoin-cli wrapper
+	if !strings.Contains(existing, "bitcoin-cli()") {
+		net := cfg.NetworkConfig()
+		btcNetFlag := ""
+		if net.Name == "testnet4" {
+			btcNetFlag = "\n        -testnet4 \\"
+		}
+		content += fmt.Sprintf(`
 # -- Virtual Private Node --
 bitcoin-cli() {
     sudo -u bitcoin /usr/local/bin/bitcoin-cli \
@@ -1069,31 +1053,19 @@ bitcoin-cli() {
 }
 export -f bitcoin-cli
 `, btcNetFlag)
-
-	f, err := os.OpenFile(bashrc,
-		os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(content)
-	return err
-}
-
-func AppendLNCLIToShell(cfg *config.AppConfig) error {
-	bashrc := paths.AdminBashrc
-	data, err := os.ReadFile(bashrc)
-	if err == nil && strings.Contains(string(data), "lncli()") {
-		return nil
 	}
 
-	net := cfg.NetworkConfig()
-	lndNetFlag := ""
-	if net.Name != "mainnet" {
-		lndNetFlag = fmt.Sprintf(
-			"\n        --network=%s \\", net.LNCLINetwork)
-	}
-	content := fmt.Sprintf(`
+	// lncli wrapper — always set up now that LND is part of
+	// the initial install
+	if cfg.HasLND() &&
+		!strings.Contains(existing, "lncli()") {
+		net := cfg.NetworkConfig()
+		lndNetFlag := ""
+		if net.Name != "mainnet" {
+			lndNetFlag = fmt.Sprintf(
+				"\n        --network=%s \\", net.LNCLINetwork)
+		}
+		content += fmt.Sprintf(`
 lncli() {
     sudo -u bitcoin /usr/local/bin/lncli \
         --lnddir=/var/lib/lnd \%s
@@ -1103,6 +1075,11 @@ lncli() {
 }
 export -f lncli
 `, lndNetFlag, net.LNCLINetwork)
+	}
+
+	if content == "" {
+		return nil
+	}
 
 	f, err := os.OpenFile(bashrc,
 		os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
