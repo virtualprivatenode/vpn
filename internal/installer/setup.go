@@ -429,7 +429,7 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 		theme.Value.Render("  cannot be displayed again.") + "\n\n" +
 		theme.Value.Render("  Before proceeding:") + "\n" +
 		theme.Value.Render("  * Make sure you are in a private area") + "\n" +
-		theme.Value.Render("  * Have pen and paper ready") + "\n" +
+		theme.Value.Render("  * Have pen and paper ready") + "\n\n" +
 		theme.Value.Render("  LND will ask you to:") + "\n" +
 		theme.Value.Render("  1. Enter a wallet password (min 8 characters)") + "\n" +
 		theme.Value.Render("  2. Confirm the password") + "\n" +

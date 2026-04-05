@@ -274,7 +274,7 @@ func (s *ChannelsHomeScreen) View(
 	}
 
 	if status == nil || !status.lndResponding {
-		return theme.Dim.Render(" Waiting for LND...")
+		return renderWaitingForLND(w, h)
 	}
 
 	// Zero-balance educational message

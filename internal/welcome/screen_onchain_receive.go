@@ -129,9 +129,7 @@ func (s *OCReceiveScreen) viewReady(
 	if s.ctx.Status != nil && !s.ctx.Status.btcSynced {
 		p.blank()
 		p.line(" " + theme.Warn.Render(
-			"Bitcoin Core is syncing. Funds will not"))
-		p.line(" " + theme.Warn.Render(
-			"appear until sync is complete."))
+			"Funds will not appear until IBD is complete."))
 	}
 
 	p.blank()

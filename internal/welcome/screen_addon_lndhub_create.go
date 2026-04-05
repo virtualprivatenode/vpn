@@ -42,6 +42,7 @@ type LndHubCreateScreen struct {
 	btnIdx      int
 	lastAccount *installer.LndHubAccount
 	accountName string // saved for display after creation
+	qrMode      string // "" = tor, "clearnet" = clearnet
 }
 
 func NewLndHubCreateScreen(
@@ -339,14 +340,30 @@ func (s *LndHubCreateScreen) creatingBindings() []key.Binding {
 
 // ── Created step ───────────────────────────────────────
 
+// createdButtons returns the button labels for the
+// created step based on available connection methods.
+func (s *LndHubCreateScreen) createdButtons() []string {
+	hubOnion := readOnion(paths.TorLndHubHostname)
+	hasClearnet := s.ctx.Cfg.P2PMode == "hybrid" &&
+		s.ctx.Status != nil &&
+		s.ctx.Status.publicIP != ""
+
+	var btns []string
+	if hubOnion != "" {
+		btns = append(btns, "QR (Tor)")
+	}
+	if hasClearnet {
+		btns = append(btns, "QR (Clearnet)")
+	}
+	btns = append(btns, "Done")
+	return btns
+}
+
 func (s *LndHubCreateScreen) handleCreatedKey(
 	keyStr string,
 ) (Screen, tea.Cmd) {
-	hubOnion := readOnion(paths.TorLndHubHostname)
-	maxBtn := 0 // Done only
-	if hubOnion != "" {
-		maxBtn = 1 // Show QR + Done
-	}
+	buttons := s.createdButtons()
+	maxBtn := len(buttons) - 1
 
 	switch keyStr {
 	case "ctrl+c":
@@ -374,17 +391,20 @@ func (s *LndHubCreateScreen) handleCreatedKey(
 		// Clean backspace: does nothing
 		return s, nil
 	case "enter":
-		if hubOnion != "" {
-			switch s.btnIdx {
-			case 0: // Show QR
+		if s.btnIdx >= 0 && s.btnIdx < len(buttons) {
+			label := buttons[s.btnIdx]
+			switch label {
+			case "QR (Tor)":
+				s.qrMode = ""
 				s.step = hubCreateStepQR
 				return s, nil
-			case 1: // Done
+			case "QR (Clearnet)":
+				s.qrMode = "clearnet"
+				s.step = hubCreateStepQR
+				return s, nil
+			case "Done":
 				return s, emitCloseTab
 			}
-		} else {
-			// No tor — single Done button
-			return s, emitCloseTab
 		}
 	}
 	return s, nil
@@ -393,6 +413,7 @@ func (s *LndHubCreateScreen) handleCreatedKey(
 func (s *LndHubCreateScreen) viewCreated(
 	w, h int,
 ) string {
+	cfg := s.ctx.Cfg
 	p := newPane(w)
 	p.title(theme.Success,
 		"Account created: "+s.accountName)
@@ -408,6 +429,13 @@ func (s *LndHubCreateScreen) viewCreated(
 			}
 			p.mono(tor)
 		}
+		if cfg.P2PMode == "hybrid" &&
+			s.ctx.Status != nil &&
+			s.ctx.Status.publicIP != "" {
+			p.labelLine("Clearnet (HTTPS):")
+			p.mono(s.ctx.Status.publicIP + ":" +
+				paths.LndHubExternalPort)
+		}
 		p.blank()
 		p.monoField("Login:    ",
 			s.lastAccount.Login)
@@ -419,11 +447,7 @@ func (s *LndHubCreateScreen) viewCreated(
 			". Won't be shown again.")
 	}
 
-	buttons := []string{"Done"}
-	hubOnion := readOnion(paths.TorLndHubHostname)
-	if hubOnion != "" {
-		buttons = []string{"Show QR", "Done"}
-	}
+	buttons := s.createdButtons()
 
 	return p.renderWithBottomButtons(
 		buttons,
@@ -438,8 +462,8 @@ func (s *LndHubCreateScreen) createdBindings() []key.Binding {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "select")))
 
-	hubOnion := readOnion(paths.TorLndHubHostname)
-	if hubOnion != "" {
+	buttons := s.createdButtons()
+	if len(buttons) > 1 {
 		binds = append(binds,
 			key.NewBinding(
 				key.WithKeys("left", "right"),
@@ -487,32 +511,51 @@ func (s *LndHubCreateScreen) viewQR(
 	w, h int,
 ) string {
 	p := newPane(w)
-	p.title(theme.Header, "LndHub Connection QR")
 
-	if s.lastAccount != nil {
-		hubOnion := readOnion(paths.TorLndHubHostname)
-		if hubOnion != "" {
-			qrData := fmt.Sprintf(
-				"lndhub://%s:%s@%s:%s",
+	var qrData string
+	if s.qrMode == "clearnet" {
+		p.title(theme.Header, "LndHub Clearnet QR")
+		if s.lastAccount != nil &&
+			s.ctx.Status != nil &&
+			s.ctx.Status.publicIP != "" {
+			qrData = fmt.Sprintf(
+				"lndhub://%s:%s@https://%s:%s",
 				s.lastAccount.Login,
 				s.lastAccount.Password,
-				hubOnion,
+				s.ctx.Status.publicIP,
 				paths.LndHubExternalPort)
-			qr := renderQRCode(qrData)
-			if qr != "" {
-				p.dim("Scan with BlueWallet or Zeus")
-				p.blank()
-				for _, line := range strings.Split(
-					qr, "\n") {
-					lineW := lipgloss.Width(line)
-					padN := (w - lineW) / 2
-					if padN < 0 {
-						padN = 0
-					}
-					p.line(
-						strings.Repeat(" ", padN) +
-							line)
+		}
+	} else {
+		p.title(theme.Header, "LndHub Connection QR")
+		if s.lastAccount != nil {
+			hubOnion := readOnion(
+				paths.TorLndHubHostname)
+			if hubOnion != "" {
+				qrData = fmt.Sprintf(
+					"lndhub://%s:%s@%s:%s",
+					s.lastAccount.Login,
+					s.lastAccount.Password,
+					hubOnion,
+					paths.LndHubExternalPort)
+			}
+		}
+	}
+
+	if qrData != "" {
+		qr := renderQRCode(qrData)
+		if qr != "" {
+			p.dim("Scan with BlueWallet or Zeus")
+			p.blank()
+			for _, line := range strings.Split(
+				qr, "\n") {
+				lineW := lipgloss.Width(line)
+				padN := (w - lineW) / 2
+				if padN < 0 {
+					padN = 0
 				}
+				p.line(
+					strings.Repeat(" ", padN) +
+						line)
 			}
 		}
 	}

@@ -245,15 +245,7 @@ func (s *WalletHomeScreen) View(
 	}
 
 	if status == nil || !status.lndResponding {
-		p := newPane(w)
-		p.dim("Waiting for LND...")
-		p.blank()
-		isOnButton := s.ctx.ContentFocused &&
-			s.focusZone == walletHomeZoneButtons
-		p.line(renderButtons(
-			[]string{"Send", "Receive", "Pairing"},
-			s.btnIdx, isOnButton, w))
-		return p.render()
+		return renderWaitingForLND(w, h)
 	}
 
 	isFocused := s.ctx.ContentFocused

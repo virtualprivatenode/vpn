@@ -808,3 +808,25 @@ func renderWalletPrompt(
 	_ = content // suppress unused
 	return strings.Join(out, "\n")
 }
+
+// renderWaitingForLND renders a vertically and
+// horizontally centered "Waiting for LND..." message.
+func renderWaitingForLND(w, h int) string {
+	msg := theme.Dim.Render("Waiting for LND...")
+	msgW := lipgloss.Width(msg)
+	lp := (w - msgW) / 2
+	if lp < 0 {
+		lp = 0
+	}
+	line := strings.Repeat(" ", lp) + msg
+	topPad := h / 2
+	if topPad < 1 {
+		topPad = 1
+	}
+	var out []string
+	for i := 0; i < topPad; i++ {
+		out = append(out, "")
+	}
+	out = append(out, line)
+	return strings.Join(out, "\n")
+}

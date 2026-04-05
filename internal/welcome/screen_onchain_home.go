@@ -492,24 +492,24 @@ func (s *OnChainHomeScreen) View(
 	status := s.ctx.Status
 
 	// ── Fixed header ─────────────────────────────
-	var headerLines []string
-	headerLines = append(headerLines, "")
 
 	if !cfg.HasLND() || !cfg.WalletExists() {
 		return renderWalletPrompt(
 			w, h, s.ctx.ContentFocused)
 	}
 
+	if status == nil || !status.lndResponding {
+		return renderWaitingForLND(w, h)
+	}
+
+	var headerLines []string
+	headerLines = append(headerLines, "")
+
 	headerLines = append(headerLines,
 		centerPad(
 			theme.Header.Render("On-Chain Wallet"),
 			w))
 	headerLines = append(headerLines, "")
-	if status == nil || !status.lndResponding {
-		headerLines = append(headerLines,
-			theme.Dim.Render(" Waiting for LND..."))
-		return strings.Join(headerLines, "\n")
-	}
 
 	isFocused := s.ctx.ContentFocused
 	utxos := s.ocCtx.Utxos
