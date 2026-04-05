@@ -144,9 +144,9 @@ func (s *ChannelOpenScreen) View(w, h int) string {
 	case coStepInput:
 		return s.viewInput(w, h)
 	case coStepCustomPeer:
-		return s.viewCustomPeer(w)
+		return s.viewCustomPeer(w, h)
 	case coStepConfirm:
-		return s.viewConfirm(w)
+		return s.viewConfirm(w, h)
 	case coStepOpening:
 		return s.viewOpening(w)
 	case coStepResult:
@@ -1063,7 +1063,7 @@ func renderToggleSwitch(
 }
 
 func (s *ChannelOpenScreen) viewCustomPeer(
-	w int,
+	w, h int,
 ) string {
 	p := newPane(w)
 	p.title(theme.Header, "Custom Peer")
@@ -1082,18 +1082,15 @@ func (s *ChannelOpenScreen) viewCustomPeer(
 
 	p.appendError(s.error)
 
-	p.blank()
 	btnFocused := isFocused &&
 		s.customZone == coCustomZoneButtons
-	p.buttons(
+	return p.renderWithBottomButtons(
 		[]string{"Cancel", "Continue"},
-		s.customBtnIdx, btnFocused)
-
-	return p.render()
+		s.customBtnIdx, btnFocused, h)
 }
 
 func (s *ChannelOpenScreen) viewConfirm(
-	w int,
+	w, h int,
 ) string {
 	p := newPane(w)
 	p.title(theme.Warning, "Confirm Channel Open")
@@ -1120,12 +1117,9 @@ func (s *ChannelOpenScreen) viewConfirm(
 
 	p.appendError(s.error)
 
-	p.blank()
-	p.buttons(
+	return p.renderWithBottomButtons(
 		[]string{"Go Back", "Confirm"},
-		s.confirmBtnIdx, s.ctx.ContentFocused)
-
-	return p.render()
+		s.confirmBtnIdx, s.ctx.ContentFocused, h)
 }
 
 func (s *ChannelOpenScreen) viewOpening(
@@ -1192,7 +1186,7 @@ func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 			key.WithHelp("↑↓", "select")),
 		key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("⇥", "next section")),
+			key.WithHelp("tab", "next")),
 		key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm")),
@@ -1202,7 +1196,7 @@ func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 		binds = append(binds,
 			key.NewBinding(
 				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧⇥", "prev section")))
+				key.WithHelp("⇧tab", "back")))
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -1215,10 +1209,10 @@ func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
 			key.WithHelp("↑↓", "select")),
 		key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("⇥", "next section")),
+			key.WithHelp("tab", "next")),
 		key.NewBinding(
 			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧⇥", "prev section")),
+			key.WithHelp("⇧tab", "back")),
 		key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm")),
@@ -1238,10 +1232,10 @@ func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 			key.WithHelp("enter", "toggle")),
 		key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("⇥", "next section")),
+			key.WithHelp("tab", "next")),
 		key.NewBinding(
 			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧⇥", "prev section")),
+			key.WithHelp("⇧tab", "back")),
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -1269,7 +1263,7 @@ func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
 			key.WithHelp("enter", "select")),
 		key.NewBinding(
 			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧⇥", "prev section")))
+			key.WithHelp("⇧tab", "back")))
 	binds = append(binds, kQuit)
 	return binds
 }
@@ -1283,10 +1277,10 @@ func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 				key.WithHelp("←→", "cursor")),
 			key.NewBinding(
 				key.WithKeys("tab"),
-				key.WithHelp("⇥", "next field")),
+				key.WithHelp("tab", "next")),
 			key.NewBinding(
 				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧⇥", "prev field")),
+				key.WithHelp("⇧tab", "back")),
 			kSidebar,
 		}
 		binds = append(binds, kQuit)
@@ -1313,7 +1307,7 @@ func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 				key.WithHelp("enter", "select")),
 			key.NewBinding(
 				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧⇥", "prev field")))
+				key.WithHelp("⇧tab", "back")))
 		binds = append(binds, kQuit)
 		return binds
 	}

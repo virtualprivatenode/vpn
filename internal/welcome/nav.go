@@ -3,6 +3,8 @@ package welcome
 import (
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -39,9 +41,9 @@ type NavSidebar struct {
 func NewNavSidebar() NavSidebar {
 	items := []NavItem{
 		{"Channels", secChannels},
-		{"Lightning", secWallet},
-		{"Bitcoin", secOnChain},
-		{"Add-ons", secAddons},
+		{"Wallet", secWallet},
+		{"On-Chain", secOnChain},
+		{"Add-On", secAddons},
 		{"System", secSystem},
 		{theme.ThemeIcon(), secThemeToggle},
 	}
@@ -151,6 +153,13 @@ func (n NavSidebar) BlockRows(
 		}
 	}
 
+	// Lipgloss cell style for centering labels.
+	// Width(w) + Align(Center) handles ANSI-aware
+	// centering correctly for all label lengths.
+	cellBase := lipgloss.NewStyle().
+		Width(w).
+		Align(lipgloss.Center)
+
 	for si := 0; si < numSections; si++ {
 		bh := blockHeights[si]
 		if bh < 1 {
@@ -170,60 +179,42 @@ func (n NavSidebar) BlockRows(
 
 		label := item.Label
 
-		labelLen := len([]rune(label))
-		totalPad := w - labelLen
-		if totalPad < 0 {
-			totalPad = 0
-		}
-		leftPad := totalPad / 2
-		rightPad := totalPad - leftPad
-
 		titleRow := bh / 2
 
-		// For the System block, place the label one
-		// row higher to make room for the theme icon.
+		// Theme icon goes in the last row of the
+		// System block, left-aligned.
 		isSystemBlock := si == secSystem
-		if isSystemBlock && bh >= 3 {
-			titleRow = bh/2 - 1
-		}
-
 		themeRow := -1
-		if isSystemBlock {
-			themeRow = titleRow + 2
-			if themeRow >= bh {
-				themeRow = titleRow + 1
-			}
-			if themeRow >= bh {
-				themeRow = -1 // no room
-			}
+		if isSystemBlock && themeIdx >= 0 && bh >= 2 {
+			themeRow = bh - 1
 		}
 
 		var rows []string
 		for r := 0; r < bh; r++ {
 			if r == titleRow {
-				if isCursor && leftPad >= 1 {
+				styled := style.Render(label)
+				if isCursor {
 					markerStyle := theme.NavActive
 					if !isActive {
 						markerStyle = theme.NavCursor
 					}
-					row := markerStyle.Render(
-						"▸") +
-						strings.Repeat(" ",
-							leftPad-1) +
-						style.Render(label) +
-						strings.Repeat(" ",
-							rightPad)
-					rows = append(rows, row)
+					// Center "▸ Label" as a single unit
+					// so the cursor doesn't push the
+					// label off-center relative to
+					// non-cursor rows.
+					combined := markerStyle.Render("▸") +
+						" " + styled
+					rows = append(rows,
+						cellBase.Render(combined))
 				} else {
 					rows = append(rows,
-						strings.Repeat(" ",
-							leftPad)+
-							style.Render(label)+
-							strings.Repeat(" ",
-								rightPad))
+						cellBase.Render(styled))
 				}
 			} else if r == themeRow && themeIdx >= 0 {
-				// Render theme toggle icon
+				// Render theme toggle icon in bottom-
+				// left corner. Highlight when cursor
+				// is on it, dim otherwise. No ▸ marker
+				// — just the icon, enter to toggle.
 				icon := n.Items[themeIdx].Label
 				isThemeCursor := n.Cursor == themeIdx &&
 					n.Focused
@@ -233,31 +224,15 @@ func (n NavSidebar) BlockRows(
 					iconStyle = theme.NavActive
 				}
 
-				iconLen := len([]rune(icon))
-				iconTotal := w - iconLen
-				if iconTotal < 0 {
-					iconTotal = 0
+				styledIcon := iconStyle.Render(icon)
+				iconVis := lipgloss.Width(styledIcon)
+				iconPad := w - 1 - iconVis
+				if iconPad < 0 {
+					iconPad = 0
 				}
-				iconLeft := iconTotal / 2
-				iconRight := iconTotal - iconLeft
-
-				if isThemeCursor && iconLeft >= 1 {
-					row := theme.NavActive.Render(
-						"▸") +
-						strings.Repeat(" ",
-							iconLeft-1) +
-						iconStyle.Render(icon) +
-						strings.Repeat(" ",
-							iconRight)
-					rows = append(rows, row)
-				} else {
-					rows = append(rows,
-						strings.Repeat(" ",
-							iconLeft)+
-							iconStyle.Render(icon)+
-							strings.Repeat(" ",
-								iconRight))
-				}
+				rows = append(rows,
+					" "+styledIcon+
+						strings.Repeat(" ", iconPad))
 			} else {
 				rows = append(rows,
 					strings.Repeat(" ", w))
@@ -273,20 +248,20 @@ func (n NavSidebar) BlockRows(
 // ── String helpers ───────────────────────────────────────
 
 func pad(s string, w int) string {
-	r := []rune(s)
-	if len(r) >= w {
-		return string(r[:w])
+	vis := lipgloss.Width(s)
+	if vis >= w {
+		return s
 	}
-	return s + strings.Repeat(" ", w-len(r))
+	return s + strings.Repeat(" ", w-vis)
 }
 
 func centerPad(s string, w int) string {
-	r := []rune(s)
-	if len(r) >= w {
-		return string(r[:w])
+	vis := lipgloss.Width(s)
+	if vis >= w {
+		return s
 	}
-	left := (w - len(r)) / 2
-	right := w - len(r) - left
+	left := (w - vis) / 2
+	right := w - vis - left
 	return strings.Repeat(" ", left) + s +
 		strings.Repeat(" ", right)
 }

@@ -100,7 +100,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchStatus(m.cfg, m.lndClient)
 	case clearUtxoSelectionMsg:
 		m.clearUtxoSelection()
-		m.syncOcCtxSelection()
 		return m, nil
 	case shellActionMsg:
 		m.shellAction = msg.action
@@ -263,9 +262,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case newAddressMsg:
-		if msg.err == nil {
-			m.onChainAddress = msg.address
-		}
 		// Route to OCReceiveScreen if open
 		if rm, cmd, ok := m.routeToScreen(
 			tabOCReceive, msg); ok {
@@ -289,9 +285,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabSend, msg)
 		return rm, cmd
 	case paymentHistoryMsg:
-		if msg.err == nil {
-			m.payHistory = msg.entries
-		}
 		// Route to wallet home screen
 		if rm, cmd, ok := m.routeToSectionScreen(
 			secWallet, msg); ok {
@@ -300,21 +293,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case utxoListMsg:
 		if msg.err == nil {
-			m.utxos = msg.utxos
 			m.ocCtx.Utxos = msg.utxos
 			// Prune selections beyond new UTXO range
-			for idx := range m.utxoSelected {
-				if idx >= len(m.utxos) {
-					delete(m.utxoSelected, idx)
+			for idx := range m.ocCtx.UtxoSelected {
+				if idx >= len(m.ocCtx.Utxos) {
+					delete(m.ocCtx.UtxoSelected, idx)
 				}
 			}
 			m.recalcSelectedTotal()
-			m.syncOcCtxSelection()
 		}
 		return m, nil
 	case onChainTxMsg:
 		if msg.err == nil {
-			m.onChainTxs = msg.txs
 			m.ocCtx.OnChainTxs = msg.txs
 		}
 		return m, nil
@@ -327,9 +317,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabCloseChannel, msg)
 		return rm, cmd
 	case closedChannelsMsg:
-		if msg.err == nil {
-			m.buildChannelHistory(msg.channels)
-		}
 		// Route to history screen so it gets the data
 		if rm, cmd, ok := m.routeToScreen(
 			tabChannelHistory, msg); ok {
@@ -348,7 +335,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case feeTiersMsg:
 		if msg.err == nil {
-			m.sendFeeTiers = msg.tiers
 			m.ocCtx.SendFeeTiers = msg.tiers
 			// Route to close screen
 			m.routeToScreen(
@@ -452,61 +438,37 @@ func labelTxCmd(
 // ── Coin control helpers ─────────────────────────────────
 
 func (m *Model) toggleUtxoSelection(idx int) {
-	if idx < 0 || idx >= len(m.utxos) {
+	if idx < 0 || idx >= len(m.ocCtx.Utxos) {
 		return
 	}
-	if m.utxoSelected[idx] {
-		delete(m.utxoSelected, idx)
+	if m.ocCtx.UtxoSelected[idx] {
+		delete(m.ocCtx.UtxoSelected, idx)
 	} else {
-		m.utxoSelected[idx] = true
+		m.ocCtx.UtxoSelected[idx] = true
 	}
 	m.recalcSelectedTotal()
-	m.syncOcCtxSelection()
 }
 
 func (m *Model) recalcSelectedTotal() {
-	m.utxoSelectedTotal = 0
-	m.utxoOutpoints = nil
-	for idx := range m.utxoSelected {
-		if idx < len(m.utxos) {
-			m.utxoSelectedTotal +=
-				m.utxos[idx].AmountSats
-			m.utxoOutpoints = append(
-				m.utxoOutpoints,
+	m.ocCtx.UtxoSelectedTotal = 0
+	m.ocCtx.UtxoOutpoints = nil
+	for idx := range m.ocCtx.UtxoSelected {
+		if idx < len(m.ocCtx.Utxos) {
+			m.ocCtx.UtxoSelectedTotal +=
+				m.ocCtx.Utxos[idx].AmountSats
+			m.ocCtx.UtxoOutpoints = append(
+				m.ocCtx.UtxoOutpoints,
 				fmt.Sprintf("%s:%d",
-					m.utxos[idx].Txid,
-					m.utxos[idx].Vout))
+					m.ocCtx.Utxos[idx].Txid,
+					m.ocCtx.Utxos[idx].Vout))
 		}
 	}
 }
 
 func (m *Model) clearUtxoSelection() {
-	m.utxoSelected = make(map[int]bool)
-	m.utxoSelectedTotal = 0
-	m.utxoOutpoints = nil
-}
-
-// syncOcCtxSelection copies current UTXO selection state
-// to the OnChainContext so screens see current data.
-func (m *Model) syncOcCtxSelection() {
-	m.ocCtx.UtxoSelected = m.utxoSelected
-	m.ocCtx.UtxoSelectedTotal = m.utxoSelectedTotal
-	m.ocCtx.UtxoOutpoints = m.utxoOutpoints
-}
-
-func (m *Model) buildChannelHistory(
-	closed []lndrpc.ClosedChannel,
-) {
-	var channels []channelInfo
-	var waiting []lndrpc.WaitingCloseChannel
-	var pending []lndrpc.PendingForceCloseChannel
-	if m.status != nil {
-		channels = m.status.channels
-		waiting = m.status.waitingCloseChannels
-		pending = m.status.pendingForceCloseChannels
-	}
-	m.chanHistory = buildChannelHistoryEntries(
-		channels, waiting, pending, closed)
+	m.ocCtx.UtxoSelected = make(map[int]bool)
+	m.ocCtx.UtxoSelectedTotal = 0
+	m.ocCtx.UtxoOutpoints = nil
 }
 
 func buildChannelHistoryEntries(
@@ -637,13 +599,15 @@ func (m Model) handleSidebarKey(
 		m.nav.MoveDown()
 		return m, nil
 	case "enter", "right":
-		// Theme toggle — don't activate a section,
-		// just toggle the theme and stay on the icon.
+		// Theme toggle — only responds to Enter.
+		// Right arrow is ignored on the toggle.
 		if m.nav.IsOnThemeToggle() {
-			mode := theme.Toggle()
-			m.cfg.Theme = mode
-			m.saveCfg()
-			m.nav.UpdateThemeLabel()
+			if key == "enter" {
+				mode := theme.Toggle()
+				m.cfg.Theme = mode
+				m.saveCfg()
+				m.nav.UpdateThemeLabel()
+			}
 			return m, nil
 		}
 		sec := m.nav.Activate()

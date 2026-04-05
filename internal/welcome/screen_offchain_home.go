@@ -334,6 +334,13 @@ func (s *WalletHomeScreen) View(
 				entry.CreationDate)
 			dateStr := fmt.Sprintf("%-*s",
 				dateW, date)
+
+			// Failed/in-flight outgoing payments
+			// didn't move funds — flag for special
+			// rendering below.
+			isFailed := !entry.IsIncoming &&
+				entry.Status != "SUCCEEDED"
+
 			memo := entry.Memo
 			if memo == "" {
 				if entry.IsIncoming &&
@@ -348,9 +355,18 @@ func (s *WalletHomeScreen) View(
 				} else if entry.IsIncoming &&
 					entry.Status == "ACCEPTED" {
 					memo = "(accepted)"
+				} else if isFailed {
+					memo = "(failed)"
 				} else {
 					memo = "—"
 				}
+			} else if isFailed {
+				// Has a memo but still failed —
+				// prepend status.
+				if len(memo) > memoW-11 {
+					memo = memo[:memoW-12] + ".."
+				}
+				memo = "(failed) " + memo
 			}
 			if len(memo) > memoW-1 {
 				memo = memo[:memoW-2] + ".."
@@ -359,7 +375,11 @@ func (s *WalletHomeScreen) View(
 				memoW, memo)
 
 			var valStr string
-			if entry.IsIncoming {
+			if isFailed {
+				// No funds moved — show dash
+				valStr = fmt.Sprintf("%*s",
+					valW, "—")
+			} else if entry.IsIncoming {
 				valStr = fmt.Sprintf("%*s", valW,
 					formatSats(entry.AmountSats))
 			} else {
@@ -368,10 +388,12 @@ func (s *WalletHomeScreen) View(
 						entry.AmountSats))
 			}
 
-			// OPEN/EXPIRED incoming: no balance impact
+			// OPEN/EXPIRED incoming and failed
+			// outgoing: no balance impact
 			var balStr string
-			if entry.IsIncoming &&
-				entry.Status != "SETTLED" {
+			if (entry.IsIncoming &&
+				entry.Status != "SETTLED") ||
+				isFailed {
 				balStr = fmt.Sprintf("%*s", balW, "—")
 			} else {
 				bal := balances[i]
@@ -388,6 +410,14 @@ func (s *WalletHomeScreen) View(
 						selBg.Render(memoStr)+
 						selBg.Render(valStr)+
 						selBg.Render(balStr))
+			} else if isFailed {
+				// Entire row dimmed for failed
+				midLines = append(midLines,
+					marker+
+						dimStyle.Render(dateStr)+
+						dimStyle.Render(memoStr)+
+						dimStyle.Render(valStr)+
+						dimStyle.Render(balStr))
 			} else {
 				var valRendered string
 				if entry.IsIncoming &&
@@ -533,7 +563,10 @@ func (s *WalletHomeScreen) computeBalances() []int64 {
 		if entry.IsIncoming &&
 			entry.Status == "SETTLED" {
 			runBal -= entry.AmountSats
-		} else if !entry.IsIncoming {
+		} else if !entry.IsIncoming &&
+			entry.Status == "SUCCEEDED" {
+			// Only successful outgoing payments
+			// affect the running balance.
 			runBal += entry.AmountSats +
 				entry.FeeSats
 		}

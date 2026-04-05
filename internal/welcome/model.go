@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
@@ -260,10 +259,6 @@ type Model struct {
 	urlTarget string
 	qrLabel   string
 
-	// Channel history
-	chanHistory       []channelHistoryEntry
-	chanHistoryCursor int
-
 	// Navigation
 	nav            NavSidebar
 	contentFocused bool
@@ -274,28 +269,6 @@ type Model struct {
 	tabFocused      bool
 	tabCursorX      int
 	tabScrollOffset int
-
-	// Text inputs
-	chanPubkeyInput textinput.Model
-	chanHostInput   textinput.Model
-	chanAmountInput textinput.Model
-
-	// On-chain state
-	onChainAddress string
-	utxos          []lndrpc.UTXO
-	// Coin control: UTXO selection
-	utxoSelected      map[int]bool // keyed by UTXO index
-	utxoSelectedTotal int64        // running sat total
-	utxoOutpoints     []string     // "txid:vout" for SendCoins
-
-	// Fee tiers (used by on-chain send screen + close)
-	sendFeeTiers [4]feeTier
-
-	// On-chain transaction history
-	onChainTxs []lndrpc.OnChainTx
-
-	// Payment history
-	payHistory []lndrpc.PaymentEntry
 }
 
 func NewModel(
@@ -309,8 +282,7 @@ func NewModel(
 	m := Model{
 		cfg: cfg, lndClient: client, version: version,
 		subview: svNone, fetchInFlight: true,
-		nav:          NewNavSidebar(),
-		utxoSelected: make(map[int]bool),
+		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
 		Cfg:       cfg,
@@ -343,7 +315,6 @@ func NewTestModel(
 		nav: NewNavSidebar(),
 	}
 	m.cfgStore = store
-	m.utxoSelected = make(map[int]bool)
 	m.ocCtx = &OnChainContext{
 		UtxoSelected: make(map[int]bool),
 	}
@@ -383,7 +354,7 @@ func (m Model) pollInterval() time.Duration {
 		return 5 * time.Second
 	}
 	if !m.status.btcSynced {
-		return 15 * time.Second
+		return 60 * time.Second
 	}
 	return 60 * time.Second
 }
@@ -641,8 +612,14 @@ func fetchPaymentHistoryCmd(
 			return paymentHistoryMsg{
 				err: fmt.Errorf("LND not connected")}
 		}
-		invoices, _ := client.ListInvoices(50)
-		payments, _ := client.ListPayments(50)
+		invoices, err := client.ListInvoices(50)
+		if err != nil {
+			logger.TUI("ListInvoices: %v", err)
+		}
+		payments, err := client.ListPayments(50)
+		if err != nil {
+			logger.TUI("ListPayments: %v", err)
+		}
 		var all []lndrpc.PaymentEntry
 		all = append(all, invoices...)
 		all = append(all, payments...)
