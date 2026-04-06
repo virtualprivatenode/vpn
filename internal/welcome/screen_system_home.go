@@ -19,10 +19,9 @@ import (
 // (Update Packages, Update Node, Reboot) and scrollable
 // service list with hotkey actions (r/s/a/l).
 //
-// Confirms are screen-owned: svcConfirm, sysConfirm,
-// and updateConfirm all live here. When active, they
-// intercept all keys and show y/n prompt in the view
-// and helpbar.
+// Confirms are screen-owned: svcConfirm and sysConfirm
+// live here. When active, they intercept all keys and
+// show y/n prompt in the view and helpbar.
 
 const (
 	sysHomeZoneButtons  = 0
@@ -36,9 +35,11 @@ type SystemHomeScreen struct {
 	svcCursor int
 
 	// Confirm dialogs — screen-owned
-	svcConfirm    string // "Restart", "Stop", "Start"
-	sysConfirm    string // "Update packages", "Reboot"
-	updateConfirm bool   // Update Node confirm
+	svcConfirm string // "Restart", "Stop", "Start"
+	sysConfirm string // "Update packages", "Reboot"
+
+	// Background service action in progress
+	svcPending string // "restarting...", "stopping...", "starting..."
 }
 
 func NewSystemHomeScreen(
@@ -63,8 +64,13 @@ func (s *SystemHomeScreen) HandleKey(
 	if s.sysConfirm != "" {
 		return s.handleSysConfirm(keyStr)
 	}
-	if s.updateConfirm {
-		return s.handleUpdateConfirm(keyStr)
+
+	// Block service actions while one is pending
+	if s.svcPending != "" {
+		switch keyStr {
+		case "r", "s", "a", "p":
+			return s, nil
+		}
 	}
 
 	hasUpdate := s.hasUpdate()
@@ -164,9 +170,12 @@ func (s *SystemHomeScreen) HandleKey(
 		if s.focusZone == sysHomeZoneServices &&
 			s.svcName(s.svcCursor) == "lnd" &&
 			s.ctx.Cfg.P2PMode == "tor" {
+			screen := NewP2PUpgradeScreen(s.ctx)
 			return s, func() tea.Msg {
-				return shellActionMsg{
-					action: svP2PUpgrade,
+				return openTabMsg{
+					Kind:   tabP2PUpgrade,
+					Label:  "P2P Upgrade",
+					Screen: screen,
 				}
 			}
 		}
@@ -178,7 +187,15 @@ func (s *SystemHomeScreen) HandleKey(
 				s.sysConfirm = "Update packages"
 			case 1:
 				if hasUpdate {
-					s.updateConfirm = true
+					screen := NewSelfUpdateScreen(
+						s.ctx)
+					return s, func() tea.Msg {
+						return openTabMsg{
+							Kind:   tabSelfUpdate,
+							Label:  "Updating",
+							Screen: screen,
+						}
+					}
 				}
 			case 2:
 				s.sysConfirm = "Reboot"
@@ -199,6 +216,14 @@ func (s *SystemHomeScreen) handleSvcConfirm(
 	if keyStr == "y" {
 		svc := s.svcName(s.svcCursor)
 		if svc != "" {
+			switch action {
+			case "Restart":
+				s.svcPending = "restarting..."
+			case "Stop":
+				s.svcPending = "stopping..."
+			case "Start":
+				s.svcPending = "starting..."
+			}
 			return s, runSvcActionCmd(action, svc)
 		}
 	}
@@ -219,23 +244,13 @@ func (s *SystemHomeScreen) handleSysConfirm(
 	return s, nil
 }
 
-func (s *SystemHomeScreen) handleUpdateConfirm(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	s.updateConfirm = false
-	if keyStr == "y" {
-		return s, func() tea.Msg {
-			return shellActionMsg{
-				action: svSelfUpdate,
-			}
-		}
-	}
-	return s, nil
-}
-
 func (s *SystemHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	switch msg.(type) {
+	case svcActionDoneMsg:
+		s.svcPending = ""
+	}
 	return s, nil
 }
 
@@ -302,15 +317,6 @@ func (s *SystemHomeScreen) View(
 			1, !hasUpdate))
 	headerLines = append(headerLines, "")
 
-	if s.updateConfirm {
-		headerLines = append(headerLines,
-			" "+theme.Warning.Render(
-				"Update to v"+
-					s.ctx.LatestVersion+
-					"? [y/n]"))
-		headerLines = append(headerLines, "")
-	}
-
 	if s.sysConfirm != "" {
 		headerLines = append(headerLines,
 			" "+theme.Warning.Render(
@@ -366,7 +372,10 @@ func (s *SystemHomeScreen) View(
 		svcLine := " " + prefix + " " + dot + " " +
 			style.Render(name)
 
-		if isSelected {
+		if isSelected && s.svcPending != "" {
+			svcLine += "  " +
+				theme.Dim.Render(s.svcPending)
+		} else if isSelected {
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
 			if name == "lnd" &&
@@ -603,8 +612,7 @@ func (s *SystemHomeScreen) View(
 
 func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 	// Confirm dialogs override everything
-	if s.svcConfirm != "" || s.sysConfirm != "" ||
-		s.updateConfirm {
+	if s.svcConfirm != "" || s.sysConfirm != "" {
 		return newConfirmBindings().ShortHelp()
 	}
 

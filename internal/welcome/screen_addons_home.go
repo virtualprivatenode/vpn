@@ -14,7 +14,7 @@ import (
 // Section home for Add-ons. Single focus zone: a
 // two-item vertical list (Syncthing, LndHub). Enter
 // opens a detail tab if the addon is installed, or
-// triggers an install flow (shellActionMsg + Quit) if
+// triggers an install flow (opens install tab) if
 // LND is ready.
 //
 // No async data — reads ctx.Cfg pointer directly for
@@ -83,9 +83,12 @@ func (s *AddonsHomeScreen) handleEnter() (
 			}
 		}
 		if cfg.HasLND() && cfg.WalletExists() {
+			screen := NewSyncthingInstallScreen(s.ctx)
 			return s, func() tea.Msg {
-				return shellActionMsg{
-					action: svSyncthingInstall,
+				return openTabMsg{
+					Kind:   tabSyncthingInstall,
+					Label:  "Installing",
+					Screen: screen,
 				}
 			}
 		}
@@ -101,9 +104,19 @@ func (s *AddonsHomeScreen) handleEnter() (
 			}
 		}
 		if cfg.HasLND() && cfg.WalletExists() {
+			// Block install during IBD — LndHub needs
+			// a synced LND to bake its macaroon.
+			if s.ctx.Status == nil ||
+				!s.ctx.Status.btcSynced ||
+				!s.ctx.Status.lndSyncedChain {
+				return s, nil
+			}
+			screen := NewLndHubInstallScreen(s.ctx)
 			return s, func() tea.Msg {
-				return shellActionMsg{
-					action: svLndHubInstall,
+				return openTabMsg{
+					Kind:   tabLndHubInstall,
+					Label:  "Installing",
+					Screen: screen,
 				}
 			}
 		}
@@ -210,6 +223,11 @@ func (s *AddonsHomeScreen) View(
 		if !cfg.WalletExists() {
 			hubStat2 = theme.Warn.Render(
 				"Requires LND wallet")
+		} else if s.ctx.Status == nil ||
+			!s.ctx.Status.btcSynced ||
+			!s.ctx.Status.lndSyncedChain {
+			hubStat2 = theme.Warn.Render(
+				"Requires synced node")
 		}
 	}
 

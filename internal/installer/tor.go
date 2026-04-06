@@ -93,3 +93,7 @@ func restartTor() error {
 	}
 	return system.SudoRun("systemctl", "restart", "tor")
 }
+
+// RestartTor is the exported wrapper for use by the welcome
+// package during install rollback.
+func RestartTor() error { return restartTor() }

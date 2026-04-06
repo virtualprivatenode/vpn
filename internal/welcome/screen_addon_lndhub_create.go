@@ -224,8 +224,11 @@ func (s *LndHubCreateScreen) handleInputKey(
 			}
 			return s, nil
 		}
-		// Enter in input field → submit
-		return s.submitCreate()
+		// Enter in input field → move to buttons
+		s.focusZone = hubCreateZoneButtons
+		s.btnIdx = 1 // focus on Create
+		s.nameInput.Blur()
+		return s, nil
 	default:
 		if s.focusZone == hubCreateZoneInput {
 			var cmd tea.Cmd

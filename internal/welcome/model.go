@@ -32,36 +32,36 @@ const (
 	// Shell actions — trigger install/update flows
 	// via the Show() restart loop
 	svWalletCreate
-	svSyncthingInstall
-	svLndHubInstall
-	svSelfUpdate
-	svP2PUpgrade
 )
 
 // Tab types for the top tab bar
 type tabKind int
 
 const (
-	tabMain            tabKind = iota // Main view for current section
-	tabChannel                        // Channel detail
-	tabPayment                        // Payment detail
-	tabSend                           // ⚡ Send payment flow
-	tabReceive                        // ⚡ Receive payment flow
-	tabPairing                        // Pairing screen
-	tabOnChain                        // ⛓ On-chain send flow
-	tabOCReceive                      // ⛓ On-chain receive flow
-	tabSyncthing                      //
-	tabSyncthingDevice                // Syncthing device detail
-	tabSyncthingWebUI                 // Syncthing Web UI
-	tabSyncthingPair                  // Syncthing pair device flow
-	tabLndHub                         //
-	tabLndHubAccount                  // LndHub account detail
-	tabLndHubCreate                   // LndHub create account flow
-	tabOpenChannel                    // Channel open flow
-	tabCloseChannel                   // Channel close flow
-	tabOnChainTx                      // on-chain transaction detail
-	tabUtxoDetail                     // UTXO detail with label edit
-	tabChannelHistory                 // channel history view
+	tabMain             tabKind = iota // Main view for current section
+	tabChannel                         // Channel detail
+	tabPayment                         // Payment detail
+	tabSend                            // ⚡ Send payment flow
+	tabReceive                         // ⚡ Receive payment flow
+	tabPairing                         // Pairing screen
+	tabOnChain                         // ⛓ On-chain send flow
+	tabOCReceive                       // ⛓ On-chain receive flow
+	tabSyncthing                       //
+	tabSyncthingDevice                 // Syncthing device detail
+	tabSyncthingWebUI                  // Syncthing Web UI
+	tabSyncthingPair                   // Syncthing pair device flow
+	tabLndHub                          //
+	tabLndHubAccount                   // LndHub account detail
+	tabLndHubCreate                    // LndHub create account flow
+	tabOpenChannel                     // Channel open flow
+	tabCloseChannel                    // Channel close flow
+	tabOnChainTx                       // on-chain transaction detail
+	tabUtxoDetail                      // UTXO detail with label edit
+	tabChannelHistory                  // channel history view
+	tabSyncthingInstall                // Syncthing install flow
+	tabLndHubInstall                   // LndHub install flow
+	tabP2PUpgrade                      // P2P mode upgrade flow
+	tabSelfUpdate                      // Self-update flow
 )
 
 type openTab struct {
@@ -371,30 +371,8 @@ func Show(cfg *config.AppConfig, version string) {
 		}
 
 		switch final.shellAction {
-		case svLndHubInstall:
-			installer.RunLndHubInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
 		case svWalletCreate:
 			installer.RunWalletCreation(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		case svSyncthingInstall:
-			installer.RunSyncthingInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		case svSelfUpdate:
-			installer.RunSelfUpdate(
-				cfg, final.latestVersion)
-			continue
-		case svP2PUpgrade:
-			installer.RunP2PModeUpgrade(cfg)
 			if u, e := config.Load(); e == nil {
 				cfg = u
 			}

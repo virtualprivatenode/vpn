@@ -216,8 +216,11 @@ func (s *SyncthingPairScreen) handleInputKey(
 			}
 			return s, nil
 		}
-		// Enter in input → submit
-		return s.submitPair()
+		// Enter in input → move to buttons
+		s.focusZone = syncPairZoneButtons
+		s.btnIdx = 1 // focus on Pair
+		s.input.Blur()
+		return s, nil
 	default:
 		if s.focusZone == syncPairZoneInput {
 			var cmd tea.Cmd

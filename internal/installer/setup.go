@@ -42,22 +42,25 @@ func NeedsInstall() bool {
 	return !cfg.InstallComplete
 }
 
-// ── Install progress TUI ─────────────────────────────────
+// ── Install step types ──────────────────────────────────
+// Exported for use by welcome.InstallProgressScreen.
+// The step functions themselves stay unexported — callers
+// use the builder functions below to get step slices.
 
-type stepStatus int
+type StepStatus int
 
 const (
-	stepPending stepStatus = iota
-	stepRunning
-	stepDone
-	stepFailed
+	StepPending StepStatus = iota
+	StepRunning
+	StepDone
+	StepFailed
 )
 
-type installStep struct {
-	name   string
-	fn     func() error
-	status stepStatus
-	err    error
+type InstallStep struct {
+	Name   string
+	Fn     func() error
+	Status StepStatus
+	Err    error
 }
 
 type stepDoneMsg struct {
@@ -66,7 +69,7 @@ type stepDoneMsg struct {
 }
 
 type installModel struct {
-	steps         []installStep
+	steps         []InstallStep
 	current       int
 	done, failed  bool
 	version       string
@@ -80,7 +83,7 @@ func (m installModel) runStep(i int) tea.Cmd {
 		if i >= len(m.steps) {
 			return stepDoneMsg{index: i}
 		}
-		return stepDoneMsg{index: i, err: m.steps[i].fn()}
+		return stepDoneMsg{index: i, err: m.steps[i].Fn()}
 	}
 }
 
@@ -99,17 +102,17 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stepDoneMsg:
 		if msg.index < len(m.steps) {
 			if msg.err != nil {
-				m.steps[msg.index].status = stepFailed
-				m.steps[msg.index].err = msg.err
+				m.steps[msg.index].Status = StepFailed
+				m.steps[msg.index].Err = msg.err
 				m.failed = true
 				m.done = true
 				return m, nil
 			}
-			m.steps[msg.index].status = stepDone
+			m.steps[msg.index].Status = StepDone
 			next := msg.index + 1
 			if next < len(m.steps) {
 				m.current = next
-				m.steps[next].status = stepRunning
+				m.steps[next].Status = StepRunning
 				return m, m.runStep(next)
 			}
 			m.done = true
@@ -129,21 +132,21 @@ func (m installModel) View() tea.View {
 	for i, s := range m.steps {
 		var sty lipgloss.Style
 		var ind string
-		switch s.status {
-		case stepDone:
+		switch s.Status {
+		case StepDone:
 			sty, ind = theme.ProgDone, "[done]"
-		case stepRunning:
+		case StepRunning:
 			sty, ind = theme.ProgRunning, "[....]"
-		case stepFailed:
+		case StepFailed:
 			sty, ind = theme.ProgFail, "[FAIL]"
 		default:
 			sty, ind = theme.ProgPending, "[wait]"
 		}
 		lines = append(lines, sty.Render(fmt.Sprintf("  %s [%d/%d] %s",
-			ind, i+1, len(m.steps), s.name)))
-		if s.status == stepFailed && s.err != nil {
+			ind, i+1, len(m.steps), s.Name)))
+		if s.Status == StepFailed && s.Err != nil {
 			lines = append(lines, theme.ProgFail.Render(
-				fmt.Sprintf("      Error: %v", s.err)))
+				fmt.Sprintf("      Error: %v", s.Err)))
 		}
 	}
 	box := theme.ProgBox.Width(bw).Render(strings.Join(lines, "\n"))
@@ -166,11 +169,11 @@ func (m installModel) View() tea.View {
 	return v
 }
 
-func RunInstallTUI(steps []installStep, version string) error {
+func RunInstallTUI(steps []InstallStep, version string) error {
 	if len(steps) == 0 {
 		return nil
 	}
-	steps[0].status = stepRunning
+	steps[0].Status = StepRunning
 	m := installModel{steps: steps, version: version}
 	p := tea.NewProgram(m)
 	result, err := p.Run()
@@ -180,8 +183,8 @@ func RunInstallTUI(steps []installStep, version string) error {
 	final := result.(installModel)
 	if final.failed {
 		for _, s := range final.steps {
-			if s.status == stepFailed {
-				return fmt.Errorf("%s: %w", s.name, s.err)
+			if s.Status == StepFailed {
+				return fmt.Errorf("%s: %w", s.Name, s.Err)
 			}
 		}
 	}
@@ -305,18 +308,18 @@ func Run() error {
 	return config.Save(cfg)
 }
 
-func buildSteps(cfg *config.AppConfig) []installStep {
-	return []installStep{
-		{name: "Creating system user and directories",
-			fn: func() error {
+func buildSteps(cfg *config.AppConfig) []InstallStep {
+	return []InstallStep{
+		{Name: "Creating system user and directories",
+			Fn: func() error {
 				if err := createSystemUser(systemUser); err != nil {
 					return err
 				}
 				return createBitcoinDirs(systemUser)
 			}},
-		{name: "Disabling IPv6", fn: disableIPv6},
-		{name: "Installing Tor",
-			fn: func() error {
+		{Name: "Disabling IPv6", Fn: disableIPv6},
+		{Name: "Installing Tor",
+			Fn: func() error {
 				if err := installTor(); err != nil {
 					return err
 				}
@@ -331,31 +334,31 @@ func buildSteps(cfg *config.AppConfig) []installStep {
 				}
 				return logTorStatus()
 			}},
-		{name: "Configuring apt for Tor",
-			fn: func() error {
+		{Name: "Configuring apt for Tor",
+			Fn: func() error {
 				if err := configureAptTor(); err != nil {
 					return err
 				}
 				return ensureGPG()
 			}},
-		{name: "Configuring firewall",
-			fn: func() error { return configureFirewall(cfg) }},
-		{name: "Downloading Bitcoin Core " + bitcoinVersion,
-			fn: func() error {
+		{Name: "Configuring firewall",
+			Fn: func() error { return configureFirewall(cfg) }},
+		{Name: "Downloading Bitcoin Core " + bitcoinVersion,
+			Fn: func() error {
 				if err := importBitcoinCoreKeys(); err != nil {
 					return err
 				}
 				return downloadBitcoin(bitcoinVersion)
 			}},
-		{name: "Verifying Bitcoin Core",
-			fn: func() error {
+		{Name: "Verifying Bitcoin Core",
+			Fn: func() error {
 				if err := verifyBitcoinCoreSigs(2); err != nil {
 					return err
 				}
 				return verifyBitcoin()
 			}},
-		{name: "Installing Bitcoin Core",
-			fn: func() error {
+		{Name: "Installing Bitcoin Core",
+			Fn: func() error {
 				if err := extractAndInstallBitcoin(bitcoinVersion); err != nil {
 					return err
 				}
@@ -364,9 +367,9 @@ func buildSteps(cfg *config.AppConfig) []installStep {
 				}
 				return writeBitcoindService(systemUser)
 			}},
-		{name: "Starting Bitcoin Core", fn: startBitcoind},
-		{name: "Configuring security",
-			fn: func() error {
+		{Name: "Starting Bitcoin Core", Fn: startBitcoind},
+		{Name: "Configuring security",
+			Fn: func() error {
 				if err := installUnattendedUpgrades(); err != nil {
 					return err
 				}
@@ -380,22 +383,22 @@ func buildSteps(cfg *config.AppConfig) []installStep {
 			}},
 
 		// ── LND (Tor-only, non-interactive) ─────────
-		{name: "Downloading LND",
-			fn: func() error {
+		{Name: "Downloading LND",
+			Fn: func() error {
 				if err := importLNDKey(); err != nil {
 					return err
 				}
 				return downloadLND(lndVersion)
 			}},
-		{name: "Verifying LND",
-			fn: func() error {
+		{Name: "Verifying LND",
+			Fn: func() error {
 				if err := verifyLNDSig(lndVersion); err != nil {
 					return err
 				}
 				return verifyLND()
 			}},
-		{name: "Installing LND",
-			fn: func() error {
+		{Name: "Installing LND",
+			Fn: func() error {
 				if err := extractAndInstallLND(lndVersion); err != nil {
 					return err
 				}
@@ -407,14 +410,14 @@ func buildSteps(cfg *config.AppConfig) []installStep {
 				}
 				return writeLNDServiceInitial(systemUser)
 			}},
-		{name: "Configuring Tor for LND",
-			fn: func() error {
+		{Name: "Configuring Tor for LND",
+			Fn: func() error {
 				if err := RebuildTorConfig(cfg); err != nil {
 					return err
 				}
 				return restartTor()
 			}},
-		{name: "Starting LND", fn: startLND},
+		{Name: "Starting LND", Fn: startLND},
 	}
 }
 
@@ -562,270 +565,199 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 	return nil
 }
 
-func RunP2PModeUpgrade(cfg *config.AppConfig) error {
-	if cfg.P2PMode == "hybrid" {
-		return nil
-	}
-
-	publicIPv4 := system.PublicIPv4()
-	if publicIPv4 == "" {
-		ShowInfoBox(
-			theme.Header.Render("Cannot Detect Public IP") + "\n\n" +
-				theme.Value.Render("Could not determine your server's public IP.") + "\n" +
-				theme.Value.Render("Hybrid mode requires a public IPv4 address.") + "\n\n" +
-				theme.Dim.Render("Press Enter to return..."))
-		return nil
-	}
-
-	// ── Privacy warning — requires typed confirmation ────
-	fmt.Print("\033[2J\033[H")
-	fmt.Println()
-	fmt.Println("  ═══════════════════════════════════════════")
-	fmt.Println("    Upgrade to Clearnet + Tor (Hybrid P2P)")
-	fmt.Println("  ═══════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("  Your server IP: " + publicIPv4)
-	fmt.Println()
-	fmt.Println("  This will permanently change your node's privacy:")
-	fmt.Println()
-	fmt.Println("  • Your server IP will be published to the")
-	fmt.Println("    Lightning Network gossip protocol")
-	fmt.Println("  • Every node on the network will learn your IP")
-	fmt.Println("  • This links your IP to your Lightning node identity")
-	fmt.Println("  • This CANNOT be undone — once published,")
-	fmt.Println("    your IP cannot be retracted from network gossip")
-	fmt.Println()
-	fmt.Println("  It will also:")
-	fmt.Println("  • Open ports 9735 and 8080 in the firewall")
-	fmt.Println("  • Allow Zeus to connect over clearnet")
-	fmt.Println("  • Regenerate the LND TLS certificate")
-	fmt.Println("  • Restart LND")
-	if cfg.LndHubInstalled {
-		fmt.Println("  • Install TLS proxy for LndHub clearnet")
-		fmt.Println("  • Open port 3000 for encrypted LndHub access")
-	}
-	fmt.Println()
-	fmt.Println("  ═══════════════════════════════════════════")
-	fmt.Println()
-	fmt.Print("  Type 'PUBLISH MY IP' to proceed (or press Enter to cancel): ")
-
-	reader := bufio.NewReader(os.Stdin)
-	confirmation, _ := reader.ReadString('\n')
-	confirmation = strings.TrimSpace(confirmation)
-	if confirmation != "PUBLISH MY IP" {
-		fmt.Println()
-		fmt.Println("  Cancelled.")
-		fmt.Println()
-		time.Sleep(1 * time.Second)
-		return nil
-	}
-
-	fmt.Println()
-	fmt.Println("  ✓ Confirmed. Upgrading to hybrid P2P mode...")
-	fmt.Println()
-
-	cfg.P2PMode = "hybrid"
-
-	steps := []installStep{
-		{name: "Removing old TLS certificate", fn: func() error {
-			system.SudoRunSilent("rm", "-f",
-				paths.LNDTLSCert, paths.LNDTLSKey)
-			return nil
-		}},
-		{name: "Updating LND config", fn: func() error {
-			return writeLNDConfig(cfg, publicIPv4)
-		}},
-		{name: "Updating firewall", fn: func() error {
-			return configureFirewall(cfg)
-		}},
-		{name: "Restarting LND", fn: func() error {
-			return system.SudoRun("systemctl", "restart", "lnd")
-		}},
+// P2PUpgradeSteps returns the install steps for upgrading
+// from Tor-only to hybrid (clearnet+Tor) P2P mode. The
+// caller must set cfg.P2PMode = "hybrid" before running
+// steps (so firewall and LND config include clearnet
+// listeners), and must save config after steps complete.
+// On failure the caller reverts cfg.P2PMode = "tor".
+func P2PUpgradeSteps(
+	cfg *config.AppConfig, publicIPv4 string,
+) []InstallStep {
+	steps := []InstallStep{
+		{Name: "Removing old TLS certificate",
+			Fn: func() error {
+				system.SudoRunSilent("rm", "-f",
+					paths.LNDTLSCert, paths.LNDTLSKey)
+				return nil
+			}},
+		{Name: "Updating LND config",
+			Fn: func() error {
+				return writeLNDConfig(cfg, publicIPv4)
+			}},
+		{Name: "Updating firewall",
+			Fn: func() error {
+				return configureFirewall(cfg)
+			}},
+		{Name: "Restarting LND",
+			Fn: func() error {
+				return system.SudoRun(
+					"systemctl", "restart", "lnd")
+			}},
 	}
 
 	if cfg.LndHubInstalled {
 		steps = append(steps,
-			installStep{
-				name: "Generating TLS certificate for LndHub proxy",
-				fn: func() error {
+			InstallStep{
+				Name: "Generating TLS certificate for LndHub proxy",
+				Fn: func() error {
 					return generateProxyCert(publicIPv4)
 				}},
-			installStep{
-				name: "Creating LndHub proxy service",
-				fn:   writeLndHubProxyService},
-			installStep{
-				name: "Starting LndHub TLS proxy",
-				fn:   startLndHubProxy},
+			InstallStep{
+				Name: "Creating LndHub proxy service",
+				Fn:   writeLndHubProxyService},
+			InstallStep{
+				Name: "Starting LndHub TLS proxy",
+				Fn:   startLndHubProxy},
 		)
 	}
 
-	if err := RunInstallTUI(steps, appVersion); err != nil {
-		cfg.P2PMode = "tor"
-		return err
-	}
-	return config.Save(cfg)
+	return steps
 }
 
 // ── Syncthing installation ───────────────────────────────
 
-func RunSyncthingInstall(cfg *config.AppConfig) error {
-	confirmMsg := theme.Header.Render("Install Syncthing") + "\n\n" +
-		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  * Install Syncthing from official repository") + "\n" +
-		theme.Value.Render("  * Open port 22000 for sync connections") + "\n" +
-		theme.Value.Render("  * Create Tor hidden service for web UI") + "\n" +
-		theme.Value.Render("  * Auto-configure LND channel backup sync") + "\n" +
-		theme.Value.Render("  * Restart Tor") + "\n\n" +
-		theme.Value.Render("After install, pair your local Syncthing") + "\n" +
-		theme.Value.Render("from the Syncthing details screen.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed -- backspace to cancel")
-	if !ShowConfirmBox(confirmMsg) {
-		return nil
-	}
-
+// SyncthingInstallSteps returns the install step list and a
+// generated password. The caller is responsible for setting
+// cfg.SyncthingInstalled = true before running steps (so Tor
+// and firewall configs include Syncthing), and for saving
+// cfg.SyncthingPassword after steps complete successfully.
+func SyncthingInstallSteps(
+	cfg *config.AppConfig,
+) ([]InstallStep, string, error) {
 	passBytes := make([]byte, 12)
 	if _, err := randRead(passBytes); err != nil {
-		return fmt.Errorf("generate password: %w", err)
+		return nil, "", fmt.Errorf(
+			"generate password: %w", err)
 	}
 	syncPassword := hexEncode(passBytes)
 
-	cfg.SyncthingInstalled = true
-
-	steps := []installStep{
-		{name: "Adding Syncthing repository",
-			fn: installSyncthingRepo},
-		{name: "Installing Syncthing",
-			fn: installSyncthingPackage},
-		{name: "Creating Syncthing directories",
-			fn: createSyncthingDirs},
-		{name: "Creating Syncthing service",
-			fn: writeSyncthingService},
-		{name: "Configuring Syncthing authentication",
-			fn: func() error {
+	steps := []InstallStep{
+		{Name: "Adding Syncthing repository",
+			Fn: installSyncthingRepo},
+		{Name: "Installing Syncthing",
+			Fn: installSyncthingPackage},
+		{Name: "Creating Syncthing directories",
+			Fn: createSyncthingDirs},
+		{Name: "Creating Syncthing service",
+			Fn: writeSyncthingService},
+		{Name: "Configuring Syncthing authentication",
+			Fn: func() error {
 				return configureSyncthingAuth(syncPassword)
 			}},
-		{name: "Configuring firewall",
-			fn: func() error { return configureFirewall(cfg) }},
-		{name: "Rebuilding Tor config",
-			fn: func() error { return RebuildTorConfig(cfg) }},
-		{name: "Restarting Tor", fn: restartTor},
-		{name: "Starting Syncthing", fn: startSyncthing},
-		{name: "Registering backup folder",
-			fn: registerBackupFolder},
-		{name: "Setting up channel backup watcher",
-			fn: func() error {
+		{Name: "Configuring firewall",
+			Fn: func() error {
+				return configureFirewall(cfg)
+			}},
+		{Name: "Rebuilding Tor config",
+			Fn: func() error {
+				return RebuildTorConfig(cfg)
+			}},
+		{Name: "Restarting Tor", Fn: restartTor},
+		{Name: "Starting Syncthing", Fn: startSyncthing},
+		{Name: "Registering backup folder",
+			Fn: registerBackupFolder},
+		{Name: "Setting up channel backup watcher",
+			Fn: func() error {
 				return setupChannelBackupWatcher(cfg)
 			}},
 	}
-	if err := RunInstallTUI(steps, appVersion); err != nil {
-		cfg.SyncthingInstalled = false
-		RebuildTorConfig(cfg)
-		restartTor()
-		return err
-	}
-	cfg.SyncthingPassword = syncPassword
-	return config.Save(cfg)
+	return steps, syncPassword, nil
 }
 
 // ── LndHub installation ──────────────────────────────────
 
-func RunLndHubInstall(cfg *config.AppConfig) error {
-	confirmMsg := theme.Header.Render("Install LndHub.go") + "\n\n" +
-		theme.Value.Render("This will:") + "\n\n" +
-		theme.Value.Render("  * Install Go toolchain (for building from source)") + "\n" +
-		theme.Value.Render("  * Install PostgreSQL database") + "\n" +
-		theme.Value.Render("  * Clone and build LndHub.go v"+lndhubVersion) + "\n" +
-		theme.Value.Render("  * Bake restricted LND macaroon") + "\n" +
-		theme.Value.Render("  * Create Tor hidden service") + "\n" +
-		theme.Value.Render("  * Create accounts for family/friends from TUI") + "\n\n" +
-		theme.Dim.Render("Enter to proceed -- backspace to cancel")
-	if !ShowConfirmBox(confirmMsg) {
-		return nil
-	}
-
+// LndHubInstallSteps returns the install step list, the
+// generated admin token, and the DB password. The caller
+// is responsible for setting cfg.LndHubInstalled = true
+// before running steps, and for saving cfg.LndHubAdminToken
+// and cfg.LndHubDBPassword after steps complete.
+func LndHubInstallSteps(
+	cfg *config.AppConfig,
+) ([]InstallStep, string, string, error) {
 	dbPassBytes := make([]byte, 16)
 	if _, err := randRead(dbPassBytes); err != nil {
-		return fmt.Errorf("generate db password: %w", err)
+		return nil, "", "", fmt.Errorf(
+			"generate db password: %w", err)
 	}
 	dbPassword := hexEncode(dbPassBytes)
 
 	jwtBytes := make([]byte, 32)
 	if _, err := randRead(jwtBytes); err != nil {
-		return fmt.Errorf("generate jwt secret: %w", err)
+		return nil, "", "", fmt.Errorf(
+			"generate jwt secret: %w", err)
 	}
 	jwtSecret := hexEncode(jwtBytes)
 
 	adminBytes := make([]byte, 24)
 	if _, err := randRead(adminBytes); err != nil {
-		return fmt.Errorf("generate admin token: %w", err)
+		return nil, "", "", fmt.Errorf(
+			"generate admin token: %w", err)
 	}
 	adminToken := hexEncode(adminBytes)
-
-	cfg.LndHubInstalled = true
 
 	publicIPv4 := ""
 	if cfg.P2PMode == "hybrid" {
 		publicIPv4 = system.PublicIPv4()
 	}
 
-	steps := []installStep{
-		{name: "Installing Go toolchain",
-			fn: installGoToolchain},
-		{name: "Installing PostgreSQL",
-			fn: installPostgreSQL},
-		{name: "Creating database",
-			fn: func() error {
+	steps := []InstallStep{
+		{Name: "Installing Go toolchain",
+			Fn: installGoToolchain},
+		{Name: "Installing PostgreSQL",
+			Fn: installPostgreSQL},
+		{Name: "Creating database",
+			Fn: func() error {
 				return createLndHubDatabase(dbPassword)
 			}},
-		{name: "Cloning lndhub.go v" + lndhubVersion,
-			fn: cloneLndHub},
-		{name: "Building lndhub (from source)",
-			fn: buildLndHub},
-		{name: "Installing binary",
-			fn: installLndHubBinary},
-		{name: "Baking LND macaroon",
-			fn: func() error { return bakeLndHubMacaroon(cfg) }},
-		{name: "Creating directories",
-			fn: createLndHubDirs},
-		{name: "Writing configuration", fn: func() error {
-			return writeLndHubConfig(
-				cfg, dbPassword, jwtSecret, adminToken)
-		}},
-		{name: "Creating service", fn: writeLndHubService},
-		{name: "Configuring firewall",
-			fn: func() error { return configureFirewall(cfg) }},
-		{name: "Rebuilding Tor config",
-			fn: func() error { return RebuildTorConfig(cfg) }},
-		{name: "Restarting Tor", fn: restartTor},
-		{name: "Starting LndHub", fn: startLndHub},
+		{Name: "Cloning lndhub.go v" + lndhubVersion,
+			Fn: cloneLndHub},
+		{Name: "Building lndhub (from source)",
+			Fn: buildLndHub},
+		{Name: "Installing binary",
+			Fn: installLndHubBinary},
+		{Name: "Baking LND macaroon",
+			Fn: func() error {
+				return bakeLndHubMacaroon(cfg)
+			}},
+		{Name: "Creating directories",
+			Fn: createLndHubDirs},
+		{Name: "Writing configuration",
+			Fn: func() error {
+				return writeLndHubConfig(
+					cfg, dbPassword, jwtSecret, adminToken)
+			}},
+		{Name: "Creating service",
+			Fn: writeLndHubService},
+		{Name: "Configuring firewall",
+			Fn: func() error {
+				return configureFirewall(cfg)
+			}},
+		{Name: "Rebuilding Tor config",
+			Fn: func() error {
+				return RebuildTorConfig(cfg)
+			}},
+		{Name: "Restarting Tor", Fn: restartTor},
+		{Name: "Starting LndHub", Fn: startLndHub},
 	}
 
 	if cfg.P2PMode == "hybrid" && publicIPv4 != "" {
 		steps = append(steps,
-			installStep{
-				name: "Generating TLS certificate for LndHub proxy",
-				fn: func() error {
+			InstallStep{
+				Name: "Generating TLS certificate for LndHub proxy",
+				Fn: func() error {
 					return generateProxyCert(publicIPv4)
 				}},
-			installStep{
-				name: "Creating LndHub proxy service",
-				fn:   writeLndHubProxyService},
-			installStep{
-				name: "Starting LndHub TLS proxy",
-				fn:   startLndHubProxy},
+			InstallStep{
+				Name: "Creating LndHub proxy service",
+				Fn:   writeLndHubProxyService},
+			InstallStep{
+				Name: "Starting LndHub TLS proxy",
+				Fn:   startLndHubProxy},
 		)
 	}
 
-	if err := RunInstallTUI(steps, appVersion); err != nil {
-		cfg.LndHubInstalled = false
-		RebuildTorConfig(cfg)
-		restartTor()
-		return err
-	}
-
-	cfg.LndHubAdminToken = adminToken
-	cfg.LndHubDBPassword = dbPassword
-	return config.Save(cfg)
+	return steps, adminToken, dbPassword, nil
 }
 
 // ── Choice box ───────────────────────────────────────────
@@ -885,101 +817,122 @@ type githubRelease struct {
 	TagName string `json:"tag_name"`
 }
 
-func RunSelfUpdate(cfg *config.AppConfig, newVersion string) error {
-	confirmMsg := theme.Header.Render("Update Virtual Private Node") + "\n\n" +
-		theme.Value.Render("Current: v"+appVersion) + "\n" +
-		theme.Value.Render("Latest:  v"+newVersion) + "\n\n" +
-		theme.Value.Render("This will download and verify the new binary.") + "\n" +
-		theme.Value.Render("The update takes effect on next SSH login.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed -- backspace to cancel")
-	if !ShowConfirmBox(confirmMsg) {
-		return nil
-	}
-
+// SelfUpdateSteps returns the install steps for updating
+// the rlvpn binary to newVersion. Steps are idempotent —
+// no rollback needed on failure. No config save on
+// success (binary replaced, takes effect on next SSH login).
+func SelfUpdateSteps(newVersion string) []InstallStep {
 	baseURL := fmt.Sprintf(
 		"https://github.com/ripsline/virtual-private-node/releases/download/v%s",
 		newVersion)
 	expectedFP := "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
-	tarball := fmt.Sprintf("rlvpn-%s-amd64.tar.gz", newVersion)
+	tarball := fmt.Sprintf("rlvpn-%s-amd64.tar.gz",
+		newVersion)
 
-	steps := []installStep{
-		{name: "Downloading v" + newVersion, fn: func() error {
-			return system.DownloadRequireTor(
-				baseURL+"/"+tarball, "/tmp/"+tarball)
-		}},
-		{name: "Downloading checksums", fn: func() error {
-			if err := system.DownloadRequireTor(
-				baseURL+"/SHA256SUMS",
-				"/tmp/rlvpn-SHA256SUMS"); err != nil {
-				return err
-			}
-			return system.DownloadRequireTor(
-				baseURL+"/SHA256SUMS.asc",
-				"/tmp/rlvpn-SHA256SUMS.asc")
-		}},
-		{name: "Importing release key", fn: func() error {
-			keyFile := "/tmp/rlvpn-release-key.asc"
-			keyURL := fmt.Sprintf(
-				"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
-				expectedFP)
-			if err := system.DownloadRequireTor(keyURL, keyFile); err != nil {
-				return fmt.Errorf(
-					"could not download signing key: %w", err)
-			}
-			defer os.Remove(keyFile)
-			if _, err := system.RunCombinedOutput("gpg",
-				"--batch", "--import", keyFile); err != nil {
-				return fmt.Errorf(
-					"could not import signing key: %w", err)
-			}
-			output, err := system.RunCombinedOutput("gpg",
-				"--batch", "--with-colons",
-				"--list-keys", expectedFP)
-			if err != nil || !strings.Contains(output, expectedFP) {
-				return fmt.Errorf("release key fingerprint mismatch")
-			}
-			return nil
-		}},
-		{name: "Verifying signature", fn: func() error {
-			output, err := system.RunCombinedOutput("gpg",
-				"--batch", "--verify",
-				"/tmp/rlvpn-SHA256SUMS.asc",
-				"/tmp/rlvpn-SHA256SUMS")
-			if err != nil {
-				return fmt.Errorf(
-					"signature verification failed: %s", output)
-			}
-			return nil
-		}},
-		{name: "Verifying checksum", fn: func() error {
-			cmd := exec.Command("sha256sum", "--ignore-missing",
-				"--check", "rlvpn-SHA256SUMS")
-			cmd.Dir = "/tmp"
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("checksum failed: %s",
-					string(output))
-			}
-			return nil
-		}},
-		{name: "Installing new binary", fn: func() error {
-			if err := system.Run("tar", "-xzf",
-				"/tmp/"+tarball, "-C", "/tmp"); err != nil {
-				return err
-			}
-			if err := system.SudoRun("install", "-m", "755",
-				"/tmp/rlvpn", "/usr/local/bin/rlvpn"); err != nil {
-				return err
-			}
-			os.Remove("/tmp/" + tarball)
-			os.Remove("/tmp/rlvpn-SHA256SUMS")
-			os.Remove("/tmp/rlvpn-SHA256SUMS.asc")
-			os.Remove("/tmp/rlvpn")
-			return nil
-		}},
+	return []InstallStep{
+		{Name: "Downloading v" + newVersion,
+			Fn: func() error {
+				return system.DownloadRequireTor(
+					baseURL+"/"+tarball,
+					"/tmp/"+tarball)
+			}},
+		{Name: "Downloading checksums",
+			Fn: func() error {
+				if err := system.DownloadRequireTor(
+					baseURL+"/SHA256SUMS",
+					"/tmp/rlvpn-SHA256SUMS"); err != nil {
+					return err
+				}
+				return system.DownloadRequireTor(
+					baseURL+"/SHA256SUMS.asc",
+					"/tmp/rlvpn-SHA256SUMS.asc")
+			}},
+		{Name: "Importing release key",
+			Fn: func() error {
+				// Skip download if key is already imported
+				// (e.g. from a previous update).
+				output, err := system.RunCombinedOutput(
+					"gpg", "--batch", "--with-colons",
+					"--list-keys", expectedFP)
+				if err == nil &&
+					strings.Contains(output, expectedFP) {
+					return nil
+				}
+
+				keyFile := "/tmp/rlvpn-release-key.asc"
+				keyURL := fmt.Sprintf(
+					"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
+					expectedFP)
+				if err := system.DownloadRequireTor(
+					keyURL, keyFile); err != nil {
+					return fmt.Errorf(
+						"could not download signing key: %w",
+						err)
+				}
+				defer os.Remove(keyFile)
+				if _, err := system.RunCombinedOutput(
+					"gpg", "--batch", "--import",
+					keyFile); err != nil {
+					return fmt.Errorf(
+						"could not import signing key: %w",
+						err)
+				}
+				output, err = system.RunCombinedOutput(
+					"gpg", "--batch", "--with-colons",
+					"--list-keys", expectedFP)
+				if err != nil ||
+					!strings.Contains(output, expectedFP) {
+					return fmt.Errorf(
+						"release key fingerprint mismatch")
+				}
+				return nil
+			}},
+		{Name: "Verifying signature",
+			Fn: func() error {
+				output, err := system.RunCombinedOutput(
+					"gpg", "--batch", "--verify",
+					"/tmp/rlvpn-SHA256SUMS.asc",
+					"/tmp/rlvpn-SHA256SUMS")
+				if err != nil {
+					return fmt.Errorf(
+						"signature verification failed: %s",
+						output)
+				}
+				return nil
+			}},
+		{Name: "Verifying checksum",
+			Fn: func() error {
+				cmd := exec.Command("sha256sum",
+					"--ignore-missing", "--check",
+					"rlvpn-SHA256SUMS")
+				cmd.Dir = "/tmp"
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					return fmt.Errorf(
+						"checksum failed: %s",
+						string(output))
+				}
+				return nil
+			}},
+		{Name: "Installing new binary",
+			Fn: func() error {
+				if err := system.Run("tar", "-xzf",
+					"/tmp/"+tarball, "-C",
+					"/tmp"); err != nil {
+					return err
+				}
+				if err := system.SudoRun("install",
+					"-m", "755", "/tmp/rlvpn",
+					"/usr/local/bin/rlvpn"); err != nil {
+					return err
+				}
+				os.Remove("/tmp/" + tarball)
+				os.Remove("/tmp/rlvpn-SHA256SUMS")
+				os.Remove("/tmp/rlvpn-SHA256SUMS.asc")
+				os.Remove("/tmp/rlvpn")
+				return nil
+			}},
 	}
-
-	return RunInstallTUI(steps, appVersion)
 }
 
 const versionCacheMaxAge = 24 * time.Hour

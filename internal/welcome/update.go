@@ -10,6 +10,7 @@ import (
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
+	"github.com/ripsline/virtual-private-node/internal/system"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -160,6 +161,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case svcActionDoneMsg:
+		m.routeToSectionScreen(secSystem, msg)
 		return m, fetchStatus(m.cfg, m.lndClient)
 	case statusMsg:
 		m.fetchInFlight = false
@@ -353,6 +355,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		rm, cmd, _ := m.routeToScreen(
 			tabOnChain, msg)
 		return rm, cmd
+	case installStepDoneMsg:
+		// Route to whichever install flow tab is open.
+		// Try each install tab kind; only one will
+		// match at a time.
+		if rm, cmd, ok := m.routeToScreen(
+			tabSyncthingInstall, msg); ok {
+			return rm, cmd
+		}
+		if rm, cmd, ok := m.routeToScreen(
+			tabLndHubInstall, msg); ok {
+			return rm, cmd
+		}
+		if rm, cmd, ok := m.routeToScreen(
+			tabP2PUpgrade, msg); ok {
+			return rm, cmd
+		}
+		if rm, cmd, ok := m.routeToScreen(
+			tabSelfUpdate, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
 	case tickMsg:
 		if m.fetchInFlight {
 			return m, tickEvery(m.pollInterval())
@@ -917,10 +940,10 @@ func runSvcActionCmd(action, svc string) tea.Cmd {
 	default:
 		return nil
 	}
-	c := exec.Command("sudo", "systemctl", verb, svc)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
+	return func() tea.Msg {
+		system.SudoRun("systemctl", verb, svc)
 		return svcActionDoneMsg{}
-	})
+	}
 }
 
 func runUpdatePackagesCmd() tea.Cmd {
