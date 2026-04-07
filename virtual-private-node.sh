@@ -51,12 +51,38 @@ if [ "$DEBIAN_VER" -lt 13 ]; then
     exit 1
 fi
 
+# ── Locate an SSH key source for the new admin user ────────
+#
+# Modern VPS providers don't give you a root login — they
+# provision a sudoer with the SSH key in its home dir, and
+# you `sudo su -` to run installers like this one. We honor
+# that by checking $SUDO_USER first, then falling back to
+# root's keys for bare-metal / legacy setups.
+#
+# If neither has keys, $SSH_KEY_SOURCE stays empty and the
+# user logs into ripsline with the random password we
+# generate (printed at the end). They can then add a key
+# via the TUI: System → SSH Keys.
+
+SSH_KEY_SOURCE=""
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] \
+    && [ -s "/home/$SUDO_USER/.ssh/authorized_keys" ]; then
+    SSH_KEY_SOURCE="/home/$SUDO_USER/.ssh/authorized_keys"
+elif [ -s /root/.ssh/authorized_keys ]; then
+    SSH_KEY_SOURCE="/root/.ssh/authorized_keys"
+fi
+
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
 echo "  ║  Virtual Private Node — Bootstrap        ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""
 echo "  Network: ${NETWORK}"
+if [ -n "$SSH_KEY_SOURCE" ]; then
+    echo "  SSH key source: ${SSH_KEY_SOURCE}"
+else
+    echo "  SSH key source: (none — password login only)"
+fi
 echo ""
 
 # ═══════════════════════════════════════════════════════════
@@ -69,7 +95,7 @@ echo "  ── Phase 1: Installing Tor (clearnet) ──────"
 echo ""
 
 apt-get update -qq
-apt-get install -y -qq sudo gnupg tor torsocks
+apt-get install -y -qq sudo gnupg tor torsocks wget
 
 # Ensure hostname resolves (prevents sudo delays)
 if ! getent hosts "$(hostname)" >/dev/null 2>&1; then
@@ -124,7 +150,7 @@ download() {
                 return 0
             fi
         elif command -v curl &>/dev/null; then
-            if torsocks curl -sL -o "$out" "$url" 2>/dev/null; then
+            if torsocks curl -sLf -o "$out" "$url" 2>/dev/null; then
                 return 0
             fi
         else
@@ -165,15 +191,15 @@ echo "$ADMIN_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$ADMIN_USER
 chmod 440 /etc/sudoers.d/$ADMIN_USER
 echo "  ✓ Configured passwordless sudo"
 
-# ── Copy SSH keys if root has them ──────────────────────────
+# ── Copy SSH keys from whichever source we found ────────────
 
-if [ -f /root/.ssh/authorized_keys ]; then
+if [ -n "$SSH_KEY_SOURCE" ]; then
     mkdir -p /home/$ADMIN_USER/.ssh
-    cp /root/.ssh/authorized_keys /home/$ADMIN_USER/.ssh/
+    cp "$SSH_KEY_SOURCE" /home/$ADMIN_USER/.ssh/authorized_keys
     chown -R $ADMIN_USER:$ADMIN_USER /home/$ADMIN_USER/.ssh
     chmod 700 /home/$ADMIN_USER/.ssh
     chmod 600 /home/$ADMIN_USER/.ssh/authorized_keys
-    echo "  ✓ Copied SSH keys to $ADMIN_USER"
+    echo "  ✓ Copied SSH keys from $SSH_KEY_SOURCE"
 fi
 
 # ── Pre-seed network config ────────────────────────────────
@@ -343,13 +369,24 @@ echo ""
 echo "  Open a NEW terminal and connect:"
 echo ""
 echo "    ssh $ADMIN_USER@<your-server-ip-address>"
-echo "    Password: $PASSWORD"
+if [ -n "$SSH_KEY_SOURCE" ]; then
+    echo ""
+    echo "    Your SSH key has been copied — key auth should"
+    echo "    just work. Fallback password (save it!): $PASSWORD"
+else
+    echo "    Password: $PASSWORD"
+fi
 echo ""
 echo "  The node installer will start automatically."
 echo "  Network: ${NETWORK}"
 echo ""
 echo "  ⚠️  Save this password. Root SSH is now disabled."
 echo "  ⚠️  Recovery: use your VPS provider's console."
+if [ -z "$SSH_KEY_SOURCE" ]; then
+    echo ""
+    echo "  To switch to key auth: log in with the password,"
+    echo "  then add your key via the TUI: System → SSH Keys."
+fi
 echo ""
 echo "  All downloads are routed through Tor."
 echo ""
