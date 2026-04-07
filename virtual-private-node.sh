@@ -65,9 +65,24 @@ fi
 # via the TUI: System → SSH Keys.
 
 SSH_KEY_SOURCE=""
-if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] \
-    && [ -s "/home/$SUDO_USER/.ssh/authorized_keys" ]; then
-    SSH_KEY_SOURCE="/home/$SUDO_USER/.ssh/authorized_keys"
+
+# Identify the original non-root user, if any.
+# $SUDO_USER is set by `sudo bash` but wiped by `sudo su -`.
+# `who am i` reads from utmp and reports the original SSH
+# login user, surviving identity changes via su.
+CANDIDATE_USER=""
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    CANDIDATE_USER="$SUDO_USER"
+elif command -v who &>/dev/null; then
+    LOGIN_USER=$(who am i 2>/dev/null | awk '{print $1}')
+    if [ -n "$LOGIN_USER" ] && [ "$LOGIN_USER" != "root" ]; then
+        CANDIDATE_USER="$LOGIN_USER"
+    fi
+fi
+
+if [ -n "$CANDIDATE_USER" ] \
+    && [ -s "/home/$CANDIDATE_USER/.ssh/authorized_keys" ]; then
+    SSH_KEY_SOURCE="/home/$CANDIDATE_USER/.ssh/authorized_keys"
 elif [ -s /root/.ssh/authorized_keys ]; then
     SSH_KEY_SOURCE="/root/.ssh/authorized_keys"
 fi
