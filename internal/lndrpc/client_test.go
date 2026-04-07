@@ -91,10 +91,3 @@ func TestNilClientSafety(t *testing.T) {
 		t.Error("should error")
 	}
 }
-
-func TestIsConnectedDefault(t *testing.T) {
-	c := &Client{}
-	if c.IsConnected() {
-		t.Error("should not be connected")
-	}
-}

@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"golang.org/x/term"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/logger"
@@ -191,90 +189,6 @@ func RunInstallTUI(steps []InstallStep, version string) error {
 	return nil
 }
 
-// ── Info and Confirm boxes ───────────────────────────────
-
-type infoBoxModel struct {
-	content       string
-	width, height int
-}
-
-func (m infoBoxModel) Init() tea.Cmd { return nil }
-func (m infoBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-	case tea.KeyPressMsg:
-		if msg.String() == "enter" || msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
-	}
-	return m, nil
-}
-func (m infoBoxModel) View() tea.View {
-	if m.width == 0 {
-		v := tea.NewView("Loading...")
-		v.AltScreen = true
-		return v
-	}
-	box := theme.Box.Padding(1, 3).
-		Width(min(m.width-8, 70)).Render(m.content)
-	content := lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, box)
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
-}
-func ShowInfoBox(content string) {
-	p := tea.NewProgram(infoBoxModel{content: content})
-	p.Run()
-}
-
-type confirmBoxModel struct {
-	content       string
-	confirmed     bool
-	width, height int
-}
-
-func (m confirmBoxModel) Init() tea.Cmd { return nil }
-func (m confirmBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "enter":
-			m.confirmed = true
-			return m, tea.Quit
-		case "backspace", "ctrl+c", "q":
-			m.confirmed = false
-			return m, tea.Quit
-		}
-	}
-	return m, nil
-}
-func (m confirmBoxModel) View() tea.View {
-	if m.width == 0 {
-		v := tea.NewView("Loading...")
-		v.AltScreen = true
-		return v
-	}
-	box := theme.Box.Padding(1, 3).
-		Width(min(m.width-8, 70)).Render(m.content)
-	content := lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, box)
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
-}
-func ShowConfirmBox(content string) bool {
-	m := confirmBoxModel{content: content}
-	p := tea.NewProgram(m)
-	result, _ := p.Run()
-	return result.(confirmBoxModel).confirmed
-}
-
 // ── Main install flow ────────────────────────────────────
 
 func Run() error {
@@ -421,150 +335,6 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 	}
 }
 
-// ── Wallet creation ──────────────────────────────────────
-
-func RunWalletCreation(cfg *config.AppConfig) error {
-	net := cfg.NetworkConfig()
-	info := theme.Header.Render("Create Your LND Wallet") + "\n\n" +
-		theme.Warning.Render("IMPORTANT: Read before proceeding") + "\n\n" +
-		theme.Value.Render("  LND will display your 24-word seed phrase") + "\n" +
-		theme.Value.Render("  in the terminal. It is shown ONCE and") + "\n" +
-		theme.Value.Render("  cannot be displayed again.") + "\n\n" +
-		theme.Value.Render("  Before proceeding:") + "\n" +
-		theme.Value.Render("  * Make sure you are in a private area") + "\n" +
-		theme.Value.Render("  * Have pen and paper ready") + "\n\n" +
-		theme.Value.Render("  LND will ask you to:") + "\n" +
-		theme.Value.Render("  1. Enter a wallet password (min 8 characters)") + "\n" +
-		theme.Value.Render("  2. Confirm the password") + "\n" +
-		theme.Value.Render("  3. 'n' to create a new seed phrase") + "\n" +
-		theme.Value.Render("  4. Optionally set a cipher seed Passphrase") + "\n" +
-		theme.Value.Render("     (press Enter to skip, most people should skip)") + "\n" +
-		theme.Value.Render("  5. WRITE DOWN your 24-word seed phrase") + "\n\n" +
-		theme.Warning.Render("Your seed is the ONLY way to recover funds.") + "\n" +
-		theme.Warning.Render("No one can help you if you lose it.") + "\n\n" +
-		theme.Dim.Render("Enter to proceed -- backspace to cancel")
-	if !ShowConfirmBox(info) {
-		return nil
-	}
-
-	fmt.Print("\033[2J\033[H")
-	fmt.Println("\n  ===================================================")
-	fmt.Println("    LND Wallet Creation")
-	fmt.Println("  ===================================================")
-	fmt.Println("  Waiting for LND...")
-	if err := waitForLND(); err != nil {
-		return err
-	}
-	fmt.Println("  LND is ready")
-	fmt.Println()
-
-	cmd := exec.Command("sudo", "-u", systemUser, "lncli",
-		"--lnddir=/var/lib/lnd", "--network="+net.LNCLINetwork,
-		"create")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("lncli create: %w", err)
-	}
-
-	fmt.Println()
-	fmt.Println("  ===================================================")
-	fmt.Println("  Your 24-word seed is displayed above.")
-	fmt.Println("  Write it down NOW. It will not be shown again.")
-	fmt.Println()
-	fmt.Println("  Store it safely:")
-	fmt.Println("  * Write on paper and store securely")
-	fmt.Println("  * Never share it with anyone")
-	fmt.Println()
-	fmt.Println("  ===================================================")
-	fmt.Println()
-	fmt.Print("  Type 'I SAVED MY SEED' to continue: ")
-
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		confirmation, _ := reader.ReadString('\n')
-		confirmation = strings.TrimSpace(confirmation)
-		if confirmation == "I SAVED MY SEED" {
-			break
-		}
-		fmt.Print("  Please type exactly: I SAVED MY SEED: ")
-	}
-
-	fmt.Println()
-	fmt.Println("  Seed confirmed.")
-	fmt.Println()
-
-	unlockMsg := theme.Header.Render("Auto-Unlock Configuration") + "\n\n" +
-		theme.Value.Render("Enter your WALLET PASSWORD in the next screen.") + "\n" +
-		theme.Value.Render("This is the password you entered at the") + "\n" +
-		theme.Value.Render("very start of wallet creation (step 1).") + "\n\n" +
-		theme.Warning.Render(" This is NOT your seed phrase") + "\n" +
-		theme.Warning.Render(" This is NOT a cipher seed Passphrase") + "\n\n" +
-		theme.Value.Render("Your wallet password will be stored so LND") + "\n" +
-		theme.Value.Render("starts automatically after reboot.") + "\n\n" +
-		theme.Dim.Render("Press Enter to continue...")
-	ShowInfoBox(unlockMsg)
-
-	fmt.Print("\033[2J\033[H")
-	fmt.Println("\n  ===================================================")
-	fmt.Println("    Auto-Unlock -- Enter Wallet Password")
-	fmt.Println("  ===================================================")
-	fmt.Println()
-	fmt.Println("  Enter the SAME password you used at the")
-	fmt.Println("  start of wallet creation (step 1).")
-	fmt.Println()
-	fmt.Println("  NOT your seed phrase")
-	fmt.Println("  NOT a cipher seed Passphrase")
-	fmt.Println()
-
-	var matched bool
-	for attempt := 0; attempt < 3; attempt++ {
-		fmt.Print("  Enter your wallet password: ")
-		pw1 := readPassword()
-		fmt.Println()
-
-		if pw1 == "" {
-			fmt.Println("  Password cannot be empty.")
-			if attempt < 2 {
-				fmt.Println("  Try again.")
-			}
-			continue
-		}
-
-		fmt.Print("  Confirm your wallet password: ")
-		pw2 := readPassword()
-		fmt.Println()
-
-		if pw1 != pw2 {
-			fmt.Println("  Passwords do not match.")
-			if attempt < 2 {
-				fmt.Println("  Try again.")
-			}
-			continue
-		}
-
-		if err := setupAutoUnlock(pw1); err != nil {
-			fmt.Printf("  Warning: %v\n", err)
-		} else {
-			fmt.Println("  Auto-unlock configured")
-		}
-		cfg.AutoUnlock = true
-		matched = true
-		break
-	}
-
-	if !matched {
-		fmt.Println("  Skipping auto-unlock. " +
-			"You will need to unlock LND manually after reboot.")
-		fmt.Println("    Run: lncli unlock")
-	}
-	cfg.WalletCreated = true
-	config.Save(cfg)
-	fmt.Print("\033[2J\033[H")
-	return nil
-}
-
 // P2PUpgradeSteps returns the install steps for upgrading
 // from Tor-only to hybrid (clearnet+Tor) P2P mode. The
 // caller must set cfg.P2PMode = "hybrid" before running
@@ -574,13 +344,16 @@ func RunWalletCreation(cfg *config.AppConfig) error {
 func P2PUpgradeSteps(
 	cfg *config.AppConfig, publicIPv4 string,
 ) []InstallStep {
+	// Note: we deliberately do NOT manually delete
+	// the TLS cert here. LND has tlsautorefresh=1 in
+	// its config, so when we rewrite lnd.conf with the
+	// new tlsextraip line and restart LND, LND detects
+	// the parameter change and regenerates the cert
+	// itself, atomically, as part of its startup. This
+	// avoids the race where our gRPC client tries to
+	// read the cert during the window between manual
+	// deletion and LND's regeneration.
 	steps := []InstallStep{
-		{Name: "Removing old TLS certificate",
-			Fn: func() error {
-				system.SudoRunSilent("rm", "-f",
-					paths.LNDTLSCert, paths.LNDTLSKey)
-				return nil
-			}},
 		{Name: "Updating LND config",
 			Fn: func() error {
 				return writeLNDConfig(cfg, publicIPv4)
@@ -758,57 +531,6 @@ func LndHubInstallSteps(
 	}
 
 	return steps, adminToken, dbPassword, nil
-}
-
-// ── Choice box ───────────────────────────────────────────
-
-type choiceBoxModel struct {
-	content       string
-	choices       []string
-	result        string
-	width, height int
-}
-
-func (m choiceBoxModel) Init() tea.Cmd { return nil }
-func (m choiceBoxModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "backspace", "ctrl+c":
-			return m, tea.Quit
-		default:
-			for _, c := range m.choices {
-				if msg.String() == c {
-					m.result = c
-					return m, tea.Quit
-				}
-			}
-		}
-	}
-	return m, nil
-}
-func (m choiceBoxModel) View() tea.View {
-	if m.width == 0 {
-		v := tea.NewView("Loading...")
-		v.AltScreen = true
-		return v
-	}
-	box := theme.Box.Padding(1, 3).
-		Width(min(m.width-8, 70)).Render(m.content)
-	content := lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, box)
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
-}
-func showChoiceBox(content string, choices []string) string {
-	m := choiceBoxModel{content: content, choices: choices}
-	p := tea.NewProgram(m)
-	result, _ := p.Run()
-	return result.(choiceBoxModel).result
 }
 
 // ── Self-update ──────────────────────────────────────────
@@ -994,29 +716,6 @@ func GetVersion() string {
 }
 
 // ── Helpers ──────────────────────────────────────────────
-
-func readPassword() string {
-	for attempts := 0; attempts < 3; attempts++ {
-		pw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		if err != nil {
-			fmt.Printf("\n  Error reading password: %v\n", err)
-			if attempts < 2 {
-				fmt.Print("  Try again: ")
-			}
-			continue
-		}
-		if len(pw) == 0 {
-			fmt.Println("\n  Password cannot be empty.")
-			if attempts < 2 {
-				fmt.Print("  Try again: ")
-			}
-			continue
-		}
-		return string(pw)
-	}
-	fmt.Println("\n  Failed to read password after 3 attempts.")
-	return ""
-}
 
 func readFileOrDefault(path, def string) string {
 	data, err := os.ReadFile(path)

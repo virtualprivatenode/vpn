@@ -111,9 +111,12 @@ func (s *WalletHomeScreen) HandleKey(
 	case "enter":
 		// No wallet → trigger wallet creation flow
 		if !s.ctx.Cfg.WalletExists() {
+			screen := NewWalletCreateScreen(s.ctx)
 			return s, func() tea.Msg {
-				return shellActionMsg{
-					action: svWalletCreate,
+				return openTabMsg{
+					Kind:   tabWalletCreate,
+					Label:  "Create Wallet",
+					Screen: screen,
 				}
 			}
 		}

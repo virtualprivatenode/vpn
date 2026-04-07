@@ -64,7 +64,15 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			mu.Unlock()
 		}()
 
-		if cfg.HasLND() && lndClient != nil && lndClient.IsConnected() {
+		// LND owns its TLS cert lifecycle via
+		// tlsautorefresh=1 in lnd.conf, so the cert
+		// is always present on disk when LND is up.
+		// The status fetcher attempts RPCs whenever
+		// the wallet exists; if LND is down or its
+		// gRPC connection is stale, the RPC fails
+		// with "Unavailable" and handleError triggers
+		// Reconnect() automatically.
+		if cfg.HasLND() && lndClient != nil {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

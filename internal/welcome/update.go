@@ -102,9 +102,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearUtxoSelectionMsg:
 		m.clearUtxoSelection()
 		return m, nil
-	case shellActionMsg:
-		m.shellAction = msg.action
-		return m, tea.Quit
 	case openTabMsg:
 		// Dedup by kind + index if Index is set
 		if msg.Index != 0 {
@@ -376,6 +373,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return rm, cmd
 		}
 		return m, nil
+	case autoUnlockSetupDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabAutoUnlock, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case autoUnlockDisableDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabAutoUnlock, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case walletLNDReadyMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabWalletCreate, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case walletExecDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabWalletCreate, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case walletCreatedMsg:
+		// Wallet was successfully created. Persist
+		// the flag, create the lndClient (it didn't
+		// exist before this point because NewModel
+		// only constructs it when the wallet already
+		// exists), and transform the wallet creation
+		// tab in place into an AutoUnlockScreen so
+		// the user goes straight from "I SAVED MY
+		// SEED" into auto-unlock setup.
+		m.cfg.WalletCreated = true
+		m.saveCfg()
+		if m.lndClient == nil && m.cfg.HasLND() {
+			m.lndClient = lndrpc.New(m.cfg.Network)
+			m.screenCtx.LndClient = m.lndClient
+		}
+		// Find the wallet creation tab and transform
+		// it. We mutate m.tabs directly because the
+		// effectiveTabs() view is computed on demand.
+		for i := range m.tabs {
+			if m.tabs[i].Kind == tabWalletCreate {
+				newScreen :=
+					NewAutoUnlockScreen(m.screenCtx)
+				m.tabs[i].Kind = tabAutoUnlock
+				m.tabs[i].Label = "Auto-Unlock"
+				m.tabs[i].Screen = newScreen
+				return m, tea.Batch(
+					fetchStatus(m.cfg, m.lndClient),
+					newScreen.Init(),
+				)
+			}
+		}
+		// Tab not found (shouldn't happen, but be
+		// defensive). Just refresh status.
+		return m, fetchStatus(m.cfg, m.lndClient)
 	case tickMsg:
 		if m.fetchInFlight {
 			return m, tickEvery(m.pollInterval())
@@ -895,11 +950,15 @@ func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
 	tmpPath := tmpFile.Name()
 	_, _ = tmpFile.WriteString(mac)
 	_ = tmpFile.Close()
+	// Macaroon hex is a credential — wipe scrollback
+	// on exit so it doesn't sit in the user's terminal
+	// history after they return to the TUI.
 	c := exec.Command("bash", "-c",
 		"clear && echo && cat "+tmpPath+
 			" && echo && echo && echo "+
 			"'  Press Enter...' && read && rm -f "+
-			tmpPath)
+			tmpPath+
+			` && printf '\033[2J\033[3J\033[H'`)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
 		return svcActionDoneMsg{}
@@ -917,11 +976,15 @@ func showInvoiceCmd(invoice string) tea.Cmd {
 	tmpPath := tmpFile.Name()
 	_, _ = tmpFile.WriteString(invoice)
 	_ = tmpFile.Close()
+	// Plain clear at end — invoice isn't sensitive
+	// (the user generated it and likely copied it),
+	// so preserving scrollback is fine.
 	c := exec.Command("bash", "-c",
 		"clear && echo && cat "+tmpPath+
 			" && echo && echo && echo "+
 			"'  Press Enter...' && read && rm -f "+
-			tmpPath)
+			tmpPath+
+			" && clear")
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
 		return svcActionDoneMsg{}

@@ -245,6 +245,15 @@ func (s *P2PUpgradeScreen) startInstall() (
 func (s *P2PUpgradeScreen) onInstallDone() tea.Cmd {
 	return func() tea.Msg {
 		config.Save(s.ctx.Cfg)
+		// The P2P upgrade deletes and regenerates LND's
+		// TLS cert. Our existing gRPC connection is now
+		// stale — explicitly reconnect so the next
+		// status poll succeeds immediately rather than
+		// failing once and reconnecting on the cycle
+		// after that.
+		if s.ctx.LndClient != nil {
+			s.ctx.LndClient.Reconnect()
+		}
 		return refreshStatusMsg{}
 	}
 }
@@ -339,15 +348,14 @@ func (s *P2PUpgradeScreen) viewConfirm(
 	p.blank()
 	p.line(" " + theme.Value.Render(
 		"It will also:"))
+	p.blank()
 	p.line(" " + theme.Value.Render(
 		"  • Open ports 9735 and 8080"+
 			" in the firewall"))
 	p.line(" " + theme.Value.Render(
 		"  • Allow Zeus to connect over clearnet"))
 	p.line(" " + theme.Value.Render(
-		"  • Regenerate the LND TLS certificate"))
-	p.line(" " + theme.Value.Render(
-		"  • Restart LND"))
+		"  • Restart LND with the new config"))
 	if cfg.LndHubInstalled {
 		p.line(" " + theme.Value.Render(
 			"  • Install TLS proxy for"+

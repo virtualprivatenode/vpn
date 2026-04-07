@@ -121,6 +121,72 @@ func (p *paneBuilder) warnWrap(
 	return p
 }
 
+// valueWrap renders prose at theme.Value style, breaking
+// at word boundaries to fit the pane width. Use for
+// long explanatory text on flow screens (e.g. confirm
+// screens with paragraphs of warnings) instead of
+// hand-wrapping with multiple p.line() calls.
+func (p *paneBuilder) valueWrap(
+	text string,
+) *paneBuilder {
+	return p.wrappedLines(text, theme.Value)
+}
+
+// warnWrapWords wraps prose at theme.Warning style,
+// breaking at word boundaries. Use for warning blocks
+// that span multiple lines. (warnWrap above is
+// character-based and used for long opaque tokens like
+// error messages — this is for prose warnings.)
+func (p *paneBuilder) warnWrapWords(
+	text string,
+) *paneBuilder {
+	return p.wrappedLines(text, theme.Warning)
+}
+
+// wrappedLines is the shared word-wrap implementation
+// for valueWrap and warnWrapWords. Splits text on
+// whitespace and packs words into lines that fit
+// within p.w - 2 columns. Empty lines in the input
+// (double newlines) become blank pane lines.
+func (p *paneBuilder) wrappedLines(
+	text string, style lipgloss.Style,
+) *paneBuilder {
+	lineW := p.w - 3 // leading space + right margin
+	if lineW < 16 {
+		lineW = 16
+	}
+	// Honor explicit paragraph breaks in the input.
+	paragraphs := strings.Split(text, "\n")
+	for pi, para := range paragraphs {
+		if pi > 0 {
+			p.lines = append(p.lines, "")
+		}
+		if para == "" {
+			continue
+		}
+		words := strings.Fields(para)
+		var current string
+		for _, w := range words {
+			if current == "" {
+				current = w
+				continue
+			}
+			if len(current)+1+len(w) > lineW {
+				p.lines = append(p.lines,
+					" "+style.Render(current))
+				current = w
+				continue
+			}
+			current += " " + w
+		}
+		if current != "" {
+			p.lines = append(p.lines,
+				" "+style.Render(current))
+		}
+	}
+	return p
+}
+
 func (p *paneBuilder) success(
 	text string,
 ) *paneBuilder {

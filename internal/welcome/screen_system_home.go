@@ -68,7 +68,7 @@ func (s *SystemHomeScreen) HandleKey(
 	// Block service actions while one is pending
 	if s.svcPending != "" {
 		switch keyStr {
-		case "r", "s", "a", "p":
+		case "r", "s", "a", "p", "u":
 			return s, nil
 		}
 	}
@@ -159,7 +159,7 @@ func (s *SystemHomeScreen) HandleKey(
 					" -n 100 --no-pager"+
 					" && echo && echo "+
 					"'  Press Enter to return...'"+
-					" && read")
+					" && read && clear")
 			return s, tea.ExecProcess(c,
 				func(err error) tea.Msg {
 					return svcActionDoneMsg{}
@@ -175,6 +175,24 @@ func (s *SystemHomeScreen) HandleKey(
 				return openTabMsg{
 					Kind:   tabP2PUpgrade,
 					Label:  "P2P Upgrade",
+					Screen: screen,
+				}
+			}
+		}
+		return s, nil
+	case "u":
+		if s.focusZone == sysHomeZoneServices &&
+			s.svcName(s.svcCursor) == "lnd" &&
+			s.ctx.Cfg.WalletExists() {
+			screen := NewAutoUnlockScreen(s.ctx)
+			label := "Auto-Unlock"
+			if s.ctx.Cfg.AutoUnlock {
+				label = "Disable Auto-Unlock"
+			}
+			return s, func() tea.Msg {
+				return openTabMsg{
+					Kind:   tabAutoUnlock,
+					Label:  label,
 					Screen: screen,
 				}
 			}
@@ -376,12 +394,28 @@ func (s *SystemHomeScreen) View(
 			svcLine += "  " +
 				theme.Dim.Render(s.svcPending)
 		} else if isSelected {
+			// Standard service hints — dim
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
+			// LND-specific destructive hotkeys —
+			// the hotkey letter itself is rendered
+			// in red so users see they're sensitive,
+			// while the description stays dim.
 			if name == "lnd" &&
 				s.ctx.Cfg.P2PMode == "tor" {
-				hint += theme.Dim.Render(
-					"  p upgrade p2p")
+				hint += "  " +
+					theme.Warning.Render("p") +
+					theme.Dim.Render(" p2p")
+			}
+			if name == "lnd" &&
+				s.ctx.Cfg.WalletExists() {
+				uLabel := " unlock"
+				if s.ctx.Cfg.AutoUnlock {
+					uLabel = " lock"
+				}
+				hint += "  " +
+					theme.Warning.Render("u") +
+					theme.Dim.Render(uLabel)
 			}
 			svcLine += hint
 		}
@@ -668,7 +702,18 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 		binds = append(binds,
 			key.NewBinding(
 				key.WithKeys("p"),
-				key.WithHelp("p", "upgrade p2p")))
+				key.WithHelp("p", "p2p")))
+	}
+	if s.svcName(s.svcCursor) == "lnd" &&
+		s.ctx.Cfg.WalletExists() {
+		uHelp := "unlock"
+		if s.ctx.Cfg.AutoUnlock {
+			uHelp = "lock"
+		}
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("u"),
+				key.WithHelp("u", uHelp)))
 	}
 	binds = append(binds,
 		key.NewBinding(

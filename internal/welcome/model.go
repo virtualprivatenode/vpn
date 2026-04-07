@@ -29,9 +29,6 @@ const (
 	svNone wSubview = iota
 	svQR
 	svFullURL
-	// Shell actions — trigger install/update flows
-	// via the Show() restart loop
-	svWalletCreate
 )
 
 // Tab types for the top tab bar
@@ -62,6 +59,8 @@ const (
 	tabLndHubInstall                   // LndHub install flow
 	tabP2PUpgrade                      // P2P mode upgrade flow
 	tabSelfUpdate                      // Self-update flow
+	tabAutoUnlock                      // Auto-unlock configuration flow
+	tabWalletCreate                    // Wallet creation flow
 )
 
 type openTab struct {
@@ -250,7 +249,6 @@ type Model struct {
 	// L16: section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
-	shellAction   wSubview
 	status        *statusMsg
 	latestVersion string
 	fetchInFlight bool
@@ -360,26 +358,13 @@ func (m Model) pollInterval() time.Duration {
 }
 
 func Show(cfg *config.AppConfig, version string) {
-	for {
-		m := NewModel(cfg, version)
-		p := tea.NewProgram(m)
-		result, _ := p.Run()
-		final := result.(Model)
+	m := NewModel(cfg, version)
+	p := tea.NewProgram(m)
+	result, _ := p.Run()
+	final := result.(Model)
 
-		if final.lndClient != nil {
-			final.lndClient.Close()
-		}
-
-		switch final.shellAction {
-		case svWalletCreate:
-			installer.RunWalletCreation(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		default:
-			return
-		}
+	if final.lndClient != nil {
+		final.lndClient.Close()
 	}
 }
 

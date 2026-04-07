@@ -168,6 +168,7 @@ func (s *AddonsHomeScreen) View(
 		lines = append(lines,
 			"   "+statusLine1)
 		if statusLine2 != "" {
+			lines = append(lines, "")
 			lines = append(lines,
 				"   "+statusLine2)
 		}
