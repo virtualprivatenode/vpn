@@ -59,6 +59,18 @@ func (s *AddonsHomeScreen) HandleKey(
 			s.cursor++
 		}
 		return s, nil
+	case "shift+tab":
+		// Step backward through cards first, then up
+		// to the tab bar — matches the two-press
+		// pattern used by every other home screen.
+		if s.cursor > 0 {
+			s.cursor--
+			return s, nil
+		}
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+		return s, nil
 	case "enter":
 		return s.handleEnter()
 	}

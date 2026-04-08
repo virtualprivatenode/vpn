@@ -34,6 +34,28 @@ func (m *Model) focusContent() {
 	m.contentFocused = true
 }
 
+// rememberTabPosition saves the current activeTab into
+// sectionFocus for the current section, so the next
+// "up from sidebar" or focusTabBarMsg-from-home-screen
+// restores it. Guards against saving 0, which would
+// clobber existing memory with a value the restore
+// logic treats as "no memory."
+//
+// Call this from any code path that *intentionally*
+// moves the cursor onto a detail tab and wants that
+// position remembered: section-exit, tab-bar→sidebar
+// boundary, openTabMsg, closeTab.
+func (m *Model) rememberTabPosition() {
+	if m.activeTab <= 0 {
+		return
+	}
+	sec := m.nav.ActiveSection()
+	if sec < 0 || sec >= numSections {
+		return
+	}
+	m.sectionFocus[sec] = m.activeTab
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -86,7 +108,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case focusTabBarMsg:
 		m.focusTabBar()
 		m.tabCursorX = 0
-		m.activeTab = 1
+		// Two cases:
+		//  1. Detail screen emitted this — m.activeTab
+		//     is already > 0, preserve it (the user
+		//     should land on the tab they came from).
+		//  2. Home screen emitted this — m.activeTab
+		//     is 0, restore from sectionFocus or fall
+		//     back to tab 1. Without this, the tab
+		//     bar focuses on the home tab and shows
+		//     no visible detail-tab cursor.
+		if m.activeTab == 0 {
+			sec := m.nav.ActiveSection()
+			tabs := m.effectiveTabs()
+			remembered := m.sectionFocus[sec]
+			if remembered >= 1 &&
+				remembered < len(tabs) {
+				m.activeTab = remembered
+			} else if len(tabs) > 1 {
+				m.activeTab = 1
+			}
+		}
 		return m, nil
 	case showQRMsg:
 		m.urlTarget = msg.URL
@@ -110,6 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if t.Kind == msg.Kind &&
 					t.Index == msg.Index {
 					m.activeTab = i
+					m.rememberTabPosition()
 					if msg.FocusTabBar {
 						m.focusTabBar()
 						m.tabCursorX = 0
@@ -128,6 +170,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if t.Kind == msg.Kind &&
 					t.Section == sec {
 					m.activeTab = i
+					m.rememberTabPosition()
 					if msg.FocusTabBar {
 						m.focusTabBar()
 						m.tabCursorX = 0
@@ -146,6 +189,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Screen:  msg.Screen,
 		})
 		m.activeTab = len(m.effectiveTabs()) - 1
+		m.rememberTabPosition()
 		if msg.FocusTabBar {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -333,21 +377,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case feeTiersMsg:
-		if msg.err == nil {
-			m.ocCtx.SendFeeTiers = msg.tiers
-			// Route to close screen
-			m.routeToScreen(
-				tabCloseChannel, msg)
-			// Route to channel detail screen
-			m.routeToScreen(
-				tabChannel, msg)
-			// Route to on-chain send screen
-			if rm, cmd, ok := m.routeToScreen(
-				tabOnChain, msg); ok {
-				return rm, cmd
+		if msg.err != nil {
+			return m, nil
+		}
+		m.ocCtx.SendFeeTiers = msg.tiers
+		// Fan out to every screen that may want fee
+		// tiers. Each routeToScreen call returns an
+		// updated Model and a possibly-nil cmd; thread
+		// the model through and batch the cmds so none
+		// get dropped.
+		var cmds []tea.Cmd
+		for _, kind := range []tabKind{
+			tabCloseChannel, tabChannel, tabOnChain,
+		} {
+			rm, cmd, ok := m.routeToScreen(kind, msg)
+			if !ok {
+				continue
+			}
+			m = rm
+			if cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 	case feeEstimateMsg:
 		rm, cmd, _ := m.routeToScreen(
 			tabOnChain, msg)
@@ -666,7 +718,17 @@ func (m Model) handleSidebarKey(
 		if m.nav.Cursor == 0 && m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
-			if m.activeTab < 1 {
+			// Restore last tab position for this
+			// section, falling back to tab 1 if no
+			// memory yet or if the saved index is
+			// out of range.
+			sec := m.nav.ActiveSection()
+			tabs := m.effectiveTabs()
+			remembered := m.sectionFocus[sec]
+			if remembered >= 1 &&
+				remembered < len(tabs) {
+				m.activeTab = remembered
+			} else if m.activeTab < 1 {
 				m.activeTab = 1
 			}
 			return m, nil
@@ -688,6 +750,12 @@ func (m Model) handleSidebarKey(
 			}
 			return m, nil
 		}
+		// Save the current section's tab position
+		// before Activate switches us away. After
+		// Activate, m.nav.ActiveSection() will return
+		// the new section, so we have to capture the
+		// old section's index here.
+		m.rememberTabPosition()
 		sec := m.nav.Activate()
 		m.focusContent()
 		m.activeTab = 0
@@ -748,6 +816,9 @@ func (m Model) handleTabBarKey(
 			return m, nil
 		}
 		m.focusSidebar()
+		// Save current position before resetting so
+		// the next "up from sidebar" restores it.
+		m.rememberTabPosition()
 		m.activeTab = 0
 		m.tabScrollOffset = 0
 		return m, nil
@@ -790,6 +861,34 @@ func (m Model) handleTabBarKey(
 	return m, nil
 }
 
+// childKindsOf returns the tab kinds that consider
+// `parent` their parent. Used by closeTab to cascade-
+// close children when their parent tab is closed.
+// Returns nil for kinds that aren't parents.
+//
+// Today only Syncthing manage and LndHub manage have
+// children. If you add a new sub-tree (e.g. another
+// add-on with detail flows), add a case here. The
+// future cleanup is to make this a field on openTab
+// (Parent tabKind) so each tab declares its own parent
+// at construction time.
+func childKindsOf(parent tabKind) []tabKind {
+	switch parent {
+	case tabSyncthing:
+		return []tabKind{
+			tabSyncthingDevice,
+			tabSyncthingWebUI,
+			tabSyncthingPair,
+		}
+	case tabLndHub:
+		return []tabKind{
+			tabLndHubAccount,
+			tabLndHubCreate,
+		}
+	}
+	return nil
+}
+
 func (m Model) closeTab(
 	tabIdx int,
 ) (tea.Model, tea.Cmd) {
@@ -804,47 +903,89 @@ func (m Model) closeTab(
 	// Model-level subview flag on any tab close.
 	m.subview = svNone
 
+	// Build a set of tabs to remove. Always includes
+	// the closing tab itself; if the closing tab is a
+	// parent (Syncthing manage, LndHub manage), also
+	// includes all of its children in the same
+	// section. Cascade is silent — no confirmation.
+	//
+	// Async results that arrive after a child is
+	// cascade-closed will land in routeToScreen,
+	// find no matching tab, and be dropped silently.
+	// This is safe for the existing flows because
+	// state-changing async messages
+	// (lndhubAccountCreatedMsg, syncthingPairedMsg)
+	// update m.cfg directly in their handlers, not
+	// only in the screen handler — so the side
+	// effect persists even if the tab is gone.
+	// Future flows that change state only via screen
+	// handlers would break this assumption.
+	childKinds := childKindsOf(closingTab.Kind)
+	shouldRemove := func(t openTab) bool {
+		if t.Section != closingTab.Section {
+			return false
+		}
+		if t.Kind == closingTab.Kind &&
+			t.Index == closingTab.Index {
+			return true
+		}
+		for _, ck := range childKinds {
+			if t.Kind == ck {
+				return true
+			}
+		}
+		return false
+	}
+
 	var newTabs []openTab
 	for _, t := range m.tabs {
-		if t.Kind == closingTab.Kind &&
-			t.Index == closingTab.Index &&
-			t.Section == closingTab.Section {
+		if shouldRemove(t) {
 			continue
 		}
 		newTabs = append(newTabs, t)
 	}
 	m.tabs = newTabs
 
-	if m.activeTab >= tabIdx {
-		m.activeTab--
-		if m.activeTab < 0 {
-			m.activeTab = 0
-		}
-	}
 	m.tabCursorX = 0
-
 	m.focusContent()
 
-	// Addon detail tabs: return to parent manage tab.
-	// All other tabs: return to section home (tab 0).
-	parentKind := tabKind(-1)
-	switch closingTab.Kind {
-	case tabSyncthingDevice, tabSyncthingWebUI,
-		tabSyncthingPair:
-		parentKind = tabSyncthing
-	case tabLndHubAccount:
-		parentKind = tabLndHub
-	case tabLndHubCreate:
-		parentKind = tabLndHub
-	}
-	m.activeTab = 0
-	if parentKind >= 0 {
-		for i, t := range m.effectiveTabs() {
-			if t.Kind == parentKind {
-				m.activeTab = i
-				break
-			}
+	// Close-to-neighbor: land on whatever tab now
+	// occupies the closed parent's index. If that
+	// index is past the new end, clamp to the last
+	// tab. If no detail tabs remain, fall back to
+	// the section home (index 0).
+	//
+	// This single rule replaces the previous
+	// addon-parent special case. Closing a Syncthing
+	// device with no siblings now lands on Syncthing
+	// manage (which is at the same neighbor index by
+	// virtue of being adjacent in the tab list);
+	// closing it with siblings lands on the next
+	// sibling instead — which is what a Sparrow /
+	// browser user expects.
+	newTabCount := len(m.effectiveTabs())
+	if newTabCount > 1 {
+		landing := tabIdx
+		if landing >= newTabCount {
+			landing = newTabCount - 1
 		}
+		m.activeTab = landing
+	} else {
+		// No detail tabs left — fall back to section
+		// home.
+		m.activeTab = 0
+	}
+
+	// Save the resolved landing index into
+	// sectionFocus so the next "up from sidebar"
+	// lands here too. This intentionally bypasses
+	// rememberTabPosition because we want to *clear*
+	// memory when no detail tabs remain (write 0),
+	// not preserve stale memory the way the helper's
+	// guard does.
+	sec := closingTab.Section
+	if sec >= 0 && sec < numSections {
+		m.sectionFocus[sec] = m.activeTab
 	}
 
 	if m.tabScrollOffset >

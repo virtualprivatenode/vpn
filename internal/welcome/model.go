@@ -267,6 +267,24 @@ type Model struct {
 	tabFocused      bool
 	tabCursorX      int
 	tabScrollOffset int
+
+	// Per-section tab memory. sectionFocus[s] holds
+	// the user's last activeTab index within section
+	// s, so that returning to s and pressing up from
+	// the sidebar restores their previous position
+	// instead of jumping to the leftmost detail tab.
+	// Zero means "no memory yet, fall back to tab 1".
+	//
+	// Invariant: tabs in non-active sections are
+	// never added, removed, or reordered. The only
+	// in-place mutation is the wallet-create →
+	// auto-unlock transformation in walletCreatedMsg,
+	// which preserves both the index and the Section
+	// field, so the saved index stays valid. If that
+	// invariant ever changes, this field needs a
+	// validate-on-restore pass to detect stale
+	// indices.
+	sectionFocus [numSections]int
 }
 
 func NewModel(
@@ -350,9 +368,6 @@ func (m Model) pollInterval() time.Duration {
 	if !m.status.lndResponding && m.cfg.HasLND() &&
 		m.cfg.WalletExists() {
 		return 5 * time.Second
-	}
-	if !m.status.btcSynced {
-		return 60 * time.Second
 	}
 	return 60 * time.Second
 }
