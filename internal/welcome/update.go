@@ -329,9 +329,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return rm, cmd
 	case paymentHistoryMsg:
 		// Route to wallet home screen
-		if rm, cmd, ok := m.routeToSectionScreen(
+		if cmd, ok := m.routeToSectionScreen(
 			secWallet, msg); ok {
-			return rm, cmd
+			return m, cmd
 		}
 		return m, nil
 	case utxoListMsg:
@@ -368,9 +368,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case labelTxMsg:
 		// Route to on-chain home screen
-		if rm, cmd, ok := m.routeToSectionScreen(
+		if cmd, ok := m.routeToSectionScreen(
 			secOnChain, msg); ok {
-			return rm, cmd
+			return m, cmd
 		}
 		if msg.err == nil {
 			return m, fetchOnChainTxCmd(m.lndClient)
@@ -386,6 +386,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// updated Model and a possibly-nil cmd; thread
 		// the model through and batch the cmds so none
 		// get dropped.
+		//
+		// The m = rm threading looks redundant because
+		// routeToScreen's screen-writeback goes through
+		// the m.tabs slice (shared backing array) and
+		// its screenCtx mutations go through a pointer,
+		// so today the discarded returns would still
+		// land in shared memory. The threading is
+		// defensive: the day someone adds a non-pointer
+		// Model mutation to routeToScreen, this loop
+		// stays correct without needing a second look.
+		// Contrast with routeToSectionScreen, which
+		// writes to the m.sectionScreens array and was
+		// converted to a pointer receiver for the same
+		// reason.
 		var cmds []tea.Cmd
 		for _, kind := range []tabKind{
 			tabCloseChannel, tabChannel, tabOnChain,
@@ -838,6 +852,7 @@ func (m Model) handleTabBarKey(
 			m.tabCursorX = 0
 			return m, nil
 		}
+		return m, nil
 
 	case "enter":
 		if m.tabCursorX == 1 && m.activeTab > 0 {
@@ -988,6 +1003,31 @@ func (m Model) closeTab(
 		m.sectionFocus[sec] = m.activeTab
 	}
 
+	// Scroll correctness: keep tabScrollOffset in
+	// agreement with where m.activeTab now points.
+	// The renderTabBar pass compensates for stale
+	// offsets on the fly, so skipping this would not
+	// be user-visible today — but the model field
+	// would drift from rendered state, which will
+	// burn any future tab-system test that asserts
+	// on tabScrollOffset directly. Mirror the two
+	// invariants the "left" key handler maintains:
+	//
+	//   1. If no detail tabs remain, reset to 0.
+	//   2. Otherwise, if the active tab is now to
+	//      the left of the current offset, pull the
+	//      offset backward to make it visible.
+	//
+	// The original upper-bound clamp (don't let the
+	// offset point past the new end) is also kept.
+	if m.activeTab == 0 {
+		m.tabScrollOffset = 0
+	} else if m.activeTab-1 < m.tabScrollOffset {
+		m.tabScrollOffset = m.activeTab - 1
+		if m.tabScrollOffset < 0 {
+			m.tabScrollOffset = 0
+		}
+	}
 	if m.tabScrollOffset >
 		len(m.effectiveTabs())-2 {
 		m.tabScrollOffset =
@@ -1043,6 +1083,15 @@ func (m *Model) setTabScreen(
 // a different tab while the async operation was in
 // flight. Returns (model, cmd, true) if routed, or
 // (model, nil, false) if no matching screen exists.
+//
+// screenCtx.HasTabs and screenCtx.ContentFocused are
+// both refreshed before dispatch so HandleMsg sees the
+// same view of focus state that HandleKey would. Without
+// this, a screen that branches on ContentFocused inside
+// HandleMsg (e.g. to decide whether to consume a paste)
+// would see whatever the last key event left the flag
+// as — silently wrong when the async message arrives
+// during sidebar or tab-bar focus.
 func (m Model) routeToScreen(
 	kind tabKind, msg tea.Msg,
 ) (Model, tea.Cmd, bool) {
@@ -1050,6 +1099,7 @@ func (m Model) routeToScreen(
 	for i, tab := range tabs {
 		if tab.Kind == kind && tab.Screen != nil {
 			m.screenCtx.HasTabs = m.hasDetailTabs()
+			m.screenCtx.ContentFocused = m.contentFocused
 			newScreen, cmd := tab.Screen.HandleMsg(msg)
 			m.setTabScreen(i, newScreen)
 			return m, cmd, true
@@ -1061,20 +1111,31 @@ func (m Model) routeToScreen(
 // routeToSectionScreen delivers a message to the section
 // home screen at the given index. Same pattern as
 // routeToScreen but keyed on section index instead of
-// tab kind. Returns (model, cmd, true) if routed, or
-// (model, nil, false) if no screen is mounted.
-func (m Model) routeToSectionScreen(
+// tab kind. Returns (cmd, true) if routed, or
+// (nil, false) if no screen is mounted.
+//
+// Pointer receiver is load-bearing: m.sectionScreens is
+// a fixed-size array, not a slice, so a value receiver
+// would write the new screen into a copy and discard it
+// on return. This bit us historically when a caller
+// forgot to capture the Model return; making the
+// receiver a pointer eliminates the class of bug.
+// routeToScreen (above) can stay a value receiver
+// because it mutates m.tabs, which is a slice and
+// shares its backing array across copies.
+func (m *Model) routeToSectionScreen(
 	sec int, msg tea.Msg,
-) (Model, tea.Cmd, bool) {
+) (tea.Cmd, bool) {
 	if sec < 0 || sec >= numSections ||
 		m.sectionScreens[sec] == nil {
-		return m, nil, false
+		return nil, false
 	}
 	m.screenCtx.HasTabs = m.hasDetailTabs()
+	m.screenCtx.ContentFocused = m.contentFocused
 	newScreen, cmd :=
 		m.sectionScreens[sec].HandleMsg(msg)
 	m.sectionScreens[sec] = newScreen
-	return m, cmd, true
+	return cmd, true
 }
 
 // ── Shell commands ───────────────────────────────────────

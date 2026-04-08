@@ -64,10 +64,19 @@ const (
 )
 
 type openTab struct {
-	Kind    tabKind
-	Label   string
-	Index   int    // channel index, payment index, etc.
-	Section int    // which section opened this tab
+	Kind  tabKind
+	Label string
+	Index int // channel index, payment index, etc.
+	// Section is the sticky owner of this tab — set
+	// at construction from m.nav.ActiveSection() and
+	// must never be mutated afterward. effectiveTabs,
+	// closeTab's cascade guard, and the sectionFocus
+	// restore logic all depend on it remaining stable.
+	// The only in-place tab transformation in the
+	// codebase (walletCreatedMsg's wallet-create →
+	// auto-unlock swap in update.go) explicitly
+	// preserves this field for that reason.
+	Section int
 	Screen  Screen // L16: owns all state for this tab's content (nil = legacy path)
 }
 
