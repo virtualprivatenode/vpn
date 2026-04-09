@@ -61,6 +61,7 @@ const (
 	tabSelfUpdate                      // Self-update flow
 	tabAutoUnlock                      // Auto-unlock configuration flow
 	tabWalletCreate                    // Wallet creation flow
+	tabNodeInfo                        // Receive channel / node info screen
 )
 
 type openTab struct {
@@ -229,6 +230,10 @@ type statusMsg struct {
 	btcSynced, btcResponding     bool
 	rebootRequired               bool
 	lndPubkey                    string
+	lndAlias                     string
+	lndURIs                      []string
+	lndVersion                   string
+	lndPeers                     int
 	lndChannels                  int
 	lndBalance                   string
 	lndSyncedChain               bool

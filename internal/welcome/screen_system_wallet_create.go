@@ -231,14 +231,45 @@ func (s *WalletCreateScreen) HandleMsg(
 //  3. Exits 0 only after the user types the exact
 //     confirmation phrase.
 //
-// If the user ctrl+c's during step 1 (lncli create),
-// lncli exits non-zero, the && short-circuits, the
-// trap is never set, the loop never runs, and the
-// callback receives the lncli error.
+// ── Asymmetric ctrl+c handling is deliberate ────────
+// Step 1 allows ctrl+c. Step 2 blocks it. This mirrors
+// the atomicity boundary inside lncli itself: until
+// GenSeed completes, no seed exists and no wallet file
+// has been written, so a canceled context leaves the
+// node in a clean state and the user can retry. Once
+// InitWallet has run, the wallet file is on disk and
+// the only remaining risk is a user who aborts before
+// writing down their seed — which would be
+// unrecoverable. Blocking SIGINT in step 2 removes
+// that exit path entirely.
 //
-// If the user ctrl+c's during step 2, the trap ignores
-// the signal and the loop continues — the only escape
-// is typing the exact phrase or killing the SSH session.
+// A subtlety worth knowing: lncli doesn't make a gRPC
+// call during the password / seed-type / passphrase
+// prompts. Those are local readline-style inputs.
+// The first (and only, for seed generation) RPC is
+// GenSeed, which fires after the cipher passphrase
+// prompt is submitted. If the user ctrl+c's during
+// the earlier prompts, lncli's SIGINT handler arms
+// cancellation on a context that doesn't exist yet,
+// and the terminal appears to swallow the signal. The
+// cancellation then fires the instant GenSeed is
+// called, and LND returns:
+//
+//	unable to generate seed: rpc error:
+//	code = Canceled desc = context canceled
+//
+// This looks like an error but is actually the
+// intended cancellation path — no wallet is written,
+// no seed is displayed, the user is safe to retry.
+// Do not "fix" this by blocking SIGINT in step 1:
+// that would remove a legitimate escape hatch that
+// depends on lncli's atomicity guarantee for its
+// correctness.
+//
+// If the user ctrl+c's during step 2, the trap
+// ignores the signal and the loop continues — the
+// only escape is typing the exact phrase or killing
+// the SSH session.
 func (s *WalletCreateScreen) startExecProcess() tea.Cmd {
 	net := s.ctx.Cfg.NetworkConfig()
 	script := `clear

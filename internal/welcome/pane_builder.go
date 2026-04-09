@@ -91,6 +91,30 @@ func (p *paneBuilder) monoWrap(text string) *paneBuilder {
 	return p
 }
 
+// fieldAligned is like field but pads the label on
+// the right to labelW characters so that a run of
+// fieldAligned calls with the same labelW produces a
+// clean vertical column of colons. Callers compute
+// labelW from the longest label in their group.
+//
+// Only works correctly for plain-ASCII labels because
+// padding is computed against len(label), not
+// lipgloss.Width(label). If you need styled or
+// wide-rune labels, widen to lipgloss.Width first.
+func (p *paneBuilder) fieldAligned(
+	label, value string, labelW int,
+) *paneBuilder {
+	padded := label
+	if len(label) < labelW {
+		padded = label +
+			strings.Repeat(" ", labelW-len(label))
+	}
+	p.lines = append(p.lines,
+		" "+theme.Label.Render(padded)+
+			theme.Value.Render(value))
+	return p
+}
+
 func (p *paneBuilder) dim(text string) *paneBuilder {
 	p.lines = append(p.lines,
 		" "+theme.Dim.Render(text))

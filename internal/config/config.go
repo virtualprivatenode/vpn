@@ -139,13 +139,6 @@ func Save(cfg *AppConfig) error {
 	return DefaultStore().Save(cfg)
 }
 
-func SaveTo(store *Store, cfg *AppConfig) error {
-	if store == nil {
-		return Save(cfg)
-	}
-	return store.Save(cfg)
-}
-
 func (c *AppConfig) HasLND() bool {
 	return c.LNDInstalled
 }

@@ -49,18 +49,6 @@ func readMacaroonHex(cfg *config.AppConfig) string {
 	return hex.EncodeToString(data)
 }
 
-func getSyncthingVersion() string {
-	output, err := system.RunContext(3*time.Second, "syncthing", "--version")
-	if err != nil {
-		return "unknown"
-	}
-	fields := strings.Fields(output)
-	if len(fields) >= 2 {
-		return fields[1]
-	}
-	return "unknown"
-}
-
 // ── Fee estimation via bitcoin-cli ───────────────────────
 
 type smartFeeResponse struct {
@@ -352,13 +340,13 @@ func balanceSummaryLines(
 		onchain = status.lndBalance
 	}
 
-	localPct := 0
+	localPct, remotePct := 0, 0
 	if totalCap > 0 {
 		localPct = int(
 			float64(totalLocal) * 100 /
 				float64(totalCap))
+		remotePct = 100 - localPct
 	}
-	remotePct := 100 - localPct
 
 	labelW := 11
 	leftColW := labelW + 18
@@ -497,15 +485,6 @@ func p2pModeLabel(mode string) string {
 		return "Tor + clearnet"
 	}
 	return "Tor only"
-}
-
-func truncatePubkey(pubkey string, maxLen int) string {
-	if len(pubkey) <= maxLen {
-		return pubkey
-	}
-	side := (maxLen - 3) / 2
-	return pubkey[:side] + "..." +
-		pubkey[len(pubkey)-side:]
 }
 
 func formatSatsCompact(sats int64) string {

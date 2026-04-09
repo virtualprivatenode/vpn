@@ -14,11 +14,11 @@ import (
 
 // ── ChannelsHomeScreen ─────────────────────────────────
 // Section home for Channels. Two focus zones: buttons
-// (Open Channel, History) and scrollable channel list.
-// Reads live data through ctx.Status pointer — no
-// snapshot, since the home screen persists for the
-// lifetime of the program and must always show current
-// data.
+// (Open Channel, Node Info, History) and scrollable
+// channel list. Reads live data through ctx.Status
+// pointer — no snapshot, since the home screen persists
+// for the lifetime of the program and must always show
+// current data.
 
 const (
 	chanHomeZoneButtons = 0
@@ -27,7 +27,7 @@ const (
 
 type ChannelsHomeScreen struct {
 	ctx       *ScreenContext
-	btnIdx    int // 0=Open Channel, 1=History
+	btnIdx    int // 0=Open Channel, 1=Node Info, 2=History
 	focusZone int // 0=buttons, 1=channel list
 	cursor    int // position in channel list
 
@@ -73,7 +73,7 @@ func (s *ChannelsHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "right":
 		if s.focusZone == chanHomeZoneButtons &&
-			s.btnIdx < 1 {
+			s.btnIdx < 2 {
 			s.btnIdx++
 		}
 		return s, nil
@@ -141,7 +141,9 @@ func (s *ChannelsHomeScreen) handleEnter() (
 		switch s.btnIdx {
 		case 0: // Open Channel
 			return s.openChannel()
-		case 1: // History
+		case 1: // Node Info
+			return s.openNodeInfo()
+		case 2: // History
 			return s.openHistory()
 		}
 		return s, nil
@@ -196,6 +198,19 @@ func (s *ChannelsHomeScreen) openChannel() (
 		return openTabMsg{
 			Kind:   tabOpenChannel,
 			Label:  "Open Channel",
+			Screen: screen,
+		}
+	}
+}
+
+func (s *ChannelsHomeScreen) openNodeInfo() (
+	Screen, tea.Cmd,
+) {
+	screen := NewNodeInfoScreen(s.ctx)
+	return s, func() tea.Msg {
+		return openTabMsg{
+			Kind:   tabNodeInfo,
+			Label:  "Node Info",
 			Screen: screen,
 		}
 	}
@@ -313,24 +328,28 @@ func (s *ChannelsHomeScreen) View(
 	// ── Fixed header ─────────────────────────────
 	var headerLines []string
 	headerLines = append(headerLines, "")
-
-	if status.lndPubkey != "" {
-		pk := truncatePubkey(status.lndPubkey, w-14)
-		headerLines = append(headerLines,
-			" "+theme.Label.Render("Pubkey:   ")+
-				theme.Mono.Render(pk))
-	}
 	headerLines = append(headerLines,
-		" "+theme.Label.Render("P2P:      ")+
+		centerPad(
+			theme.Header.Render(
+				"Lightning Channels Dashboard"),
+			w))
+	headerLines = append(headerLines, "")
+
+	// P2P Mode sits above the balance group. The
+	// balanceSummaryLines helper begins its output
+	// with a blank row (row 0 of leftLines pairs with
+	// the box top border on the right), so no explicit
+	// separator is needed here — the caller-side blank
+	// plus the helper's blank would produce two rows
+	// of gap, which is too much.
+	headerLines = append(headerLines,
+		" "+theme.Label.Render("P2P Mode: ")+
 			theme.Value.Render(
 				p2pModeLabel(cfg.P2PMode)))
-
-	headerLines = append(headerLines, "")
 
 	headerLines = append(headerLines,
 		balanceSummaryLines(status, w)...)
 
-	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 
@@ -343,7 +362,11 @@ func (s *ChannelsHomeScreen) View(
 	var btnLines []string
 	btnLines = append(btnLines,
 		renderButtons(
-			[]string{"Open Channel", "History"},
+			[]string{
+				"Open Channel",
+				"Node Info",
+				"History",
+			},
 			s.btnIdx, isOnButton, w))
 	btnLines = append(btnLines, "")
 	btnLines = append(btnLines, "")
