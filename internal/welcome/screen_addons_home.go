@@ -208,7 +208,7 @@ func (s *AddonsHomeScreen) View(
 	}
 
 	syncLines := renderSection(
-		"🔄", "Syncthing",
+		"↻", "Syncthing",
 		"Auto-backup LND channel state",
 		syncStat1, syncStat2,
 		syncSelected,

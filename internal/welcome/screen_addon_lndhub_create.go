@@ -2,12 +2,10 @@ package welcome
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/installer"
 	"github.com/ripsline/virtual-private-node/internal/paths"
@@ -22,7 +20,6 @@ const (
 	hubCreateStepInput    hubCreateStep = iota // name entry
 	hubCreateStepCreating                      // waiting for API
 	hubCreateStepCreated                       // result display
-	hubCreateStepQR                            // inline QR code
 )
 
 // ── Focus zones for input step ─────────────────────────
@@ -42,7 +39,6 @@ type LndHubCreateScreen struct {
 	btnIdx      int
 	lastAccount *installer.LndHubAccount
 	accountName string // saved for display after creation
-	qrMode      string // "" = tor, "clearnet" = clearnet
 }
 
 func NewLndHubCreateScreen(
@@ -71,8 +67,6 @@ func (s *LndHubCreateScreen) HandleKey(
 		return s.handleCreatingKey(keyStr)
 	case hubCreateStepCreated:
 		return s.handleCreatedKey(keyStr)
-	case hubCreateStepQR:
-		return s.handleQRKey(keyStr)
 	}
 	return s, nil
 }
@@ -118,8 +112,6 @@ func (s *LndHubCreateScreen) View(
 		return s.viewCreating(w, h)
 	case hubCreateStepCreated:
 		return s.viewCreated(w, h)
-	case hubCreateStepQR:
-		return s.viewQR(w, h)
 	}
 	return ""
 }
@@ -132,8 +124,6 @@ func (s *LndHubCreateScreen) HelpBindings() []key.Binding {
 		return s.creatingBindings()
 	case hubCreateStepCreated:
 		return s.createdBindings()
-	case hubCreateStepQR:
-		return s.qrBindings()
 	}
 	return nil
 }
@@ -353,10 +343,10 @@ func (s *LndHubCreateScreen) createdButtons() []string {
 
 	var btns []string
 	if hubOnion != "" {
-		btns = append(btns, "QR (Tor)")
+		btns = append(btns, "Show QR (Tor)")
 	}
 	if hasClearnet {
-		btns = append(btns, "QR (Clearnet)")
+		btns = append(btns, "Show QR (Clearnet)")
 	}
 	btns = append(btns, "Done")
 	return btns
@@ -397,14 +387,45 @@ func (s *LndHubCreateScreen) handleCreatedKey(
 		if s.btnIdx >= 0 && s.btnIdx < len(buttons) {
 			label := buttons[s.btnIdx]
 			switch label {
-			case "QR (Tor)":
-				s.qrMode = ""
-				s.step = hubCreateStepQR
-				return s, nil
-			case "QR (Clearnet)":
-				s.qrMode = "clearnet"
-				s.step = hubCreateStepQR
-				return s, nil
+			case "Show QR (Tor)":
+				if s.lastAccount == nil {
+					return s, nil
+				}
+				hubOnion := readOnion(
+					paths.TorLndHubHostname)
+				if hubOnion == "" {
+					return s, nil
+				}
+				url := fmt.Sprintf(
+					"lndhub://%s:%s@http://%s:%s",
+					s.lastAccount.Login,
+					s.lastAccount.Password,
+					hubOnion,
+					paths.LndHubExternalPort)
+				return s, func() tea.Msg {
+					return showQRMsg{
+						URL:   url,
+						Label: "LndHub — Tor",
+					}
+				}
+			case "Show QR (Clearnet)":
+				if s.lastAccount == nil ||
+					s.ctx.Status == nil ||
+					s.ctx.Status.publicIP == "" {
+					return s, nil
+				}
+				url := fmt.Sprintf(
+					"lndhub://%s:%s@https://%s:%s",
+					s.lastAccount.Login,
+					s.lastAccount.Password,
+					s.ctx.Status.publicIP,
+					paths.LndHubExternalPort)
+				return s, func() tea.Msg {
+					return showQRMsg{
+						URL:   url,
+						Label: "LndHub — Clearnet",
+					}
+				}
 			case "Done":
 				return s, emitCloseTab
 			}
@@ -474,108 +495,6 @@ func (s *LndHubCreateScreen) createdBindings() []key.Binding {
 	}
 
 	binds = append(binds, kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
-}
-
-// ── QR step ────────────────────────────────────────────
-
-func (s *LndHubCreateScreen) handleQRKey(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	switch keyStr {
-	case "ctrl+c":
-		return s, tea.Quit
-	case "enter":
-		s.step = hubCreateStepCreated
-		return s, nil
-	case "left":
-		return s, emitFocusSidebar
-	case "up", "shift+tab":
-		if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
-	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
-	}
-	return s, nil
-}
-
-func (s *LndHubCreateScreen) viewQR(
-	w, h int,
-) string {
-	p := newPane(w)
-
-	var qrData string
-	if s.qrMode == "clearnet" {
-		p.title(theme.Header, "LndHub Clearnet QR")
-		if s.lastAccount != nil &&
-			s.ctx.Status != nil &&
-			s.ctx.Status.publicIP != "" {
-			qrData = fmt.Sprintf(
-				"lndhub://%s:%s@https://%s:%s",
-				s.lastAccount.Login,
-				s.lastAccount.Password,
-				s.ctx.Status.publicIP,
-				paths.LndHubExternalPort)
-		}
-	} else {
-		p.title(theme.Header, "LndHub Connection QR")
-		if s.lastAccount != nil {
-			hubOnion := readOnion(
-				paths.TorLndHubHostname)
-			if hubOnion != "" {
-				qrData = fmt.Sprintf(
-					"lndhub://%s:%s@%s:%s",
-					s.lastAccount.Login,
-					s.lastAccount.Password,
-					hubOnion,
-					paths.LndHubExternalPort)
-			}
-		}
-	}
-
-	if qrData != "" {
-		qr := renderQRCode(qrData)
-		if qr != "" {
-			p.dim("Scan with BlueWallet or Zeus")
-			p.blank()
-			for _, line := range strings.Split(
-				qr, "\n") {
-				lineW := lipgloss.Width(line)
-				padN := (w - lineW) / 2
-				if padN < 0 {
-					padN = 0
-				}
-				p.line(
-					strings.Repeat(" ", padN) +
-						line)
-			}
-		}
-	}
-
-	return p.renderWithBottomButtons(
-		[]string{"Back"}, 0,
-		s.ctx.ContentFocused, h)
-}
-
-func (s *LndHubCreateScreen) qrBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "back")),
-		kSidebar)
 
 	if s.ctx.HasTabs {
 		binds = append(binds,

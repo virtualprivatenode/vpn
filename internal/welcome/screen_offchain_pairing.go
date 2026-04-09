@@ -35,10 +35,7 @@ func (s *PairingScreen) Init() tea.Cmd {
 }
 
 func (s *PairingScreen) maxBtn() int {
-	if s.ctx.Cfg.P2PMode == "hybrid" {
-		return 2
-	}
-	return 1
+	return len(s.buttons()) - 1
 }
 
 func (s *PairingScreen) HandleKey(
@@ -74,9 +71,22 @@ func (s *PairingScreen) HandleKey(
 	return s, nil
 }
 
+func (s *PairingScreen) buttons() []string {
+	btns := []string{"Show QR (Tor)"}
+	if s.ctx.Cfg.P2PMode == "hybrid" {
+		btns = append(btns, "Show QR (Clearnet)")
+	}
+	btns = append(btns, "Copyable Macaroon")
+	return btns
+}
+
 func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
-	switch s.btnIdx {
-	case 0: // QR (Tor)
+	btns := s.buttons()
+	if s.btnIdx < 0 || s.btnIdx >= len(btns) {
+		return s, nil
+	}
+	switch btns[s.btnIdx] {
+	case "Show QR (Tor)":
 		restOnion := readOnion(
 			paths.TorLNDRESTHostname)
 		mac := readMacaroonHex(s.ctx.Cfg)
@@ -84,19 +94,14 @@ func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
 			url := fmt.Sprintf(
 				"lndconnect://%s:8080?macaroon=%s",
 				restOnion, hexToBase64URL(mac))
-			label := "Tor QR — " +
-				restOnion[:min(20,
-					len(restOnion))] + "..."
 			return s, func() tea.Msg {
 				return showQRMsg{
 					URL:   url,
-					Label: label,
+					Label: "LND Connect — Tor",
 				}
 			}
 		}
-	case 1: // Macaroon
-		return s, showMacaroonCmd(s.ctx.Cfg)
-	case 2: // QR (Clearnet)
+	case "Show QR (Clearnet)":
 		if s.ctx.Cfg.P2PMode == "hybrid" &&
 			s.ctx.Status != nil &&
 			s.ctx.Status.publicIP != "" {
@@ -107,16 +112,16 @@ func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
 						"?macaroon=%s",
 					s.ctx.Status.publicIP,
 					hexToBase64URL(mac))
-				label := "Clearnet QR — " +
-					s.ctx.Status.publicIP + ":8080"
 				return s, func() tea.Msg {
 					return showQRMsg{
 						URL:   url,
-						Label: label,
+						Label: "LND Connect — Clearnet",
 					}
 				}
 			}
 		}
+	case "Copyable Macaroon":
+		return s, showMacaroonCmd(s.ctx.Cfg)
 	}
 	return s, nil
 }
@@ -156,7 +161,7 @@ func (s *PairingScreen) View(
 
 	if cfg.P2PMode == "hybrid" {
 		p.line(" " + theme.Header.Render(
-			"🛜 Clearnet"))
+			"Clearnet"))
 		if status.publicIP != "" {
 			p.labelLine("Server:")
 			p.monoWrap(status.publicIP)
@@ -165,7 +170,7 @@ func (s *PairingScreen) View(
 			p.monoWrap("8080")
 		}
 		p.blank()
-		p.line(" " + theme.Header.Render("🧅 Tor"))
+		p.line(" " + theme.Header.Render("Tor"))
 	}
 
 	if restOnion == "" {
@@ -186,13 +191,8 @@ func (s *PairingScreen) View(
 		p.monoWrap(preview)
 	}
 
-	btnLabels := []string{"QR (Tor)", "Copyable Macaroon"}
-	if cfg.P2PMode == "hybrid" {
-		btnLabels = append(btnLabels, "QR (Clearnet)")
-	}
-
 	return p.renderWithBottomButtons(
-		btnLabels, s.btnIdx,
+		s.buttons(), s.btnIdx,
 		s.ctx.ContentFocused, h)
 }
 
