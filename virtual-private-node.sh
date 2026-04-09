@@ -53,33 +53,58 @@ fi
 
 # ── Locate an SSH key source for the new admin user ────────
 #
-# Modern VPS providers don't give you a root login — they
-# provision a sudoer with the SSH key in its home dir, and
-# you `sudo su -` to run installers like this one. We honor
-# that by checking $SUDO_USER first, then falling back to
-# root's keys for bare-metal / legacy setups.
+# Most VPS providers don't give you a root login — they
+# provision a sudoer with the SSH key in its home dir. The
+# recommended invocation is `curl … | sudo bash`, which sets
+# $SUDO_USER directly. Operators who reach for `sudo su -`
+# first lose $SUDO_USER (it gets wiped by su's login shell),
+# so we have a cascade of fallbacks to recover the original
+# user even then.
 #
-# If neither has keys, $SSH_KEY_SOURCE stays empty and the
-# user logs into ripsline with the random password we
-# generate (printed at the end). They can then add a key
-# via the TUI: System → SSH Keys.
+# Resolution order:
+#   1. $SUDO_USER              (sudo bash — primary path)
+#   2. logname                 (asks kernel for login name,
+#                               survives sudo su -)
+#   3. who (no args)           (reads utmp, first non-root)
+#   4. /root/.ssh/authorized_keys  (bare-metal / legacy)
+#
+# Note: `who am i` was tried here originally but it depends
+# on stdin being a tty, which curl|bash does not provide.
+# logname and `who` (no args) do not have that problem.
+#
+# If none of the above yields keys, $SSH_KEY_SOURCE stays
+# empty and the operator logs into ripsline with the random
+# password we generate (printed at the end). They can then
+# add a key via the TUI: System → SSH Keys.
 
 SSH_KEY_SOURCE=""
-
-# Identify the original non-root user, if any.
-# $SUDO_USER is set by `sudo bash` but wiped by `sudo su -`.
-# `who am i` reads from utmp and reports the original SSH
-# login user, surviving identity changes via su.
 CANDIDATE_USER=""
+
+# 1. $SUDO_USER (sudo bash path)
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
     CANDIDATE_USER="$SUDO_USER"
-elif command -v who &>/dev/null; then
-    LOGIN_USER=$(who am i 2>/dev/null | awk '{print $1}')
-    if [ -n "$LOGIN_USER" ] && [ "$LOGIN_USER" != "root" ]; then
-        CANDIDATE_USER="$LOGIN_USER"
+fi
+
+# 2. logname — kernel-level lookup of the login name
+#    associated with the controlling terminal. Works through
+#    sudo su - and through curl | bash.
+if [ -z "$CANDIDATE_USER" ] && command -v logname &>/dev/null; then
+    LN=$(logname 2>/dev/null || true)
+    if [ -n "$LN" ] && [ "$LN" != "root" ]; then
+        CANDIDATE_USER="$LN"
     fi
 fi
 
+# 3. who (no args) — reads utmp directly. Last resort for
+#    unusual setups where logname fails.
+if [ -z "$CANDIDATE_USER" ] && command -v who &>/dev/null; then
+    WHO_USER=$(who 2>/dev/null | awk '$1 != "root" {print $1; exit}')
+    if [ -n "$WHO_USER" ]; then
+        CANDIDATE_USER="$WHO_USER"
+    fi
+fi
+
+# Pick the authorized_keys file to copy from.
 if [ -n "$CANDIDATE_USER" ] \
     && [ -s "/home/$CANDIDATE_USER/.ssh/authorized_keys" ]; then
     SSH_KEY_SOURCE="/home/$CANDIDATE_USER/.ssh/authorized_keys"
@@ -109,13 +134,47 @@ echo ""
 echo "  ── Phase 1: Installing Tor (clearnet) ──────"
 echo ""
 
+# Force non-interactive package operations throughout Phase 1.
+# DEBIAN_FRONTEND suppresses debconf prompts entirely.
+# NEEDRESTART_MODE=a tells needrestart (installed by default on
+# Debian 13) to auto-restart services instead of showing the
+# blue ncurses dialog mid-upgrade.
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 apt-get update -qq
+
+# Bring the base image current before doing anything else.
+# Fresh VPS images are often weeks or months old and ship
+# with unpatched CVEs. Upgrading now closes that window
+# before the box starts listening on the network.
+#
+# confdef + confold tell dpkg to keep existing config files
+# on conflict rather than prompting. On a fresh image with
+# no user customizations this is the safe default.
+echo "  Upgrading base packages (this may take a minute)..."
+apt-get upgrade -y -qq \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold"
+echo "  ✓ Base packages upgraded"
+
 apt-get install -y -qq sudo gnupg tor torsocks wget
 
 # Ensure hostname resolves (prevents sudo delays)
 if ! getent hosts "$(hostname)" >/dev/null 2>&1; then
     echo "127.0.0.1 $(hostname)" >> /etc/hosts
     echo "  ✓ Fixed hostname resolution"
+fi
+
+# Enable NTP clock sync. Bitcoin Core and LND depend on
+# accurate time for block timestamps, HTLC timeouts, and
+# macaroon expiry. systemd-timesyncd is present on Debian
+# 13 by default and uses the standard Debian NTP pool,
+# which serves UTC. No timezone setting — UTC is the
+# correct default for a server.
+if command -v timedatectl &>/dev/null; then
+    timedatectl set-ntp true 2>/dev/null || true
+    echo "  ✓ NTP clock sync enabled"
 fi
 
 # Start Tor and wait for it to bootstrap
@@ -355,19 +414,33 @@ BASHEOF
 chown $ADMIN_USER:$ADMIN_USER /home/$ADMIN_USER/.bash_profile
 echo "  ✓ Configured auto-launch"
 
-# ── Disable root SSH login ──────────────────────────────────
+# ── Harden SSH daemon ───────────────────────────────────────
+#
+# Disables root login and several legacy/unused auth paths.
+# Does NOT disable password authentication — that's a
+# one-way lockout risk and belongs in the TUI's System tab,
+# where the operator can verify key auth works first.
 
 mkdir -p /etc/ssh/sshd_config.d
-echo "PermitRootLogin no" > /etc/ssh/sshd_config.d/99-no-root.conf
-chmod 644 /etc/ssh/sshd_config.d/99-no-root.conf
-echo "  ✓ Created sshd drop-in (PermitRootLogin no)"
+cat > /etc/ssh/sshd_config.d/99-rlvpn-hardening.conf << 'SSHEOF'
+# Virtual Private Node — SSH hardening
+# Password auth is intentionally left untouched here and is
+# managed from the TUI (System tab) after key verification.
+PermitRootLogin no
+PubkeyAuthentication yes
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+X11Forwarding no
+SSHEOF
+chmod 644 /etc/ssh/sshd_config.d/99-rlvpn-hardening.conf
+echo "  ✓ Created sshd hardening drop-in"
 
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 if ! grep -q "^PermitRootLogin no" /etc/ssh/sshd_config; then
     echo "PermitRootLogin no" >> /etc/ssh/sshd_config
 fi
 systemctl restart sshd 2>/dev/null || systemctl restart ssh
-echo "  ✓ Disabled root SSH login"
+echo "  ✓ Applied SSH hardening (root login disabled)"
 
 # ── Log bootstrap completion ────────────────────────────────
 
@@ -395,8 +468,8 @@ echo ""
 echo "  The node installer will start automatically."
 echo "  Network: ${NETWORK}"
 echo ""
-echo "  ⚠  Save this password. Root SSH is now disabled."
-echo "  ⚠  Recovery: use your VPS provider's console."
+echo "  ⚠️  Save this password. Root SSH is now disabled."
+echo "  ⚠️  Recovery: use your VPS provider's console."
 if [ -z "$SSH_KEY_SOURCE" ]; then
     echo ""
     echo "  To switch to key auth: log in with the password,"

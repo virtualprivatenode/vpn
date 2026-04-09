@@ -244,7 +244,6 @@ type statusMsg struct {
 
 type Model struct {
 	cfg       *config.AppConfig
-	cfgStore  *config.Store
 	lndClient *lndrpc.Client
 	version   string
 	subview   wSubview
@@ -300,6 +299,21 @@ func NewModel(
 	cfg *config.AppConfig, version string,
 ) Model {
 	theme.Init(cfg.Theme != "light")
+	// Invariant — load-bearing for the wallet-create
+	// flow: lndClient stays nil until a wallet exists.
+	// The walletCreatedMsg handler in update.go is the
+	// only code path that creates lndClient post-launch,
+	// and it runs in the same Update tick that flips
+	// cfg.WalletCreated to true. Together these prevent
+	// statusMsg from racing walletCreatedMsg: see the
+	// walletDetected branch in status.go (gated on
+	// lndClient != nil) and the statusMsg handler in
+	// update.go (gated on !cfg.WalletExists via the
+	// same guard in the fetcher). If a future change
+	// ever needs lndClient earlier — e.g. to read a
+	// macaroon before wallet creation — the walletExec
+	// → walletCreatedMsg → tab transform sequence needs
+	// to be re-audited for the two handlers interleaving.
 	var client *lndrpc.Client
 	if cfg.HasLND() && cfg.WalletExists() {
 		client = lndrpc.New(cfg.Network)
@@ -330,22 +344,6 @@ func NewModel(
 	return m
 }
 
-func NewTestModel(
-	cfg *config.AppConfig, version string,
-	store *config.Store,
-) Model {
-	m := Model{
-		cfg: cfg, version: version,
-		subview: svNone, fetchInFlight: true,
-		nav: NewNavSidebar(),
-	}
-	m.cfgStore = store
-	m.ocCtx = &OnChainContext{
-		UtxoSelected: make(map[int]bool),
-	}
-	return m
-}
-
 func serviceNames(cfg *config.AppConfig) []string {
 	names := []string{"tor", "bitcoind"}
 	if cfg.HasLND() {
@@ -364,7 +362,7 @@ func serviceNames(cfg *config.AppConfig) []string {
 }
 
 func (m Model) saveCfg() {
-	if err := config.SaveTo(m.cfgStore, m.cfg); err != nil {
+	if err := config.Save(m.cfg); err != nil {
 		logger.TUI(
 			"ERROR: failed to save config: %v", err)
 	}

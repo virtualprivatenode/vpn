@@ -208,6 +208,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fetchInFlight = false
 		m.status = &msg
 		m.screenCtx.Status = m.status
+		// walletDetected can only fire when lndClient
+		// is non-nil (see status.go). lndClient stays
+		// nil until walletCreatedMsg runs — so during
+		// the wallet-create flow this branch is dead,
+		// and the in-place tab transform in
+		// walletCreatedMsg is the only path that moves
+		// the user off the wallet-create screen. See
+		// the invariant comment in NewModel.
 		if msg.walletDetected && !m.cfg.WalletCreated {
 			m.cfg.WalletCreated = true
 			m.saveCfg()
