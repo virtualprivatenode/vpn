@@ -33,7 +33,7 @@ type ChannelsHomeScreen struct {
 
 	// Zero balance interstitial
 	zeroBalanceMsg bool
-	fundBtnIdx     int // 0=Fund Wallet, 1=Go Back
+	fundBtnIdx     int // 0=Go Back, 1=Fund Wallet
 }
 
 func NewChannelsHomeScreen(
@@ -189,7 +189,10 @@ func (s *ChannelsHomeScreen) openChannel() (
 	if s.ctx.Status != nil &&
 		s.ctx.Status.lndBalance == "0" {
 		s.zeroBalanceMsg = true
-		s.fundBtnIdx = 0
+		// Highlight Fund Wallet (index 1) by default so
+		// pressing enter or down lands on the action
+		// button, not the Go Back button.
+		s.fundBtnIdx = 1
 		return s, nil
 	}
 	// Normal path: channel open
@@ -253,20 +256,20 @@ func (s *ChannelsHomeScreen) handleZeroBalanceKey(
 		return s, nil
 	case "enter":
 		if s.fundBtnIdx == 0 {
-			// Fund Wallet → open on-chain receive
+			// Go Back
 			s.zeroBalanceMsg = false
-			screen := NewOCReceiveScreen(s.ctx)
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabOCReceive,
-					Label:  "⛓ Receive",
-					Screen: screen,
-				}
+			return s, nil
+		}
+		// Fund Wallet → open on-chain receive
+		s.zeroBalanceMsg = false
+		screen := NewOCReceiveScreen(s.ctx)
+		return s, func() tea.Msg {
+			return openTabMsg{
+				Kind:   tabOCReceive,
+				Label:  "⛓ Receive",
+				Screen: screen,
 			}
 		}
-		// Go Back
-		s.zeroBalanceMsg = false
-		return s, nil
 	}
 	return s, nil
 }
@@ -315,11 +318,9 @@ func (s *ChannelsHomeScreen) View(
 			p.line("  " + theme.Warn.Render(
 				"once sync is complete."))
 		}
-		p.blank()
-		p.line(renderButtons(
-			[]string{"Fund Wallet", "Go Back"},
-			s.fundBtnIdx, true, w))
-		return p.render()
+		return p.renderWithBottomButtons(
+			[]string{"Go Back", "Fund Wallet"},
+			s.fundBtnIdx, true, h)
 	}
 
 	isFocused := s.ctx.ContentFocused
@@ -425,11 +426,14 @@ func (s *ChannelsHomeScreen) View(
 			}
 			remoteFill := barW - localFill
 
+			// Bar colors reflect channel state only, not
+			// cursor position. The row's orange highlight
+			// is sufficient to show which channel the
+			// cursor is on — the bar color is reserved
+			// for the semantic question "is this channel
+			// reachable right now?"
 			var lColor, rColor color.Color
-			if isSelected {
-				lColor = theme.ColorChanLocalActive
-				rColor = theme.ColorChanRemoteActive
-			} else if ch.Active {
+			if ch.Active {
 				lColor = theme.ColorChanLocal
 				rColor = theme.ColorChanRemote
 			} else {

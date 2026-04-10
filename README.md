@@ -4,25 +4,25 @@ A one-command installer for a private Lightning node on Debian —
 Bitcoin Core, LND, and Tor, configured and running in minutes.
 
 After installation, manage your node with the beautiful terminal UI
-or  `bitcoin-cli`, `lncli`, and `systemctl`. 
+or `bitcoin-cli`, `lncli`, and `systemctl`.
 No wrappers, no abstractions. Your keys, your node.
 
-![Screenshot](docs/images/dashboard.png)
+![Screenshot](docs/images/dashboard-light.png)
 
 ## What gets installed
 
 ### Base (automatic)
 
 - **Bitcoin Core** — pruned node, Tor-only P2P, GPG-verified with 5 independent signatures
+- **LND** — Lightning Network daemon with Tor hidden services, installed Tor-only by default
 - **Tor** — all traffic routed through Tor by default
 - **UFW firewall** — deny all incoming except SSH
 - **fail2ban** — brute force protection
 - **Unattended upgrades** — automatic Debian security updates
+- **NTP clock sync** — accurate time for block timestamps, HTLC timeouts, and macaroon expiry
 
 ### Optional (from the TUI)
 
-- **LND** — Lightning Network daemon with Tor hidden services
-- **Lightning Terminal** — browser-based channel management over Tor
 - **Syncthing** — automatic LND channel backup to your local device
 - **LndHub.go** — Lightning accounts
 
@@ -34,41 +34,49 @@ No wrappers, no abstractions. Your keys, your node.
 
 ### Quick Start
 
-SSH into Debian 13+ as root and run:
+SSH into your VPS and run:
 
 ```bash
-apt update && apt install -y git curl
+curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
 ```
+
+This creates a `ripsline` user, copies your SSH key across automatically,
+downloads the `rlvpn` binary, installs Bitcoin Core + LND + Tor, and
+hardens the SSH daemon. Follow the on-screen instructions to SSH in as
+`ripsline` — Bitcoin Core begins syncing and the TUI opens to the wallet
+creation flow.
+
+For testnet4:
+
 ```bash
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | bash
+curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash -s -- --testnet4
 ```
 
-This creates a `ripsline` user, downloads the `rlvpn` binary, and
-disables root SSH. Follow the on-screen instructions to SSH in as 
-`ripsline` — Bitcoin Core begins installing and syncing automatically.
-
-For testnet4 (developers usually):
-
-```bash
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | bash -s -- --testnet4
-```
+**SSH key discovery.** The bootstrap tries several ways to find an
+existing SSH key to copy to the new `ripsline` user: `$SUDO_USER`'s
+`authorized_keys`, then `logname`, then `who`, then `/root/.ssh/`.
+This works for `curl | sudo bash`, `sudo su -` followed by curl, and
+bare-metal root installs. If no key is found, a random password is
+printed at the end and you can add a key later from the TUI.
 
 ### Dashboard
 
-Every SSH login as `ripsline` opens a dashboard with four tabs:
+Every SSH login as `ripsline` opens a terminal UI with a sidebar of
+five sections plus a dark/light theme toggle:
 
-- **Dashboard** — Services (with logs), System, Bitcoin, and Lightning cards
-- **Pairing** — Zeus wallet connection with QR codes (Tor and clearnet)
-- **Add-ons** — install Syncthing, LndHub, and Lightning Terminal
-- **Settings** — update to new version
+- **Channels** — open, close, and manage Lightning channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
+- **Wallet** — send and receive Lightning payments; payment history
+- **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
+- **Add-On** — install and manage Syncthing (channel backup) and LndHub (Lightning accounts)
+- **System** — service status and logs; auto-unlock configuration; P2P mode upgrade; self-update
 
-Press`q` to drop to a shell:
+Detail views open in tabs within each section. Press `ctrl+c` to quit
+and drop to a shell:
 
 ```bash
 bitcoin-cli getblockchaininfo
 bitcoin-cli getpeerinfo
 
-# After installing LND from Dashboard:
 lncli getinfo
 lncli walletbalance
 
@@ -76,34 +84,9 @@ lncli walletbalance
 systemctl status bitcoind
 systemctl status tor@default
 systemctl status lnd
-systemctl status litd
 systemctl status lndhub
 systemctl status syncthing
 ```
-
-### Software Verification
-
-All software is verified with GPG signatures and SHA256 checksums:
-
-- **Bitcoin Core** — 5 trusted builder keys from
-  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
-  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any key is a hard stop.
-- **LND** — Roasbeef's signing key verified against known fingerprint.
-- **Lightning Terminal** — ViktorT-11's signing key from Ubuntu keyserver.
-- **LndHub.go** — built from source at pinned release tag (v1.0.2).
-  No prebuilt binary is used. The Go toolchain compiles directly from
-  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
-
-Verification failure is a hard stop.
-
-After installation, review the log:
-
-```bash
-cat /var/log/rlvpn.log
-```
-
-For manual binary verification before installation, see
-[Release Verification](docs/verifying.md).
 
 ### Build from Source
 
@@ -123,48 +106,116 @@ cd virtual-private-node
 go mod tidy
 go build -o rlvpn ./cmd/
 sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | bash
+curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
 ```
+
+The bootstrap script detects that `rlvpn` is already installed and
+skips the download.
+
+### Software Verification
+
+All software is verified with GPG signatures and SHA256 checksums:
+
+- **Bitcoin Core** — 5 trusted builder keys from
+  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
+  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
+  key is a hard stop.
+- **LND** — Roasbeef's signing key verified against known fingerprint.
+- **LndHub.go** — built from source at pinned release tag (v1.0.2).
+  No prebuilt binary is used. The Go toolchain compiles directly from
+  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
+- **rlvpn binary** — signed with a key hosted on an independent
+  keyserver (not GitHub). The bootstrap downloads the key file directly
+  through Tor rather than using keyserver protocols, so compromising
+  one source does not compromise both the binary and the key.
+
+Verification failure is a hard stop.
+
+After installation, review the log:
+
+```bash
+cat /var/log/rlvpn.log
+```
+
+For manual binary verification before installation, see
+[Release Verification](docs/verifying.md).
+
+### Wallet Creation
+
+On first TUI launch after bootstrap, you'll go straight to the wallet
+creation flow:
+
+1. Read the privacy and seed warnings, press Proceed
+2. Wait for LND to become ready
+3. Type a wallet password
+4. Write down your 24-word seed on paper
+5. Type `I SAVED MY SEED` to confirm
+
+The confirmation phrase is required — there is no skip. Once confirmed,
+the flow transitions into auto-unlock configuration so you don't have
+to manually unlock on every reboot.
+
+A note on cancellation: pressing `ctrl+c` during the password prompt is
+a legitimate escape hatch (no seed has been generated yet, nothing is
+written to disk). Once you've seen your seed, `ctrl+c` is blocked by
+design — the only way forward is typing the confirmation phrase.
 
 ### Connecting Zeus Wallet
 
+Open the **Wallet** section in the TUI for Zeus pairing — scan a QR
+code or copy the connection string. Both Tor and clearnet pairings
+are supported if your node is in hybrid P2P mode.
+
 #### Tor only (default)
-1. Install LND from Dashboard, create wallet
-2. Open Pairing tab → Zeus card
-3. In Zeus: Advanced Set-Up → LND (REST)
-4. Enter server address, REST port (8080), and macaroon from Pairing tab
-5. Or scan QR code from Pairing tab
+1. Open the Wallet section → Pair Wallet
+2. In Zeus: Advanced Set-Up → LND (REST)
+3. Scan the QR code, or copy the server address, REST port (8080),
+   and macaroon
 
 #### Clearnet + Tor (hybrid mode)
-1. Install LND with hybrid P2P mode, or upgrade from Lightning details
-2. Open Pairing tab → Zeus card
-3. Both clearnet (IP:8080) and Tor connection details are shown
-4. Scan the Clearnet QR
-5. First clearnet connection: accept the certificate warning — the connection is encrypted
+1. Upgrade to hybrid P2P mode from System → P2P Upgrade
+2. Open the Wallet section → Pair Wallet
+3. Both clearnet (IP:8080) and Tor connection strings are available
+4. First clearnet connection: accept the self-signed certificate
+   warning — the connection is encrypted with LND's auto-refreshed
+   TLS certificate
 
 Note: Clearnet is faster. Tor is more private. Both use the same macaroon.
 
-#### P2P Mode
+### Sharing Your Node
 
-During LND installation, choose between:
+The **Channels** section has a **Node Info** tab that displays
+everything a peer needs to open a channel with you:
 
-- Tor only — maximum privacy, all connections through Tor
-- Hybrid (Tor + clearnet) — better routing, your server IP is published to the Lightning Network
+- Node alias, pubkey, LND version
+- Peer count, active channels, node capacity
+- Outbound, inbound, on-chain, and total spendable balances
+- QR codes for your advertised URIs (Tor, clearnet, or both)
+- A `Copy URIs` button that drops to a shell view with clean
+  clearnet/Tor section labels for easy copy-paste
 
-You can upgrade from Tor-only to hybrid later from the Lightning
-details view. This is a one-way change — once your IP is published
-to the network gossip, it cannot be retracted.
+### P2P Mode
+
+LND is installed Tor-only by default. You can upgrade to hybrid mode
+later from **System → P2P Upgrade**:
+
+- **Tor only** — maximum privacy, all connections through Tor
+- **Hybrid (Tor + clearnet)** — better routing, your server IP is
+  published to the Lightning Network
+
+The upgrade is one-way — once your IP is published to the network
+gossip, it cannot be retracted.
 
 ### LndHub — Lightning Accounts
 
 LndHub.go provides separate Lightning wallet accounts backed by your
 LND node. Create accounts for family, friends, or AI agents from the
-Add-ons tab. Each account gets isolated credentials and connects via
-Zeus or any LndHub-compatible wallet.
+Add-On section. Each account gets isolated credentials and connects
+via Zeus or any LndHub-compatible wallet.
 
 **How it works:**
 
-1. Install LndHub from the Add-ons tab
+1. Install LndHub from the Add-On section
 2. Create accounts from the LndHub management screen
 3. Share the login, password, and server address with the user
 4. They connect Zeus: Advanced Set-Up → LndHub → enter credentials
@@ -181,8 +232,8 @@ Zeus or any LndHub-compatible wallet.
 **Built from source:**
 
 LndHub.go is cloned from GitHub at a pinned release tag and compiled
-on your server using the Go toolchain. No prebuilt binaries are downloaded.
-PostgreSQL is installed as the database backend.
+on your server using the Go toolchain. No prebuilt binaries are
+downloaded. PostgreSQL is installed as the database backend.
 
 **Clearnet note:** Clearnet connections (hybrid P2P mode) are encrypted
 via a TLS reverse proxy. Tor connections use HTTP through the encrypted
@@ -191,10 +242,10 @@ Tor tunnel. Both are secure in transit.
 ### Syncthing Channel Backups
 
 Syncthing automatically syncs your LND `channel.backup` file to
-your local device. No cloud services. No trust. If your Server dies,
+your local device. No cloud services. No trust. If your VPS dies,
 recover your channels with your seed phrase and the backup file.
 
-The sync connection is direct between your Node and your device
+The sync connection is direct between your VPS and your device
 over an encrypted channel. Syncthing uses mutual TLS authentication
 with device keys — only devices you explicitly approve can connect.
 Discovery servers and relays are disabled.
@@ -203,12 +254,12 @@ Discovery servers and relays are disabled.
 
 1. Install Syncthing on your device from [syncthing.net](https://syncthing.net)
 2. Disable discovery, relays, and NAT traversal in local Syncthing settings
-3. Pair your device from the Add-ons tab in the dashboard
-4. Add the Node as a remote device in your local Syncthing
+3. Pair your device from the Add-On section in the dashboard
+4. Add the VPS as a remote device in your local Syncthing
 5. Accept the backup folder share and set it to Receive Only
 
 Your `channel.backup` syncs automatically whenever both devices are
-online. The Syncthing web UI on the Node is accessible over Tor for
+online. The Syncthing web UI on the VPS is accessible over Tor for
 advanced configuration.
 
 For the full setup guide, see
@@ -220,14 +271,16 @@ For the full setup guide, see
 - All connections through Tor (SOCKS5 port 9050)
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
-- UFW firewall: SSH only (+ 9735, 8080, 3000 for hybrid P2P, 22000 for Syncthing)
+- UFW firewall: SSH only (+ 9735, 8080 for hybrid P2P, 3000 for LndHub hybrid, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
 - Root SSH disabled after bootstrap
+- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled (password auth left on by default — toggle from the TUI once you've verified key auth works)
 - Services run as dedicated bitcoin system user
 - GPG signature verification for all software
-- Signing key hosted on independent keyserver with pinned fingerprint
+- Signing key hosted on independent keyserver with pinned fingerprint, downloaded as a file through Tor
 - Bad signature detection — any BADSIG is a hard stop
 - Unattended security upgrades with auto-reboot
+- Base packages upgraded during bootstrap to close CVE windows on stale VPS images
 - LND channel backup auto-synced via Syncthing (mutual TLS, direct connection, no cloud)
 - Syncthing sync port (22000) rejects unapproved devices via mutual TLS before any data exchange
 - Syncthing web UI accessible only via Tor
@@ -240,25 +293,27 @@ For the full setup guide, see
 - LndHub TLS proxy: rate limited (10 req/s), X-Forwarded-For stripped
 - Public IP detection uses kernel routing table (no external network calls)
 - Mandatory seed confirmation ("I SAVED MY SEED") during wallet creation
+- Auto-unlock (optional) uses a local password file with 0400 perms, never transmitted
 
 ### Privacy — Network Traffic
 
 The bootstrap script makes two types of network calls:
 
 **Phase 1 (clearnet, unavoidable):**
-- `apt-get install tor torsocks gnupg sudo` — Debian package mirrors
+- `apt-get upgrade` — Debian security updates
+- `apt-get install tor torsocks gnupg sudo wget` — Debian package mirrors
 
 **Phase 2 (all through Tor):**
 - rlvpn binary download from GitHub
-- GPG signing key import from keyserver
-- Bitcoin Core, LND, LIT downloads
-- Go toolchain download
-- Syncthing repository key
+- GPG signing key file download from independent keyserver
+- Bitcoin Core and LND downloads
+- Go toolchain download (when LndHub is installed)
+- Syncthing repository key (when Syncthing is installed)
 - All subsequent apt operations
 
-After bootstrap, the only clearnet traffic is Syncthing sync (port 22000)
-if you install it, and LND P2P if you choose hybrid mode. Everything
-else routes through Tor.
+After bootstrap, the only clearnet traffic is Syncthing sync
+(port 22000) if you install it, and LND P2P if you choose hybrid
+mode. Everything else routes through Tor.
 
 Verify Tor routing after install:
 ```bash
@@ -268,17 +323,17 @@ grep "Tor" /var/log/rlvpn.log
 ### Architecture
 
 ```
-User SSH → ripsline@<server-ip-address> → rlvpn dashboard (non-root)
+User SSH → ripsline@VPS → rlvpn TUI (non-root)
                              ↓
               sudo per-action → systemctl, bitcoin-cli, lncli
-              press q → shell with bitcoin-cli, lncli wrappers
+              ctrl+c → shell with bitcoin-cli, lncli wrappers
 
 Services (systemd, run as bitcoin user):
-  tor.service → SOCKS proxy, hidden services
+  tor.service        → SOCKS proxy, hidden services
   bitcoind.service   → pruned node, Tor-routed, wallet disabled
-  lnd.service → Lightning (from Dashboard)
-  litd.service       → Lightning Terminal (add-on)
+  lnd.service        → Lightning daemon, Tor-only by default
   lndhub.service     → Lightning accounts (add-on, built from source)
+  lndhub-proxy       → TLS reverse proxy for LndHub (hybrid mode only)
   syncthing.service  → channel backup sync (add-on)
 ```
 
@@ -288,13 +343,11 @@ Services (systemd, run as bitcoin user):
 | --- | --- |
 | /etc/bitcoin/bitcoin.conf | Bitcoin Core configuration |
 | /etc/lnd/lnd.conf | LND configuration |
-| /etc/lit/lit.conf | Lightning Terminal configuration |
 | /etc/syncthing/ | Syncthing configuration |
 | /etc/lndhub/lndhub.env | LndHub configuration and secrets |
 | /etc/rlvpn/config.json | Install state and credentials |
 | /var/lib/bitcoin/ | Blockchain data |
 | /var/lib/lnd/ | LND data and wallet |
-| /var/lib/lit/ | Lightning Terminal data |
 | /var/lib/lndhub/ | LndHub data |
 | /var/lib/syncthing/lnd-backup/ | Auto-synced channel.backup |
 | /var/log/rlvpn.log | Application log (install, verification, status) |

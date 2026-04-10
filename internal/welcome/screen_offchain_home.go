@@ -324,9 +324,7 @@ func (s *WalletHomeScreen) View(
 		posStyle := lipgloss.NewStyle().
 			Foreground(theme.ColorPrimary)
 		dimStyle := theme.Dim
-		selBg := lipgloss.NewStyle().
-			Foreground(theme.ColorAccent).
-			Bold(true)
+		selBg := theme.NavActive
 
 		for i, entry := range s.entries {
 			isSelected := i == s.cursor &&

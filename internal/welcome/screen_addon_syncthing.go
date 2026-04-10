@@ -6,7 +6,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
@@ -233,9 +232,7 @@ func (s *SyncthingDetailScreen) View(
 		onList := isFocused &&
 			s.focusZone == syncDetailZoneList
 
-		selStyle := lipgloss.NewStyle().
-			Foreground(theme.ColorAccent).
-			Bold(true)
+		selStyle := theme.NavActive
 
 		tableStart := len(midLines)
 

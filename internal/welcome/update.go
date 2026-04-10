@@ -1285,9 +1285,27 @@ func runSvcActionCmd(action, svc string) tea.Cmd {
 }
 
 func runUpdatePackagesCmd() tea.Cmd {
+	// Non-interactive environment so beginner users
+	// never see mid-upgrade prompts:
+	//   - DEBIAN_FRONTEND=noninteractive suppresses
+	//     debconf dialogs entirely
+	//   - NEEDRESTART_MODE=a tells needrestart (default
+	//     on Debian 13) to auto-restart services instead
+	//     of showing its blue ncurses picker
+	//   - --force-confdef + --force-confold keeps the
+	//     existing config file on any conffile conflict,
+	//     skipping the pink dpkg prompt
+	// This matches the bootstrap script's Phase 1
+	// upgrade command exactly.
 	c := exec.Command("bash", "-c",
-		"sudo apt-get update && "+
-			"sudo apt-get upgrade -y")
+		"sudo DEBIAN_FRONTEND=noninteractive "+
+			"NEEDRESTART_MODE=a "+
+			"apt-get update -qq && "+
+			"sudo DEBIAN_FRONTEND=noninteractive "+
+			"NEEDRESTART_MODE=a "+
+			"apt-get upgrade -y -qq "+
+			"-o Dpkg::Options::=--force-confdef "+
+			"-o Dpkg::Options::=--force-confold")
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return svcActionDoneMsg{}
 	})

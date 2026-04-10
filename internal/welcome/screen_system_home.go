@@ -298,11 +298,7 @@ func (s *SystemHomeScreen) View(
 	verText := "Virtual Private Node v" +
 		installer.GetVersion()
 	headerLines = append(headerLines,
-		centerPad(
-			lipgloss.NewStyle().
-				Bold(true).
-				Foreground(theme.ColorAccent).
-				Render(verText), w))
+		centerPad(theme.Action.Render(verText), w))
 
 	hasUpdate := s.hasUpdate()
 	if hasUpdate {

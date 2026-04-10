@@ -43,7 +43,7 @@ type OnChainHomeScreen struct {
 	labelEditing bool
 	labelInput   textinput.Model
 	labelOnBtn   bool // true when on Save/Cancel buttons
-	labelBtnIdx  int  // 0=Save, 1=Cancel
+	labelBtnIdx  int  // 0=Cancel, 1=Save
 }
 
 func NewOnChainHomeScreen(
@@ -391,7 +391,8 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 	case "down", "tab":
 		if !s.labelOnBtn {
 			s.labelOnBtn = true
-			s.labelBtnIdx = 0
+			// Land on Save (index 1) — the action button.
+			s.labelBtnIdx = 1
 			s.labelInput.Blur()
 		}
 		return s, nil
@@ -420,7 +421,10 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 	case "enter":
 		if s.labelOnBtn {
 			switch s.labelBtnIdx {
-			case 0: // Save
+			case 0: // Cancel
+				s.closeLabelPopup()
+				return s, nil
+			case 1: // Save
 				if s.utxoCursor <
 					len(s.ocCtx.Utxos) {
 					txid := s.ocCtx.Utxos[s.utxoCursor].Txid
@@ -431,14 +435,11 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 				}
 				s.closeLabelPopup()
 				return s, nil
-			case 1: // Cancel
-				s.closeLabelPopup()
-				return s, nil
 			}
 		}
-		// On label field — move to buttons
+		// On label field — move to buttons, land on Save.
 		s.labelOnBtn = true
-		s.labelBtnIdx = 0
+		s.labelBtnIdx = 1
 		s.labelInput.Blur()
 		return s, nil
 	case "backspace":
@@ -668,10 +669,7 @@ func (s *OnChainHomeScreen) View(
 				marker = "▸"
 			}
 
-			selStyle := lipgloss.NewStyle().
-				Foreground(
-					theme.ColorAccent).
-				Bold(true)
+			selStyle := theme.NavActive
 
 			switch {
 			case isSelected && s.pencilFocused &&
@@ -806,10 +804,7 @@ func (s *OnChainHomeScreen) View(
 			marker := " "
 			if isSelected {
 				marker = "▸"
-				selStyle := lipgloss.NewStyle().
-					Foreground(
-						theme.ColorAccent).
-					Bold(true)
+				selStyle := theme.NavActive
 				txMidLines = append(txMidLines,
 					marker+
 						selStyle.Render(dateStr)+
@@ -894,14 +889,17 @@ func (s *OnChainHomeScreen) openLabelPopup() {
 	s.labelInput.Focus()
 	s.labelEditing = true
 	s.labelOnBtn = false
-	s.labelBtnIdx = 0
+	// Default to Save (index 1) so the first down/tab
+	// or enter off the label field lands on the action
+	// button, not Cancel.
+	s.labelBtnIdx = 1
 	s.pencilFocused = false
 }
 
 func (s *OnChainHomeScreen) closeLabelPopup() {
 	s.labelEditing = false
 	s.labelOnBtn = false
-	s.labelBtnIdx = 0
+	s.labelBtnIdx = 1
 	s.labelInput.Blur()
 }
 
@@ -944,7 +942,7 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 			border.Render("│"))
 
 	btnStr := renderButtons(
-		[]string{"Save", "Cancel"},
+		[]string{"Cancel", "Save"},
 		s.labelBtnIdx,
 		isFocused && s.labelOnBtn, boxW)
 	btnW := lipgloss.Width(btnStr)

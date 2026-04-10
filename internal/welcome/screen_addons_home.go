@@ -71,7 +71,7 @@ func (s *AddonsHomeScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
-	case "enter":
+	case "enter", "right":
 		return s.handleEnter()
 	}
 	return s, nil
