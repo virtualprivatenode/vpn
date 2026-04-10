@@ -7,7 +7,18 @@ After installation, manage your node with the beautiful terminal UI
 or `bitcoin-cli`, `lncli`, and `systemctl`.
 No wrappers, no abstractions. Your keys, your node.
 
-![Screenshot](docs/images/dashboard-light.png)
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/images/create_wallet_dark.png" alt="Create Wallet Screen (Dark)" /></td>
+    <td><img src="docs/images/create_wallet_light.png" alt="Create Wallet Screen (Light)" /></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/channels_dark.png" alt="Channels Dashboard (Dark)" /></td>
+    <td><img src="docs/images/channels_lights.png" alt="Channels Dashboard (Light)" /></td>
+  </tr>
+</table>
 
 ## What gets installed
 
@@ -34,11 +45,14 @@ No wrappers, no abstractions. Your keys, your node.
 
 ### Quick Start
 
-SSH into your VPS and run:
+SSH into your Server (computer) and run:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
 ```
+
+> [!NOTE]
+> Some downloads route through Tor and can occasionally fail on the first attempt. The script is idempotent and safe to rerun. If you hit an error, just run the above command again.
 
 This creates a `ripsline` user, copies your SSH key across automatically,
 downloads the `rlvpn` binary, installs Bitcoin Core + LND + Tor, and
@@ -242,10 +256,10 @@ Tor tunnel. Both are secure in transit.
 ### Syncthing Channel Backups
 
 Syncthing automatically syncs your LND `channel.backup` file to
-your local device. No cloud services. No trust. If your VPS dies,
+your local device. No cloud services. No trust. If your Node dies,
 recover your channels with your seed phrase and the backup file.
 
-The sync connection is direct between your VPS and your device
+The sync connection is direct between your Node and your device
 over an encrypted channel. Syncthing uses mutual TLS authentication
 with device keys — only devices you explicitly approve can connect.
 Discovery servers and relays are disabled.
@@ -255,11 +269,11 @@ Discovery servers and relays are disabled.
 1. Install Syncthing on your device from [syncthing.net](https://syncthing.net)
 2. Disable discovery, relays, and NAT traversal in local Syncthing settings
 3. Pair your device from the Add-On section in the dashboard
-4. Add the VPS as a remote device in your local Syncthing
+4. Add the Node as a remote device in your local Syncthing
 5. Accept the backup folder share and set it to Receive Only
 
 Your `channel.backup` syncs automatically whenever both devices are
-online. The Syncthing web UI on the VPS is accessible over Tor for
+online. The Syncthing web UI on the Node is accessible over Tor for
 advanced configuration.
 
 For the full setup guide, see
@@ -280,7 +294,7 @@ For the full setup guide, see
 - Signing key hosted on independent keyserver with pinned fingerprint, downloaded as a file through Tor
 - Bad signature detection — any BADSIG is a hard stop
 - Unattended security upgrades with auto-reboot
-- Base packages upgraded during bootstrap to close CVE windows on stale VPS images
+- Base packages upgraded during bootstrap to close CVE windows on stale server images
 - LND channel backup auto-synced via Syncthing (mutual TLS, direct connection, no cloud)
 - Syncthing sync port (22000) rejects unapproved devices via mutual TLS before any data exchange
 - Syncthing web UI accessible only via Tor
@@ -323,7 +337,7 @@ grep "Tor" /var/log/rlvpn.log
 ### Architecture
 
 ```
-User SSH → ripsline@VPS → rlvpn TUI (non-root)
+User SSH → ripsline@<server-ip-address> → rlvpn TUI (non-root)
                              ↓
               sudo per-action → systemctl, bitcoin-cli, lncli
               ctrl+c → shell with bitcoin-cli, lncli wrappers

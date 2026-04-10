@@ -2,13 +2,21 @@
 
 Reproducibility is a goal of the Virtual Private Node project.
 As of v0.1.1 and later, it is possible to recreate the exact binary
-in the GitHub releases.
+published in the GitHub releases.
 
 Because the project is a single statically-linked Go binary with no
 bundled runtime, reproducibility is straightforward compared to
 projects that bundle a JVM or native installers.
 
 ## Reproducing a release
+
+### Prerequisites
+
+On Debian 13+:
+
+```bash
+apt install -y git wget curl sudo
+```
 
 ### Install Go
 
@@ -23,11 +31,11 @@ different default flags, which will produce a non-reproducible build.
 
 #### Go from the official downloads
 
-It is available for all supported platforms from
+Go is available for all supported platforms from
 [go.dev/dl](https://go.dev/dl/).
 
 ```bash
-GO_VERSION="1.26.0"  # check go.mod for exact version
+GO_VERSION="1.26.1"  # check go.mod for exact version
 wget "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
@@ -40,22 +48,13 @@ export PATH=$PATH:/usr/local/go/bin
 go version
 ```
 
-### Other requirements
-
-Other packages may be necessary depending on the platform. On
-Debian systems:
-
-```bash
-sudo apt install -y git wget curl sudo
-```
-
 ### Building the binary
 
 First, assign a temporary variable in your shell for the specific
 release you want to build:
 
 ```bash
-GIT_TAG="v0.3.4"
+GIT_TAG="v0.4.0"
 ```
 
 The project can then be cloned as follows:
@@ -85,7 +84,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     -o rlvpn ./cmd/
 ```
 
-The binary will be placed in the current directory as`rlvpn`.
+The binary will be placed in the current directory as `rlvpn`.
 
 ### Verifying the binary is identical
 
@@ -93,7 +92,7 @@ Download the released binary from
 [GitHub Releases](https://github.com/ripsline/virtual-private-node/releases):
 
 ```bash
-VERSION="0.3.4"
+VERSION="0.4.0"
 
 wget -q "https://github.com/ripsline/virtual-private-node/releases/download/v${VERSION}/rlvpn-${VERSION}-amd64.tar.gz"
 wget -q "https://github.com/ripsline/virtual-private-node/releases/download/v${VERSION}/SHA256SUMS"
@@ -137,15 +136,15 @@ platform and Go version.
 
 If the checksums do not match, check the following:
 
-|  | Cause | Fix |
-| ------- | ----- | --- |
-| Different Go version | Check`go.mod` and use the exact version listed |  |
-| Missing`-trimpath` |  | Local filesystem paths get embedded in the binary |
-| CGO enabled | Set`CGO_ENABLED=0` explicitly |  |
-| Different`ldflags` | Must include`-s -w -X main.version=VERSION` |  |
-| OS/arch mismatch | Must build with`GOOS=linux GOARCH=amd64` |  |
-|  | Go installed via apt/snap | Use the official tarball from go.dev/dl |
-| Missing`-X main.version` |  | Version string will differ in the binary |
+| Cause | Fix |
+| --- | --- |
+| Different Go version | Check `go.mod` and use the exact version listed |
+| Missing `-trimpath` | Local filesystem paths get embedded in the binary |
+| CGO enabled | Set `CGO_ENABLED=0` explicitly |
+| Different `ldflags` | Must include `-s -w -X main.version=VERSION` |
+| OS/arch mismatch | Must build with `GOOS=linux GOARCH=amd64` |
+| Go installed via apt/snap | Use the official tarball from go.dev/dl |
+| Missing `-X main.version` | Version string will differ in the binary |
 
 You can inspect the build metadata embedded in each binary:
 
@@ -159,7 +158,7 @@ Both outputs should be identical.
 ## What this proves
 
 | Check | What it verifies |
-| ----------------- | --- |
+| --- | --- |
 | GPG signature | Release was signed by the project maintainer |
 | SHA256 checksum | Download was not corrupted or tampered with |
 | Reproducible build | Binary was built from the published source code |
