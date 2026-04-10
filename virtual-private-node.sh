@@ -242,18 +242,23 @@ download() {
 }
 
 # ── Create admin user ───────────────────────────────────────
+#
+# A fresh random password is generated on every run. On a
+# re-run after a partial failure, this replaces the existing
+# password so the final summary always prints a usable one.
+
+set +o pipefail
+PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 25)
+set -o pipefail
+if [ ${#PASSWORD} -lt 25 ]; then
+    echo "ERROR: Failed to generate secure password."
+    exit 1
+fi
 
 if id "$ADMIN_USER" &>/dev/null; then
-    echo "  User $ADMIN_USER already exists, skipping."
-    PASSWORD="(unchanged)"
+    echo "$ADMIN_USER:$PASSWORD" | chpasswd
+    echo "  ✓ User $ADMIN_USER exists — password reset"
 else
-    set +o pipefail
-    PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 25)
-    set -o pipefail
-    if [ ${#PASSWORD} -lt 25 ]; then
-        echo "ERROR: Failed to generate secure password."
-        exit 1
-    fi
     adduser --disabled-password --gecos "Virtual Private Node" "$ADMIN_USER"
     echo "$ADMIN_USER:$PASSWORD" | chpasswd
     echo "  ✓ Created user $ADMIN_USER"
