@@ -24,6 +24,7 @@ type NodeInfo struct {
 	SyncedChain bool
 	SyncedGraph bool
 	Version     string
+	URIs        []string // LND's advertised node URIs
 }
 
 type WalletBalance struct {
@@ -135,6 +136,7 @@ func (c *Client) GetInfo() (*NodeInfo, error) {
 		SyncedChain: resp.GetSyncedToChain(),
 		SyncedGraph: resp.GetSyncedToGraph(),
 		Version:     resp.GetVersion(),
+		URIs:        resp.GetUris(),
 	}, nil
 }
 

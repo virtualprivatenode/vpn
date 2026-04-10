@@ -144,7 +144,7 @@ func TestSignerFingerprints(t *testing.T) {
 }
 
 func TestReleaseKeyFingerprintFormat(t *testing.T) {
-	// The release signing key fingerprint is defined in setup.go's RunSelfUpdate.
+	// The release signing key fingerprint is defined in setup.go's SelfUpdateSteps.
 	// We can't easily access it from here since it's a local variable,
 	// but we can test the fingerprint validation logic.
 

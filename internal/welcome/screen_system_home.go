@@ -19,10 +19,9 @@ import (
 // (Update Packages, Update Node, Reboot) and scrollable
 // service list with hotkey actions (r/s/a/l).
 //
-// Confirms are screen-owned: svcConfirm, sysConfirm,
-// and updateConfirm all live here. When active, they
-// intercept all keys and show y/n prompt in the view
-// and helpbar.
+// Confirms are screen-owned: svcConfirm and sysConfirm
+// live here. When active, they intercept all keys and
+// show y/n prompt in the view and helpbar.
 
 const (
 	sysHomeZoneButtons  = 0
@@ -36,9 +35,11 @@ type SystemHomeScreen struct {
 	svcCursor int
 
 	// Confirm dialogs — screen-owned
-	svcConfirm    string // "Restart", "Stop", "Start"
-	sysConfirm    string // "Update packages", "Reboot"
-	updateConfirm bool   // Update Node confirm
+	svcConfirm string // "Restart", "Stop", "Start"
+	sysConfirm string // "Update packages", "Reboot"
+
+	// Background service action in progress
+	svcPending string // "restarting...", "stopping...", "starting..."
 }
 
 func NewSystemHomeScreen(
@@ -63,8 +64,13 @@ func (s *SystemHomeScreen) HandleKey(
 	if s.sysConfirm != "" {
 		return s.handleSysConfirm(keyStr)
 	}
-	if s.updateConfirm {
-		return s.handleUpdateConfirm(keyStr)
+
+	// Block service actions while one is pending
+	if s.svcPending != "" {
+		switch keyStr {
+		case "r", "s", "a", "p", "u":
+			return s, nil
+		}
 	}
 
 	hasUpdate := s.hasUpdate()
@@ -153,11 +159,43 @@ func (s *SystemHomeScreen) HandleKey(
 					" -n 100 --no-pager"+
 					" && echo && echo "+
 					"'  Press Enter to return...'"+
-					" && read")
+					" && read && clear")
 			return s, tea.ExecProcess(c,
 				func(err error) tea.Msg {
 					return svcActionDoneMsg{}
 				})
+		}
+		return s, nil
+	case "p":
+		if s.focusZone == sysHomeZoneServices &&
+			s.svcName(s.svcCursor) == "lnd" &&
+			s.ctx.Cfg.P2PMode == "tor" {
+			screen := NewP2PUpgradeScreen(s.ctx)
+			return s, func() tea.Msg {
+				return openTabMsg{
+					Kind:   tabP2PUpgrade,
+					Label:  "P2P Upgrade",
+					Screen: screen,
+				}
+			}
+		}
+		return s, nil
+	case "u":
+		if s.focusZone == sysHomeZoneServices &&
+			s.svcName(s.svcCursor) == "lnd" &&
+			s.ctx.Cfg.WalletExists() {
+			screen := NewAutoUnlockScreen(s.ctx)
+			label := "Auto-Unlock"
+			if s.ctx.Cfg.AutoUnlock {
+				label = "Disable Auto-Unlock"
+			}
+			return s, func() tea.Msg {
+				return openTabMsg{
+					Kind:   tabAutoUnlock,
+					Label:  label,
+					Screen: screen,
+				}
+			}
 		}
 		return s, nil
 	case "enter":
@@ -167,7 +205,15 @@ func (s *SystemHomeScreen) HandleKey(
 				s.sysConfirm = "Update packages"
 			case 1:
 				if hasUpdate {
-					s.updateConfirm = true
+					screen := NewSelfUpdateScreen(
+						s.ctx)
+					return s, func() tea.Msg {
+						return openTabMsg{
+							Kind:   tabSelfUpdate,
+							Label:  "Updating",
+							Screen: screen,
+						}
+					}
 				}
 			case 2:
 				s.sysConfirm = "Reboot"
@@ -188,6 +234,14 @@ func (s *SystemHomeScreen) handleSvcConfirm(
 	if keyStr == "y" {
 		svc := s.svcName(s.svcCursor)
 		if svc != "" {
+			switch action {
+			case "Restart":
+				s.svcPending = "restarting..."
+			case "Stop":
+				s.svcPending = "stopping..."
+			case "Start":
+				s.svcPending = "starting..."
+			}
 			return s, runSvcActionCmd(action, svc)
 		}
 	}
@@ -208,23 +262,13 @@ func (s *SystemHomeScreen) handleSysConfirm(
 	return s, nil
 }
 
-func (s *SystemHomeScreen) handleUpdateConfirm(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	s.updateConfirm = false
-	if keyStr == "y" {
-		return s, func() tea.Msg {
-			return shellActionMsg{
-				action: svSelfUpdate,
-			}
-		}
-	}
-	return s, nil
-}
-
 func (s *SystemHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	switch msg.(type) {
+	case svcActionDoneMsg:
+		s.svcPending = ""
+	}
 	return s, nil
 }
 
@@ -254,11 +298,7 @@ func (s *SystemHomeScreen) View(
 	verText := "Virtual Private Node v" +
 		installer.GetVersion()
 	headerLines = append(headerLines,
-		centerPad(
-			lipgloss.NewStyle().
-				Bold(true).
-				Foreground(theme.ColorAccent).
-				Render(verText), w))
+		centerPad(theme.Action.Render(verText), w))
 
 	hasUpdate := s.hasUpdate()
 	if hasUpdate {
@@ -290,15 +330,6 @@ func (s *SystemHomeScreen) View(
 				s.focusZone == sysHomeZoneButtons, w,
 			1, !hasUpdate))
 	headerLines = append(headerLines, "")
-
-	if s.updateConfirm {
-		headerLines = append(headerLines,
-			" "+theme.Warning.Render(
-				"Update to v"+
-					s.ctx.LatestVersion+
-					"? [y/n]"))
-		headerLines = append(headerLines, "")
-	}
 
 	if s.sysConfirm != "" {
 		headerLines = append(headerLines,
@@ -355,9 +386,33 @@ func (s *SystemHomeScreen) View(
 		svcLine := " " + prefix + " " + dot + " " +
 			style.Render(name)
 
-		if isSelected {
+		if isSelected && s.svcPending != "" {
+			svcLine += "  " +
+				theme.Dim.Render(s.svcPending)
+		} else if isSelected {
+			// Standard service hints — dim
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
+			// LND-specific destructive hotkeys —
+			// the hotkey letter itself is rendered
+			// in red so users see they're sensitive,
+			// while the description stays dim.
+			if name == "lnd" &&
+				s.ctx.Cfg.P2PMode == "tor" {
+				hint += "  " +
+					theme.Warning.Render("p") +
+					theme.Dim.Render(" p2p")
+			}
+			if name == "lnd" &&
+				s.ctx.Cfg.WalletExists() {
+				uLabel := " unlock"
+				if s.ctx.Cfg.AutoUnlock {
+					uLabel = " lock"
+				}
+				hint += "  " +
+					theme.Warning.Render("u") +
+					theme.Dim.Render(uLabel)
+			}
 			svcLine += hint
 		}
 
@@ -587,8 +642,7 @@ func (s *SystemHomeScreen) View(
 
 func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 	// Confirm dialogs override everything
-	if s.svcConfirm != "" || s.sysConfirm != "" ||
-		s.updateConfirm {
+	if s.svcConfirm != "" || s.sysConfirm != "" {
 		return newConfirmBindings().ShortHelp()
 	}
 
@@ -638,11 +692,31 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 		key.NewBinding(
 			key.WithKeys("l"),
 			key.WithHelp("l", "logs")),
+	}
+	if s.svcName(s.svcCursor) == "lnd" &&
+		s.ctx.Cfg.P2PMode == "tor" {
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("p"),
+				key.WithHelp("p", "p2p")))
+	}
+	if s.svcName(s.svcCursor) == "lnd" &&
+		s.ctx.Cfg.WalletExists() {
+		uHelp := "unlock"
+		if s.ctx.Cfg.AutoUnlock {
+			uHelp = "lock"
+		}
+		binds = append(binds,
+			key.NewBinding(
+				key.WithKeys("u"),
+				key.WithHelp("u", uHelp)))
+	}
+	binds = append(binds,
 		key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("⇧tab", "buttons")),
 		kSidebar,
-	}
+	)
 	binds = append(binds, kQuit)
 	return binds
 }

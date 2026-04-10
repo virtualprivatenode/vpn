@@ -42,7 +42,6 @@ type Client struct {
 	macaroonHex string
 	network     string
 	mu          sync.RWMutex
-	connected   bool
 }
 
 // New creates a new LND gRPC client. It reads the TLS certificate
@@ -98,7 +97,6 @@ func (c *Client) connect() error {
 
 	c.conn = conn
 	c.lightning = lnrpc.NewLightningClient(conn)
-	c.connected = true
 
 	// Test the connection with a longer timeout.
 	// During IBD, LND's GetInfo queries Bitcoin Core which can be slow.
@@ -124,19 +122,11 @@ func (c *Client) Reconnect() {
 	}
 	c.conn = nil
 	c.lightning = nil
-	c.connected = false
 	c.mu.Unlock()
 
 	if err := c.connect(); err != nil {
 		logger.Status("LND gRPC reconnect failed: %v", err)
 	}
-}
-
-// IsConnected returns true if the gRPC connection is established.
-func (c *Client) IsConnected() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.connected
 }
 
 // Close shuts down the gRPC connection.
@@ -147,7 +137,6 @@ func (c *Client) Close() {
 		c.conn.Close()
 		c.conn = nil
 		c.lightning = nil
-		c.connected = false
 	}
 }
 

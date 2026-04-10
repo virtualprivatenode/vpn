@@ -49,18 +49,6 @@ func readMacaroonHex(cfg *config.AppConfig) string {
 	return hex.EncodeToString(data)
 }
 
-func getSyncthingVersion() string {
-	output, err := system.RunContext(3*time.Second, "syncthing", "--version")
-	if err != nil {
-		return "unknown"
-	}
-	fields := strings.Fields(output)
-	if len(fields) >= 2 {
-		return fields[1]
-	}
-	return "unknown"
-}
-
 // ── Fee estimation via bitcoin-cli ───────────────────────
 
 type smartFeeResponse struct {
@@ -352,13 +340,13 @@ func balanceSummaryLines(
 		onchain = status.lndBalance
 	}
 
-	localPct := 0
+	localPct, remotePct := 0, 0
 	if totalCap > 0 {
 		localPct = int(
 			float64(totalLocal) * 100 /
 				float64(totalCap))
+		remotePct = 100 - localPct
 	}
-	remotePct := 100 - localPct
 
 	labelW := 11
 	leftColW := labelW + 18
@@ -497,15 +485,6 @@ func p2pModeLabel(mode string) string {
 		return "Tor + clearnet"
 	}
 	return "Tor only"
-}
-
-func truncatePubkey(pubkey string, maxLen int) string {
-	if len(pubkey) <= maxLen {
-		return pubkey
-	}
-	side := (maxLen - 3) / 2
-	return pubkey[:side] + "..." +
-		pubkey[len(pubkey)-side:]
 }
 
 func formatSatsCompact(sats int64) string {
@@ -691,4 +670,142 @@ func cleanPayReq(s string) string {
 	s = strings.TrimPrefix(s, "lightning:")
 	s = strings.TrimPrefix(s, "LIGHTNING:")
 	return s
+}
+
+// ── Wallet creation prompt ──────────────────────────────
+// Shared across all three section home screens when no
+// wallet exists. Renders a centered call-to-action with
+// a focusable "Create Wallet" button.
+
+func renderWalletPrompt(
+	w, h int, focused bool,
+) string {
+	boxW := w - 8
+	if boxW > 50 {
+		boxW = 50
+	}
+	if boxW < 30 {
+		boxW = 30
+	}
+
+	border := theme.AddonBorderNormal
+
+	var lines []string
+	lines = append(lines,
+		border.Render(
+			"┌"+strings.Repeat("─", boxW-2)+"┐"))
+
+	padLine := border.Render("│") +
+		strings.Repeat(" ", boxW-2) +
+		border.Render("│")
+	lines = append(lines, padLine)
+
+	msg1 := "Create your Lightning wallet"
+	msg2 := "to start sending and receiving"
+	msg3 := "Bitcoin over the Lightning Network."
+
+	centerInBox := func(text string) string {
+		rendered := theme.Value.Render(text)
+		vis := lipgloss.Width(rendered)
+		pad := boxW - 2 - vis
+		lp := pad / 2
+		rp := pad - lp
+		if lp < 0 {
+			lp = 0
+		}
+		if rp < 0 {
+			rp = 0
+		}
+		return border.Render("│") +
+			strings.Repeat(" ", lp) +
+			rendered +
+			strings.Repeat(" ", rp) +
+			border.Render("│")
+	}
+
+	lines = append(lines, centerInBox(msg1))
+	lines = append(lines, centerInBox(msg2))
+	lines = append(lines, centerInBox(msg3))
+	lines = append(lines, padLine)
+
+	// Button
+	btnLabel := "Create Wallet"
+	var btnRendered string
+	if focused {
+		btnRendered = theme.BtnFocused.
+			Render(" " + btnLabel + " ")
+	} else {
+		btnRendered = theme.BtnNormal.
+			Render(" " + btnLabel + " ")
+	}
+	btnVis := lipgloss.Width(btnRendered)
+	btnPad := boxW - 2 - btnVis
+	btnLP := btnPad / 2
+	btnRP := btnPad - btnLP
+	if btnLP < 0 {
+		btnLP = 0
+	}
+	if btnRP < 0 {
+		btnRP = 0
+	}
+	btnLine := border.Render("│") +
+		strings.Repeat(" ", btnLP) +
+		btnRendered +
+		strings.Repeat(" ", btnRP) +
+		border.Render("│")
+	lines = append(lines, btnLine)
+
+	lines = append(lines, padLine)
+	lines = append(lines,
+		border.Render(
+			"└"+strings.Repeat("─", boxW-2)+"┘"))
+
+	// Center vertically in available space
+	content := strings.Join(lines, "\n")
+	contentH := len(lines)
+	topPad := (h - contentH) / 2
+	if topPad < 1 {
+		topPad = 1
+	}
+
+	var out []string
+	for i := 0; i < topPad; i++ {
+		out = append(out, "")
+	}
+
+	// Center horizontally
+	boxVis := lipgloss.Width(lines[0])
+	leftPad := (w - boxVis) / 2
+	if leftPad < 1 {
+		leftPad = 1
+	}
+	prefix := strings.Repeat(" ", leftPad)
+	for _, l := range lines {
+		out = append(out, prefix+l)
+	}
+
+	_ = content // suppress unused
+	return strings.Join(out, "\n")
+}
+
+// renderWaitingForLND renders a vertically and
+// horizontally centered "Waiting for LND..." message.
+func renderWaitingForLND(w, h int) string {
+	msg := theme.Dim.Render("Waiting for LND...")
+	msgW := lipgloss.Width(msg)
+	lp := (w - msgW) / 2
+	if lp < 0 {
+		lp = 0
+	}
+	line := strings.Repeat(" ", lp) + msg
+	topPad := h / 2
+	if topPad < 1 {
+		topPad = 1
+	}
+	var out []string
+	for i := 0; i < topPad; i++ {
+		out = append(out, "")
+	}
+	out = append(out, line)
+	return strings.Join(out, "\n")
 }

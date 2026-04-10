@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
@@ -30,47 +29,55 @@ const (
 	svNone wSubview = iota
 	svQR
 	svFullURL
-	// Shell actions — trigger install/update flows
-	// via the Show() restart loop
-	svWalletCreate
-	svLNDInstall
-	svSyncthingInstall
-	svLndHubInstall
-	svSelfUpdate
-	svP2PUpgrade
 )
 
 // Tab types for the top tab bar
 type tabKind int
 
 const (
-	tabMain            tabKind = iota // Main view for current section
-	tabChannel                        // Channel detail
-	tabPayment                        // Payment detail
-	tabSend                           // ⚡ Send payment flow
-	tabReceive                        // ⚡ Receive payment flow
-	tabPairing                        // Pairing screen
-	tabOnChain                        // ⛓ On-chain send flow
-	tabOCReceive                      // ⛓ On-chain receive flow
-	tabSyncthing                      //
-	tabSyncthingDevice                // Syncthing device detail
-	tabSyncthingWebUI                 // Syncthing Web UI
-	tabSyncthingPair                  // Syncthing pair device flow
-	tabLndHub                         //
-	tabLndHubAccount                  // LndHub account detail
-	tabLndHubCreate                   // LndHub create account flow
-	tabOpenChannel                    // Channel open flow
-	tabCloseChannel                   // Channel close flow
-	tabOnChainTx                      // on-chain transaction detail
-	tabUtxoDetail                     // UTXO detail with label edit
-	tabChannelHistory                 // channel history view
+	tabMain             tabKind = iota // Main view for current section
+	tabChannel                         // Channel detail
+	tabPayment                         // Payment detail
+	tabSend                            // ⚡ Send payment flow
+	tabReceive                         // ⚡ Receive payment flow
+	tabPairing                         // Pairing screen
+	tabOnChain                         // ⛓ On-chain send flow
+	tabOCReceive                       // ⛓ On-chain receive flow
+	tabSyncthing                       //
+	tabSyncthingDevice                 // Syncthing device detail
+	tabSyncthingWebUI                  // Syncthing Web UI
+	tabSyncthingPair                   // Syncthing pair device flow
+	tabLndHub                          //
+	tabLndHubAccount                   // LndHub account detail
+	tabLndHubCreate                    // LndHub create account flow
+	tabOpenChannel                     // Channel open flow
+	tabCloseChannel                    // Channel close flow
+	tabOnChainTx                       // on-chain transaction detail
+	tabUtxoDetail                      // UTXO detail with label edit
+	tabChannelHistory                  // channel history view
+	tabSyncthingInstall                // Syncthing install flow
+	tabLndHubInstall                   // LndHub install flow
+	tabP2PUpgrade                      // P2P mode upgrade flow
+	tabSelfUpdate                      // Self-update flow
+	tabAutoUnlock                      // Auto-unlock configuration flow
+	tabWalletCreate                    // Wallet creation flow
+	tabNodeInfo                        // Receive channel / node info screen
 )
 
 type openTab struct {
-	Kind    tabKind
-	Label   string
-	Index   int    // channel index, payment index, etc.
-	Section int    // which section opened this tab
+	Kind  tabKind
+	Label string
+	Index int // channel index, payment index, etc.
+	// Section is the sticky owner of this tab — set
+	// at construction from m.nav.ActiveSection() and
+	// must never be mutated afterward. effectiveTabs,
+	// closeTab's cascade guard, and the sectionFocus
+	// restore logic all depend on it remaining stable.
+	// The only in-place tab transformation in the
+	// codebase (walletCreatedMsg's wallet-create →
+	// auto-unlock swap in update.go) explicitly
+	// preserves this field for that reason.
+	Section int
 	Screen  Screen // L16: owns all state for this tab's content (nil = legacy path)
 }
 
@@ -223,6 +230,10 @@ type statusMsg struct {
 	btcSynced, btcResponding     bool
 	rebootRequired               bool
 	lndPubkey                    string
+	lndAlias                     string
+	lndURIs                      []string
+	lndVersion                   string
+	lndPeers                     int
 	lndChannels                  int
 	lndBalance                   string
 	lndSyncedChain               bool
@@ -238,7 +249,6 @@ type statusMsg struct {
 
 type Model struct {
 	cfg       *config.AppConfig
-	cfgStore  *config.Store
 	lndClient *lndrpc.Client
 	version   string
 	subview   wSubview
@@ -252,7 +262,6 @@ type Model struct {
 	// L16: section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
-	shellAction   wSubview
 	status        *statusMsg
 	latestVersion string
 	fetchInFlight bool
@@ -260,10 +269,6 @@ type Model struct {
 	// QR fullscreen (Model-owned overlay)
 	urlTarget string
 	qrLabel   string
-
-	// Channel history
-	chanHistory       []channelHistoryEntry
-	chanHistoryCursor int
 
 	// Navigation
 	nav            NavSidebar
@@ -276,33 +281,44 @@ type Model struct {
 	tabCursorX      int
 	tabScrollOffset int
 
-	// Text inputs
-	chanPubkeyInput textinput.Model
-	chanHostInput   textinput.Model
-	chanAmountInput textinput.Model
-
-	// On-chain state
-	onChainAddress string
-	utxos          []lndrpc.UTXO
-	// Coin control: UTXO selection
-	utxoSelected      map[int]bool // keyed by UTXO index
-	utxoSelectedTotal int64        // running sat total
-	utxoOutpoints     []string     // "txid:vout" for SendCoins
-
-	// Fee tiers (used by on-chain send screen + close)
-	sendFeeTiers [4]feeTier
-
-	// On-chain transaction history
-	onChainTxs []lndrpc.OnChainTx
-
-	// Payment history
-	payHistory []lndrpc.PaymentEntry
+	// Per-section tab memory. sectionFocus[s] holds
+	// the user's last activeTab index within section
+	// s, so that returning to s and pressing up from
+	// the sidebar restores their previous position
+	// instead of jumping to the leftmost detail tab.
+	// Zero means "no memory yet, fall back to tab 1".
+	//
+	// Invariant: tabs in non-active sections are
+	// never added, removed, or reordered. The only
+	// in-place mutation is the wallet-create →
+	// auto-unlock transformation in walletCreatedMsg,
+	// which preserves both the index and the Section
+	// field, so the saved index stays valid. If that
+	// invariant ever changes, this field needs a
+	// validate-on-restore pass to detect stale
+	// indices.
+	sectionFocus [numSections]int
 }
 
 func NewModel(
 	cfg *config.AppConfig, version string,
 ) Model {
 	theme.Init(cfg.Theme != "light")
+	// Invariant — load-bearing for the wallet-create
+	// flow: lndClient stays nil until a wallet exists.
+	// The walletCreatedMsg handler in update.go is the
+	// only code path that creates lndClient post-launch,
+	// and it runs in the same Update tick that flips
+	// cfg.WalletCreated to true. Together these prevent
+	// statusMsg from racing walletCreatedMsg: see the
+	// walletDetected branch in status.go (gated on
+	// lndClient != nil) and the statusMsg handler in
+	// update.go (gated on !cfg.WalletExists via the
+	// same guard in the fetcher). If a future change
+	// ever needs lndClient earlier — e.g. to read a
+	// macaroon before wallet creation — the walletExec
+	// → walletCreatedMsg → tab transform sequence needs
+	// to be re-audited for the two handlers interleaving.
 	var client *lndrpc.Client
 	if cfg.HasLND() && cfg.WalletExists() {
 		client = lndrpc.New(cfg.Network)
@@ -310,8 +326,7 @@ func NewModel(
 	m := Model{
 		cfg: cfg, lndClient: client, version: version,
 		subview: svNone, fetchInFlight: true,
-		nav:          NewNavSidebar(),
-		utxoSelected: make(map[int]bool),
+		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
 		Cfg:       cfg,
@@ -334,23 +349,6 @@ func NewModel(
 	return m
 }
 
-func NewTestModel(
-	cfg *config.AppConfig, version string,
-	store *config.Store,
-) Model {
-	m := Model{
-		cfg: cfg, version: version,
-		subview: svNone, fetchInFlight: true,
-		nav: NewNavSidebar(),
-	}
-	m.cfgStore = store
-	m.utxoSelected = make(map[int]bool)
-	m.ocCtx = &OnChainContext{
-		UtxoSelected: make(map[int]bool),
-	}
-	return m
-}
-
 func serviceNames(cfg *config.AppConfig) []string {
 	names := []string{"tor", "bitcoind"}
 	if cfg.HasLND() {
@@ -369,7 +367,7 @@ func serviceNames(cfg *config.AppConfig) []string {
 }
 
 func (m Model) saveCfg() {
-	if err := config.SaveTo(m.cfgStore, m.cfg); err != nil {
+	if err := config.Save(m.cfg); err != nil {
 		logger.TUI(
 			"ERROR: failed to save config: %v", err)
 	}
@@ -383,67 +381,17 @@ func (m Model) pollInterval() time.Duration {
 		m.cfg.WalletExists() {
 		return 5 * time.Second
 	}
-	if !m.status.btcSynced {
-		return 15 * time.Second
-	}
 	return 60 * time.Second
 }
 
 func Show(cfg *config.AppConfig, version string) {
-	for {
-		m := NewModel(cfg, version)
-		p := tea.NewProgram(m)
-		result, _ := p.Run()
-		final := result.(Model)
+	m := NewModel(cfg, version)
+	p := tea.NewProgram(m)
+	result, _ := p.Run()
+	final := result.(Model)
 
-		if final.lndClient != nil {
-			final.lndClient.Close()
-		}
-
-		switch final.shellAction {
-		case svLndHubInstall:
-			installer.RunLndHubInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		case svWalletCreate:
-			installer.RunWalletCreation(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		case svLNDInstall:
-			installer.RunLNDInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			if err := installer.AppendLNCLIToShell(
-				cfg); err != nil {
-				logger.TUI(
-					"Warning: lncli wrapper: %v",
-					err)
-			}
-			continue
-		case svSyncthingInstall:
-			installer.RunSyncthingInstall(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		case svSelfUpdate:
-			installer.RunSelfUpdate(
-				cfg, final.latestVersion)
-			continue
-		case svP2PUpgrade:
-			installer.RunP2PModeUpgrade(cfg)
-			if u, e := config.Load(); e == nil {
-				cfg = u
-			}
-			continue
-		default:
-			return
-		}
+	if final.lndClient != nil {
+		final.lndClient.Close()
 	}
 }
 
@@ -654,8 +602,14 @@ func fetchPaymentHistoryCmd(
 			return paymentHistoryMsg{
 				err: fmt.Errorf("LND not connected")}
 		}
-		invoices, _ := client.ListInvoices(50)
-		payments, _ := client.ListPayments(50)
+		invoices, err := client.ListInvoices(50)
+		if err != nil {
+			logger.TUI("ListInvoices: %v", err)
+		}
+		payments, err := client.ListPayments(50)
+		if err != nil {
+			logger.TUI("ListPayments: %v", err)
+		}
 		var all []lndrpc.PaymentEntry
 		all = append(all, invoices...)
 		all = append(all, payments...)

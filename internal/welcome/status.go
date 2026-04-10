@@ -1,6 +1,7 @@
 package welcome
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/ripsline/virtual-private-node/internal/bitcoin"
@@ -64,7 +65,15 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			mu.Unlock()
 		}()
 
-		if cfg.HasLND() && lndClient != nil && lndClient.IsConnected() {
+		// LND owns its TLS cert lifecycle via
+		// tlsautorefresh=1 in lnd.conf, so the cert
+		// is always present on disk when LND is up.
+		// The status fetcher attempts RPCs whenever
+		// the wallet exists; if LND is down or its
+		// gRPC connection is stale, the RPC fails
+		// with "Unavailable" and handleError triggers
+		// Reconnect() automatically.
+		if cfg.HasLND() && lndClient != nil {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -73,6 +82,20 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 				if err == nil {
 					s.lndResponding = true
 					s.lndPubkey = lndInfo.Pubkey
+					s.lndAlias = lndInfo.Alias
+					s.lndURIs = lndInfo.URIs
+					// LND reports Version as e.g.
+					// "0.20.0-beta commit=v0.20.0-beta".
+					// Strip the commit=... suffix so
+					// the user-facing display shows just
+					// the semver. Any downstream code
+					// that needs the full string can
+					// call GetInfo directly.
+					if fields := strings.Fields(
+						lndInfo.Version); len(fields) > 0 {
+						s.lndVersion = fields[0]
+					}
+					s.lndPeers = lndInfo.Peers
 					s.lndChannels = lndInfo.Channels
 					s.lndSyncedChain = lndInfo.SyncedChain
 					s.lndSyncedGraph = lndInfo.SyncedGraph

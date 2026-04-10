@@ -431,7 +431,7 @@ func (s *SendScreen) viewInput(w, h int) string {
 
 	if !s.ctx.Cfg.HasLND() ||
 		!s.ctx.Cfg.WalletExists() {
-		p.dim("Install LND and create wallet to send.")
+		p.dim("Create LND wallet to send.")
 		return p.render()
 	}
 	if s.ctx.Status == nil ||

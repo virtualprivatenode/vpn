@@ -1,6 +1,7 @@
 package welcome
 
 import (
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -420,12 +421,14 @@ func clampLine(s string, w int) string {
 		return s + strings.Repeat(" ",
 			w-lipgloss.Width(s))
 	}
+	// Truncation: trim runes from end until visual
+	// width fits. This is ANSI-safe — lipgloss.Width
+	// ignores escape sequences.
 	r := []rune(s)
-	if len(r) > w {
-		r = r[:w-1]
-		return string(r) + "…"
+	for lipgloss.Width(string(r)) > w-1 && len(r) > 0 {
+		r = r[:len(r)-1]
 	}
-	return string(r)
+	return string(r) + "…"
 }
 
 func centerInWidth(s string, w int) string {
@@ -440,11 +443,6 @@ func centerInWidth(s string, w int) string {
 }
 
 func parseBalance(s string) int64 {
-	var n int64
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int64(c-'0')
-		}
-	}
+	n, _ := strconv.ParseInt(s, 10, 64)
 	return n
 }

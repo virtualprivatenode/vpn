@@ -9,9 +9,13 @@ require (
 	github.com/lightningnetwork/lnd v0.20.0-beta
 	github.com/mdp/qrterminal/v3 v3.2.1
 	golang.org/x/crypto v0.46.0
-	golang.org/x/term v0.41.0
 	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.73.0-dev
+)
+
+require (
+	golang.org/x/term v0.41.0 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )
 
 require (
@@ -200,7 +204,6 @@ require (
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 	pgregory.net/rapid v1.2.0 // indirect
-	rsc.io/qr v0.2.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 

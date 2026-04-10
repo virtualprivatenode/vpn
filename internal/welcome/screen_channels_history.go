@@ -6,7 +6,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/theme"
@@ -142,9 +141,7 @@ func (s *ChannelHistoryScreen) View(
 	// ── Scrollable rows ──────────────────────────
 	var midLines []string
 
-	selStyle := lipgloss.NewStyle().
-		Foreground(theme.ColorAccent).
-		Bold(true)
+	selStyle := theme.NavActive
 
 	for i, ch := range s.entries {
 		isSelected := isFocused &&

@@ -95,7 +95,7 @@ func (s *SyncthingWebUIScreen) View(
 	w, h int,
 ) string {
 	p := newPane(w)
-	p.title(theme.Header, "🔄 Syncthing Web UI")
+	p.title(theme.Header, "↻ Syncthing Web UI")
 
 	syncOnion := readOnion(paths.TorSyncthingHostname)
 	if syncOnion == "" {

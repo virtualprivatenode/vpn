@@ -14,11 +14,11 @@ import (
 
 // ── ChannelsHomeScreen ─────────────────────────────────
 // Section home for Channels. Two focus zones: buttons
-// (Open Channel, History) and scrollable channel list.
-// Reads live data through ctx.Status pointer — no
-// snapshot, since the home screen persists for the
-// lifetime of the program and must always show current
-// data.
+// (Open Channel, Node Info, History) and scrollable
+// channel list. Reads live data through ctx.Status
+// pointer — no snapshot, since the home screen persists
+// for the lifetime of the program and must always show
+// current data.
 
 const (
 	chanHomeZoneButtons = 0
@@ -27,9 +27,13 @@ const (
 
 type ChannelsHomeScreen struct {
 	ctx       *ScreenContext
-	btnIdx    int // 0=Open Channel, 1=History
+	btnIdx    int // 0=Open Channel, 1=Node Info, 2=History
 	focusZone int // 0=buttons, 1=channel list
 	cursor    int // position in channel list
+
+	// Zero balance interstitial
+	zeroBalanceMsg bool
+	fundBtnIdx     int // 0=Go Back, 1=Fund Wallet
 }
 
 func NewChannelsHomeScreen(
@@ -49,6 +53,11 @@ func (s *ChannelsHomeScreen) Init() tea.Cmd {
 func (s *ChannelsHomeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
+	// Zero-balance interstitial intercepts all keys
+	if s.zeroBalanceMsg {
+		return s.handleZeroBalanceKey(keyStr)
+	}
+
 	channels := s.channels()
 	s.clampCursor()
 
@@ -64,7 +73,7 @@ func (s *ChannelsHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "right":
 		if s.focusZone == chanHomeZoneButtons &&
-			s.btnIdx < 1 {
+			s.btnIdx < 2 {
 			s.btnIdx++
 		}
 		return s, nil
@@ -109,6 +118,17 @@ func (s *ChannelsHomeScreen) HandleKey(
 	case "backspace":
 		return s, emitFocusSidebar
 	case "enter":
+		// No wallet → trigger wallet creation flow
+		if !s.ctx.Cfg.WalletExists() {
+			screen := NewWalletCreateScreen(s.ctx)
+			return s, func() tea.Msg {
+				return openTabMsg{
+					Kind:   tabWalletCreate,
+					Label:  "Create Wallet",
+					Screen: screen,
+				}
+			}
+		}
 		return s.handleEnter()
 	}
 	return s, nil
@@ -121,7 +141,9 @@ func (s *ChannelsHomeScreen) handleEnter() (
 		switch s.btnIdx {
 		case 0: // Open Channel
 			return s.openChannel()
-		case 1: // History
+		case 1: // Node Info
+			return s.openNodeInfo()
+		case 2: // History
 			return s.openHistory()
 		}
 		return s, nil
@@ -163,17 +185,15 @@ func (s *ChannelsHomeScreen) openChannel() (
 		!cfg.WalletExists() {
 		return s, nil
 	}
-	// Zero balance: redirect to on-chain receive
+	// Zero balance: show educational message
 	if s.ctx.Status != nil &&
 		s.ctx.Status.lndBalance == "0" {
-		screen := NewOCReceiveScreen(s.ctx)
-		return s, func() tea.Msg {
-			return openTabMsg{
-				Kind:   tabOCReceive,
-				Label:  "Receive",
-				Screen: screen,
-			}
-		}
+		s.zeroBalanceMsg = true
+		// Highlight Fund Wallet (index 1) by default so
+		// pressing enter or down lands on the action
+		// button, not the Go Back button.
+		s.fundBtnIdx = 1
+		return s, nil
 	}
 	// Normal path: channel open
 	screen := NewChannelOpenScreen(s.ctx)
@@ -181,6 +201,19 @@ func (s *ChannelsHomeScreen) openChannel() (
 		return openTabMsg{
 			Kind:   tabOpenChannel,
 			Label:  "Open Channel",
+			Screen: screen,
+		}
+	}
+}
+
+func (s *ChannelsHomeScreen) openNodeInfo() (
+	Screen, tea.Cmd,
+) {
+	screen := NewNodeInfoScreen(s.ctx)
+	return s, func() tea.Msg {
+		return openTabMsg{
+			Kind:   tabNodeInfo,
+			Label:  "Node Info",
 			Screen: screen,
 		}
 	}
@@ -202,6 +235,45 @@ func (s *ChannelsHomeScreen) openHistory() (
 		fetchClosedChannelsCmd(s.ctx.LndClient))
 }
 
+func (s *ChannelsHomeScreen) handleZeroBalanceKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.fundBtnIdx > 0 {
+			s.fundBtnIdx--
+		}
+		return s, nil
+	case "right":
+		if s.fundBtnIdx < 1 {
+			s.fundBtnIdx++
+		}
+		return s, nil
+	case "backspace":
+		s.zeroBalanceMsg = false
+		return s, nil
+	case "enter":
+		if s.fundBtnIdx == 0 {
+			// Go Back
+			s.zeroBalanceMsg = false
+			return s, nil
+		}
+		// Fund Wallet → open on-chain receive
+		s.zeroBalanceMsg = false
+		screen := NewOCReceiveScreen(s.ctx)
+		return s, func() tea.Msg {
+			return openTabMsg{
+				Kind:   tabOCReceive,
+				Label:  "⛓ Receive",
+				Screen: screen,
+			}
+		}
+	}
+	return s, nil
+}
+
 func (s *ChannelsHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
@@ -217,21 +289,38 @@ func (s *ChannelsHomeScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
-	if !cfg.HasLND() {
-		p := newPane(w)
-		p.dim("LND is not installed.")
-		p.dim("Go to System to install.")
-		return p.render()
-	}
-
-	if !cfg.WalletExists() {
-		p := newPane(w)
-		p.dim("LND wallet not created.")
-		return p.render()
+	if !cfg.HasLND() || !cfg.WalletExists() {
+		return renderWalletPrompt(
+			w, h, s.ctx.ContentFocused)
 	}
 
 	if status == nil || !status.lndResponding {
-		return theme.Dim.Render(" Waiting for LND...")
+		return renderWaitingForLND(w, h)
+	}
+
+	// Zero-balance educational message
+	if s.zeroBalanceMsg {
+		p := newPane(w)
+		p.blank()
+		p.line(centerPad(
+			theme.Header.Render("Fund Your Wallet"), w))
+		p.blank()
+		p.dim("  Opening a Lightning channel requires")
+		p.dim("  on-chain Bitcoin. Send Bitcoin to your")
+		p.dim("  on-chain address first, then return")
+		p.dim("  here to open a channel.")
+		if !status.btcSynced {
+			p.blank()
+			p.line("  " + theme.Warn.Render(
+				"Bitcoin Core is syncing. If you have"))
+			p.line("  " + theme.Warn.Render(
+				"already sent funds, they will appear"))
+			p.line("  " + theme.Warn.Render(
+				"once sync is complete."))
+		}
+		return p.renderWithBottomButtons(
+			[]string{"Go Back", "Fund Wallet"},
+			s.fundBtnIdx, true, h)
 	}
 
 	isFocused := s.ctx.ContentFocused
@@ -240,24 +329,28 @@ func (s *ChannelsHomeScreen) View(
 	// ── Fixed header ─────────────────────────────
 	var headerLines []string
 	headerLines = append(headerLines, "")
-
-	if status.lndPubkey != "" {
-		pk := truncatePubkey(status.lndPubkey, w-14)
-		headerLines = append(headerLines,
-			" "+theme.Label.Render("Pubkey:   ")+
-				theme.Mono.Render(pk))
-	}
 	headerLines = append(headerLines,
-		" "+theme.Label.Render("P2P:      ")+
+		centerPad(
+			theme.Header.Render(
+				"Lightning Channels Dashboard"),
+			w))
+	headerLines = append(headerLines, "")
+
+	// P2P Mode sits above the balance group. The
+	// balanceSummaryLines helper begins its output
+	// with a blank row (row 0 of leftLines pairs with
+	// the box top border on the right), so no explicit
+	// separator is needed here — the caller-side blank
+	// plus the helper's blank would produce two rows
+	// of gap, which is too much.
+	headerLines = append(headerLines,
+		" "+theme.Label.Render("P2P Mode: ")+
 			theme.Value.Render(
 				p2pModeLabel(cfg.P2PMode)))
-
-	headerLines = append(headerLines, "")
 
 	headerLines = append(headerLines,
 		balanceSummaryLines(status, w)...)
 
-	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 
@@ -270,7 +363,11 @@ func (s *ChannelsHomeScreen) View(
 	var btnLines []string
 	btnLines = append(btnLines,
 		renderButtons(
-			[]string{"Open Channel", "History"},
+			[]string{
+				"Open Channel",
+				"Node Info",
+				"History",
+			},
 			s.btnIdx, isOnButton, w))
 	btnLines = append(btnLines, "")
 	btnLines = append(btnLines, "")
@@ -329,11 +426,14 @@ func (s *ChannelsHomeScreen) View(
 			}
 			remoteFill := barW - localFill
 
+			// Bar colors reflect channel state only, not
+			// cursor position. The row's orange highlight
+			// is sufficient to show which channel the
+			// cursor is on — the bar color is reserved
+			// for the semantic question "is this channel
+			// reachable right now?"
 			var lColor, rColor color.Color
-			if isSelected {
-				lColor = theme.ColorChanLocalActive
-				rColor = theme.ColorChanRemoteActive
-			} else if ch.Active {
+			if ch.Active {
 				lColor = theme.ColorChanLocal
 				rColor = theme.ColorChanRemote
 			} else {
@@ -406,6 +506,29 @@ func (s *ChannelsHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *ChannelsHomeScreen) HelpBindings() []key.Binding {
+	if !s.ctx.Cfg.WalletExists() {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "create wallet")),
+			kSidebar,
+			kQuit,
+		}
+	}
+	if s.zeroBalanceMsg {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("left", "right"),
+				key.WithHelp("←→", "buttons")),
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "select")),
+			key.NewBinding(
+				key.WithKeys("backspace"),
+				key.WithHelp("⌫", "back")),
+			kQuit,
+		}
+	}
 	if s.focusZone == chanHomeZoneList {
 		return s.listBindings()
 	}

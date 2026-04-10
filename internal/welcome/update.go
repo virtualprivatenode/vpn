@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
+	"github.com/ripsline/virtual-private-node/internal/system"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -31,6 +33,28 @@ func (m *Model) focusContent() {
 	m.nav.Blur()
 	m.tabFocused = false
 	m.contentFocused = true
+}
+
+// rememberTabPosition saves the current activeTab into
+// sectionFocus for the current section, so the next
+// "up from sidebar" or focusTabBarMsg-from-home-screen
+// restores it. Guards against saving 0, which would
+// clobber existing memory with a value the restore
+// logic treats as "no memory."
+//
+// Call this from any code path that *intentionally*
+// moves the cursor onto a detail tab and wants that
+// position remembered: section-exit, tab-bar→sidebar
+// boundary, openTabMsg, closeTab.
+func (m *Model) rememberTabPosition() {
+	if m.activeTab <= 0 {
+		return
+	}
+	sec := m.nav.ActiveSection()
+	if sec < 0 || sec >= numSections {
+		return
+	}
+	m.sectionFocus[sec] = m.activeTab
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -85,7 +109,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case focusTabBarMsg:
 		m.focusTabBar()
 		m.tabCursorX = 0
-		m.activeTab = 1
+		// Two cases:
+		//  1. Detail screen emitted this — m.activeTab
+		//     is already > 0, preserve it (the user
+		//     should land on the tab they came from).
+		//  2. Home screen emitted this — m.activeTab
+		//     is 0, restore from sectionFocus or fall
+		//     back to tab 1. Without this, the tab
+		//     bar focuses on the home tab and shows
+		//     no visible detail-tab cursor.
+		if m.activeTab == 0 {
+			sec := m.nav.ActiveSection()
+			tabs := m.effectiveTabs()
+			remembered := m.sectionFocus[sec]
+			if remembered >= 1 &&
+				remembered < len(tabs) {
+				m.activeTab = remembered
+			} else if len(tabs) > 1 {
+				m.activeTab = 1
+			}
+		}
 		return m, nil
 	case showQRMsg:
 		m.urlTarget = msg.URL
@@ -100,11 +143,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchStatus(m.cfg, m.lndClient)
 	case clearUtxoSelectionMsg:
 		m.clearUtxoSelection()
-		m.syncOcCtxSelection()
 		return m, nil
-	case shellActionMsg:
-		m.shellAction = msg.action
-		return m, tea.Quit
 	case openTabMsg:
 		// Dedup by kind + index if Index is set
 		if msg.Index != 0 {
@@ -113,6 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if t.Kind == msg.Kind &&
 					t.Index == msg.Index {
 					m.activeTab = i
+					m.rememberTabPosition()
 					if msg.FocusTabBar {
 						m.focusTabBar()
 						m.tabCursorX = 0
@@ -131,6 +171,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if t.Kind == msg.Kind &&
 					t.Section == sec {
 					m.activeTab = i
+					m.rememberTabPosition()
 					if msg.FocusTabBar {
 						m.focusTabBar()
 						m.tabCursorX = 0
@@ -149,6 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Screen:  msg.Screen,
 		})
 		m.activeTab = len(m.effectiveTabs()) - 1
+		m.rememberTabPosition()
 		if msg.FocusTabBar {
 			m.focusTabBar()
 			m.tabCursorX = 0
@@ -161,11 +203,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case svcActionDoneMsg:
+		m.routeToSectionScreen(secSystem, msg)
 		return m, fetchStatus(m.cfg, m.lndClient)
 	case statusMsg:
 		m.fetchInFlight = false
 		m.status = &msg
 		m.screenCtx.Status = m.status
+		// walletDetected can only fire when lndClient
+		// is non-nil (see status.go). lndClient stays
+		// nil until walletCreatedMsg runs — so during
+		// the wallet-create flow this branch is dead,
+		// and the in-place tab transform in
+		// walletCreatedMsg is the only path that moves
+		// the user off the wallet-create screen. See
+		// the invariant comment in NewModel.
 		if msg.walletDetected && !m.cfg.WalletCreated {
 			m.cfg.WalletCreated = true
 			m.saveCfg()
@@ -263,9 +314,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case newAddressMsg:
-		if msg.err == nil {
-			m.onChainAddress = msg.address
-		}
 		// Route to OCReceiveScreen if open
 		if rm, cmd, ok := m.routeToScreen(
 			tabOCReceive, msg); ok {
@@ -289,32 +337,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabSend, msg)
 		return rm, cmd
 	case paymentHistoryMsg:
-		if msg.err == nil {
-			m.payHistory = msg.entries
-		}
 		// Route to wallet home screen
-		if rm, cmd, ok := m.routeToSectionScreen(
+		if cmd, ok := m.routeToSectionScreen(
 			secWallet, msg); ok {
-			return rm, cmd
+			return m, cmd
 		}
 		return m, nil
 	case utxoListMsg:
 		if msg.err == nil {
-			m.utxos = msg.utxos
 			m.ocCtx.Utxos = msg.utxos
 			// Prune selections beyond new UTXO range
-			for idx := range m.utxoSelected {
-				if idx >= len(m.utxos) {
-					delete(m.utxoSelected, idx)
+			for idx := range m.ocCtx.UtxoSelected {
+				if idx >= len(m.ocCtx.Utxos) {
+					delete(m.ocCtx.UtxoSelected, idx)
 				}
 			}
 			m.recalcSelectedTotal()
-			m.syncOcCtxSelection()
 		}
 		return m, nil
 	case onChainTxMsg:
 		if msg.err == nil {
-			m.onChainTxs = msg.txs
 			m.ocCtx.OnChainTxs = msg.txs
 		}
 		return m, nil
@@ -327,9 +369,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabCloseChannel, msg)
 		return rm, cmd
 	case closedChannelsMsg:
-		if msg.err == nil {
-			m.buildChannelHistory(msg.channels)
-		}
 		// Route to history screen so it gets the data
 		if rm, cmd, ok := m.routeToScreen(
 			tabChannelHistory, msg); ok {
@@ -338,35 +377,135 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case labelTxMsg:
 		// Route to on-chain home screen
-		if rm, cmd, ok := m.routeToSectionScreen(
+		if cmd, ok := m.routeToSectionScreen(
 			secOnChain, msg); ok {
-			return rm, cmd
+			return m, cmd
 		}
 		if msg.err == nil {
 			return m, fetchOnChainTxCmd(m.lndClient)
 		}
 		return m, nil
 	case feeTiersMsg:
-		if msg.err == nil {
-			m.sendFeeTiers = msg.tiers
-			m.ocCtx.SendFeeTiers = msg.tiers
-			// Route to close screen
-			m.routeToScreen(
-				tabCloseChannel, msg)
-			// Route to channel detail screen
-			m.routeToScreen(
-				tabChannel, msg)
-			// Route to on-chain send screen
-			if rm, cmd, ok := m.routeToScreen(
-				tabOnChain, msg); ok {
-				return rm, cmd
+		if msg.err != nil {
+			return m, nil
+		}
+		m.ocCtx.SendFeeTiers = msg.tiers
+		// Fan out to every screen that may want fee
+		// tiers. Each routeToScreen call returns an
+		// updated Model and a possibly-nil cmd; thread
+		// the model through and batch the cmds so none
+		// get dropped.
+		//
+		// The m = rm threading looks redundant because
+		// routeToScreen's screen-writeback goes through
+		// the m.tabs slice (shared backing array) and
+		// its screenCtx mutations go through a pointer,
+		// so today the discarded returns would still
+		// land in shared memory. The threading is
+		// defensive: the day someone adds a non-pointer
+		// Model mutation to routeToScreen, this loop
+		// stays correct without needing a second look.
+		// Contrast with routeToSectionScreen, which
+		// writes to the m.sectionScreens array and was
+		// converted to a pointer receiver for the same
+		// reason.
+		var cmds []tea.Cmd
+		for _, kind := range []tabKind{
+			tabCloseChannel, tabChannel, tabOnChain,
+		} {
+			rm, cmd, ok := m.routeToScreen(kind, msg)
+			if !ok {
+				continue
+			}
+			m = rm
+			if cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 	case feeEstimateMsg:
 		rm, cmd, _ := m.routeToScreen(
 			tabOnChain, msg)
 		return rm, cmd
+	case installStepDoneMsg:
+		// Route to whichever install flow tab is open.
+		// Try each install tab kind; only one will
+		// match at a time.
+		if rm, cmd, ok := m.routeToScreen(
+			tabSyncthingInstall, msg); ok {
+			return rm, cmd
+		}
+		if rm, cmd, ok := m.routeToScreen(
+			tabLndHubInstall, msg); ok {
+			return rm, cmd
+		}
+		if rm, cmd, ok := m.routeToScreen(
+			tabP2PUpgrade, msg); ok {
+			return rm, cmd
+		}
+		if rm, cmd, ok := m.routeToScreen(
+			tabSelfUpdate, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case autoUnlockSetupDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabAutoUnlock, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case autoUnlockDisableDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabAutoUnlock, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case walletLNDReadyMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabWalletCreate, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case walletExecDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabWalletCreate, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case walletCreatedMsg:
+		// Wallet was successfully created. Persist
+		// the flag, create the lndClient (it didn't
+		// exist before this point because NewModel
+		// only constructs it when the wallet already
+		// exists), and transform the wallet creation
+		// tab in place into an AutoUnlockScreen so
+		// the user goes straight from "I SAVED MY
+		// SEED" into auto-unlock setup.
+		m.cfg.WalletCreated = true
+		m.saveCfg()
+		if m.lndClient == nil && m.cfg.HasLND() {
+			m.lndClient = lndrpc.New(m.cfg.Network)
+			m.screenCtx.LndClient = m.lndClient
+		}
+		// Find the wallet creation tab and transform
+		// it. We mutate m.tabs directly because the
+		// effectiveTabs() view is computed on demand.
+		for i := range m.tabs {
+			if m.tabs[i].Kind == tabWalletCreate {
+				newScreen :=
+					NewAutoUnlockScreen(m.screenCtx)
+				m.tabs[i].Kind = tabAutoUnlock
+				m.tabs[i].Label = "Auto-Unlock"
+				m.tabs[i].Screen = newScreen
+				return m, tea.Batch(
+					fetchStatus(m.cfg, m.lndClient),
+					newScreen.Init(),
+				)
+			}
+		}
+		// Tab not found (shouldn't happen, but be
+		// defensive). Just refresh status.
+		return m, fetchStatus(m.cfg, m.lndClient)
 	case tickMsg:
 		if m.fetchInFlight {
 			return m, tickEvery(m.pollInterval())
@@ -452,61 +591,37 @@ func labelTxCmd(
 // ── Coin control helpers ─────────────────────────────────
 
 func (m *Model) toggleUtxoSelection(idx int) {
-	if idx < 0 || idx >= len(m.utxos) {
+	if idx < 0 || idx >= len(m.ocCtx.Utxos) {
 		return
 	}
-	if m.utxoSelected[idx] {
-		delete(m.utxoSelected, idx)
+	if m.ocCtx.UtxoSelected[idx] {
+		delete(m.ocCtx.UtxoSelected, idx)
 	} else {
-		m.utxoSelected[idx] = true
+		m.ocCtx.UtxoSelected[idx] = true
 	}
 	m.recalcSelectedTotal()
-	m.syncOcCtxSelection()
 }
 
 func (m *Model) recalcSelectedTotal() {
-	m.utxoSelectedTotal = 0
-	m.utxoOutpoints = nil
-	for idx := range m.utxoSelected {
-		if idx < len(m.utxos) {
-			m.utxoSelectedTotal +=
-				m.utxos[idx].AmountSats
-			m.utxoOutpoints = append(
-				m.utxoOutpoints,
+	m.ocCtx.UtxoSelectedTotal = 0
+	m.ocCtx.UtxoOutpoints = nil
+	for idx := range m.ocCtx.UtxoSelected {
+		if idx < len(m.ocCtx.Utxos) {
+			m.ocCtx.UtxoSelectedTotal +=
+				m.ocCtx.Utxos[idx].AmountSats
+			m.ocCtx.UtxoOutpoints = append(
+				m.ocCtx.UtxoOutpoints,
 				fmt.Sprintf("%s:%d",
-					m.utxos[idx].Txid,
-					m.utxos[idx].Vout))
+					m.ocCtx.Utxos[idx].Txid,
+					m.ocCtx.Utxos[idx].Vout))
 		}
 	}
 }
 
 func (m *Model) clearUtxoSelection() {
-	m.utxoSelected = make(map[int]bool)
-	m.utxoSelectedTotal = 0
-	m.utxoOutpoints = nil
-}
-
-// syncOcCtxSelection copies current UTXO selection state
-// to the OnChainContext so screens see current data.
-func (m *Model) syncOcCtxSelection() {
-	m.ocCtx.UtxoSelected = m.utxoSelected
-	m.ocCtx.UtxoSelectedTotal = m.utxoSelectedTotal
-	m.ocCtx.UtxoOutpoints = m.utxoOutpoints
-}
-
-func (m *Model) buildChannelHistory(
-	closed []lndrpc.ClosedChannel,
-) {
-	var channels []channelInfo
-	var waiting []lndrpc.WaitingCloseChannel
-	var pending []lndrpc.PendingForceCloseChannel
-	if m.status != nil {
-		channels = m.status.channels
-		waiting = m.status.waitingCloseChannels
-		pending = m.status.pendingForceCloseChannels
-	}
-	m.chanHistory = buildChannelHistoryEntries(
-		channels, waiting, pending, closed)
+	m.ocCtx.UtxoSelected = make(map[int]bool)
+	m.ocCtx.UtxoSelectedTotal = 0
+	m.ocCtx.UtxoOutpoints = nil
 }
 
 func buildChannelHistoryEntries(
@@ -626,7 +741,17 @@ func (m Model) handleSidebarKey(
 		if m.nav.Cursor == 0 && m.hasDetailTabs() {
 			m.focusTabBar()
 			m.tabCursorX = 0
-			if m.activeTab < 1 {
+			// Restore last tab position for this
+			// section, falling back to tab 1 if no
+			// memory yet or if the saved index is
+			// out of range.
+			sec := m.nav.ActiveSection()
+			tabs := m.effectiveTabs()
+			remembered := m.sectionFocus[sec]
+			if remembered >= 1 &&
+				remembered < len(tabs) {
+				m.activeTab = remembered
+			} else if m.activeTab < 1 {
 				m.activeTab = 1
 			}
 			return m, nil
@@ -637,15 +762,23 @@ func (m Model) handleSidebarKey(
 		m.nav.MoveDown()
 		return m, nil
 	case "enter", "right":
-		// Theme toggle — don't activate a section,
-		// just toggle the theme and stay on the icon.
+		// Theme toggle — only responds to Enter.
+		// Right arrow is ignored on the toggle.
 		if m.nav.IsOnThemeToggle() {
-			mode := theme.Toggle()
-			m.cfg.Theme = mode
-			m.saveCfg()
-			m.nav.UpdateThemeLabel()
+			if key == "enter" {
+				mode := theme.Toggle()
+				m.cfg.Theme = mode
+				m.saveCfg()
+				m.nav.UpdateThemeLabel()
+			}
 			return m, nil
 		}
+		// Save the current section's tab position
+		// before Activate switches us away. After
+		// Activate, m.nav.ActiveSection() will return
+		// the new section, so we have to capture the
+		// old section's index here.
+		m.rememberTabPosition()
 		sec := m.nav.Activate()
 		m.focusContent()
 		m.activeTab = 0
@@ -706,6 +839,9 @@ func (m Model) handleTabBarKey(
 			return m, nil
 		}
 		m.focusSidebar()
+		// Save current position before resetting so
+		// the next "up from sidebar" restores it.
+		m.rememberTabPosition()
 		m.activeTab = 0
 		m.tabScrollOffset = 0
 		return m, nil
@@ -725,6 +861,7 @@ func (m Model) handleTabBarKey(
 			m.tabCursorX = 0
 			return m, nil
 		}
+		return m, nil
 
 	case "enter":
 		if m.tabCursorX == 1 && m.activeTab > 0 {
@@ -748,6 +885,34 @@ func (m Model) handleTabBarKey(
 	return m, nil
 }
 
+// childKindsOf returns the tab kinds that consider
+// `parent` their parent. Used by closeTab to cascade-
+// close children when their parent tab is closed.
+// Returns nil for kinds that aren't parents.
+//
+// Today only Syncthing manage and LndHub manage have
+// children. If you add a new sub-tree (e.g. another
+// add-on with detail flows), add a case here. The
+// future cleanup is to make this a field on openTab
+// (Parent tabKind) so each tab declares its own parent
+// at construction time.
+func childKindsOf(parent tabKind) []tabKind {
+	switch parent {
+	case tabSyncthing:
+		return []tabKind{
+			tabSyncthingDevice,
+			tabSyncthingWebUI,
+			tabSyncthingPair,
+		}
+	case tabLndHub:
+		return []tabKind{
+			tabLndHubAccount,
+			tabLndHubCreate,
+		}
+	}
+	return nil
+}
+
 func (m Model) closeTab(
 	tabIdx int,
 ) (tea.Model, tea.Cmd) {
@@ -762,49 +927,116 @@ func (m Model) closeTab(
 	// Model-level subview flag on any tab close.
 	m.subview = svNone
 
+	// Build a set of tabs to remove. Always includes
+	// the closing tab itself; if the closing tab is a
+	// parent (Syncthing manage, LndHub manage), also
+	// includes all of its children in the same
+	// section. Cascade is silent — no confirmation.
+	//
+	// Async results that arrive after a child is
+	// cascade-closed will land in routeToScreen,
+	// find no matching tab, and be dropped silently.
+	// This is safe for the existing flows because
+	// state-changing async messages
+	// (lndhubAccountCreatedMsg, syncthingPairedMsg)
+	// update m.cfg directly in their handlers, not
+	// only in the screen handler — so the side
+	// effect persists even if the tab is gone.
+	// Future flows that change state only via screen
+	// handlers would break this assumption.
+	childKinds := childKindsOf(closingTab.Kind)
+	shouldRemove := func(t openTab) bool {
+		if t.Section != closingTab.Section {
+			return false
+		}
+		if t.Kind == closingTab.Kind &&
+			t.Index == closingTab.Index {
+			return true
+		}
+		for _, ck := range childKinds {
+			if t.Kind == ck {
+				return true
+			}
+		}
+		return false
+	}
+
 	var newTabs []openTab
 	for _, t := range m.tabs {
-		if t.Kind == closingTab.Kind &&
-			t.Index == closingTab.Index &&
-			t.Section == closingTab.Section {
+		if shouldRemove(t) {
 			continue
 		}
 		newTabs = append(newTabs, t)
 	}
 	m.tabs = newTabs
 
-	if m.activeTab >= tabIdx {
-		m.activeTab--
-		if m.activeTab < 0 {
-			m.activeTab = 0
-		}
-	}
 	m.tabCursorX = 0
-
 	m.focusContent()
 
-	// Addon detail tabs: return to parent manage tab.
-	// All other tabs: return to section home (tab 0).
-	parentKind := tabKind(-1)
-	switch closingTab.Kind {
-	case tabSyncthingDevice, tabSyncthingWebUI,
-		tabSyncthingPair:
-		parentKind = tabSyncthing
-	case tabLndHubAccount:
-		parentKind = tabLndHub
-	case tabLndHubCreate:
-		parentKind = tabLndHub
-	}
-	m.activeTab = 0
-	if parentKind >= 0 {
-		for i, t := range m.effectiveTabs() {
-			if t.Kind == parentKind {
-				m.activeTab = i
-				break
-			}
+	// Close-to-neighbor: land on whatever tab now
+	// occupies the closed parent's index. If that
+	// index is past the new end, clamp to the last
+	// tab. If no detail tabs remain, fall back to
+	// the section home (index 0).
+	//
+	// This single rule replaces the previous
+	// addon-parent special case. Closing a Syncthing
+	// device with no siblings now lands on Syncthing
+	// manage (which is at the same neighbor index by
+	// virtue of being adjacent in the tab list);
+	// closing it with siblings lands on the next
+	// sibling instead — which is what a Sparrow /
+	// browser user expects.
+	newTabCount := len(m.effectiveTabs())
+	if newTabCount > 1 {
+		landing := tabIdx
+		if landing >= newTabCount {
+			landing = newTabCount - 1
 		}
+		m.activeTab = landing
+	} else {
+		// No detail tabs left — fall back to section
+		// home.
+		m.activeTab = 0
 	}
 
+	// Save the resolved landing index into
+	// sectionFocus so the next "up from sidebar"
+	// lands here too. This intentionally bypasses
+	// rememberTabPosition because we want to *clear*
+	// memory when no detail tabs remain (write 0),
+	// not preserve stale memory the way the helper's
+	// guard does.
+	sec := closingTab.Section
+	if sec >= 0 && sec < numSections {
+		m.sectionFocus[sec] = m.activeTab
+	}
+
+	// Scroll correctness: keep tabScrollOffset in
+	// agreement with where m.activeTab now points.
+	// The renderTabBar pass compensates for stale
+	// offsets on the fly, so skipping this would not
+	// be user-visible today — but the model field
+	// would drift from rendered state, which will
+	// burn any future tab-system test that asserts
+	// on tabScrollOffset directly. Mirror the two
+	// invariants the "left" key handler maintains:
+	//
+	//   1. If no detail tabs remain, reset to 0.
+	//   2. Otherwise, if the active tab is now to
+	//      the left of the current offset, pull the
+	//      offset backward to make it visible.
+	//
+	// The original upper-bound clamp (don't let the
+	// offset point past the new end) is also kept.
+	if m.activeTab == 0 {
+		m.tabScrollOffset = 0
+	} else if m.activeTab-1 < m.tabScrollOffset {
+		m.tabScrollOffset = m.activeTab - 1
+		if m.tabScrollOffset < 0 {
+			m.tabScrollOffset = 0
+		}
+	}
 	if m.tabScrollOffset >
 		len(m.effectiveTabs())-2 {
 		m.tabScrollOffset =
@@ -860,6 +1092,15 @@ func (m *Model) setTabScreen(
 // a different tab while the async operation was in
 // flight. Returns (model, cmd, true) if routed, or
 // (model, nil, false) if no matching screen exists.
+//
+// screenCtx.HasTabs and screenCtx.ContentFocused are
+// both refreshed before dispatch so HandleMsg sees the
+// same view of focus state that HandleKey would. Without
+// this, a screen that branches on ContentFocused inside
+// HandleMsg (e.g. to decide whether to consume a paste)
+// would see whatever the last key event left the flag
+// as — silently wrong when the async message arrives
+// during sidebar or tab-bar focus.
 func (m Model) routeToScreen(
 	kind tabKind, msg tea.Msg,
 ) (Model, tea.Cmd, bool) {
@@ -867,6 +1108,7 @@ func (m Model) routeToScreen(
 	for i, tab := range tabs {
 		if tab.Kind == kind && tab.Screen != nil {
 			m.screenCtx.HasTabs = m.hasDetailTabs()
+			m.screenCtx.ContentFocused = m.contentFocused
 			newScreen, cmd := tab.Screen.HandleMsg(msg)
 			m.setTabScreen(i, newScreen)
 			return m, cmd, true
@@ -878,20 +1120,31 @@ func (m Model) routeToScreen(
 // routeToSectionScreen delivers a message to the section
 // home screen at the given index. Same pattern as
 // routeToScreen but keyed on section index instead of
-// tab kind. Returns (model, cmd, true) if routed, or
-// (model, nil, false) if no screen is mounted.
-func (m Model) routeToSectionScreen(
+// tab kind. Returns (cmd, true) if routed, or
+// (nil, false) if no screen is mounted.
+//
+// Pointer receiver is load-bearing: m.sectionScreens is
+// a fixed-size array, not a slice, so a value receiver
+// would write the new screen into a copy and discard it
+// on return. This bit us historically when a caller
+// forgot to capture the Model return; making the
+// receiver a pointer eliminates the class of bug.
+// routeToScreen (above) can stay a value receiver
+// because it mutates m.tabs, which is a slice and
+// shares its backing array across copies.
+func (m *Model) routeToSectionScreen(
 	sec int, msg tea.Msg,
-) (Model, tea.Cmd, bool) {
+) (tea.Cmd, bool) {
 	if sec < 0 || sec >= numSections ||
 		m.sectionScreens[sec] == nil {
-		return m, nil, false
+		return nil, false
 	}
 	m.screenCtx.HasTabs = m.hasDetailTabs()
+	m.screenCtx.ContentFocused = m.contentFocused
 	newScreen, cmd :=
 		m.sectionScreens[sec].HandleMsg(msg)
 	m.sectionScreens[sec] = newScreen
-	return m, cmd, true
+	return cmd, true
 }
 
 // ── Shell commands ───────────────────────────────────────
@@ -908,11 +1161,15 @@ func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
 	tmpPath := tmpFile.Name()
 	_, _ = tmpFile.WriteString(mac)
 	_ = tmpFile.Close()
+	// Macaroon hex is a credential — wipe scrollback
+	// on exit so it doesn't sit in the user's terminal
+	// history after they return to the TUI.
 	c := exec.Command("bash", "-c",
 		"clear && echo && cat "+tmpPath+
 			" && echo && echo && echo "+
 			"'  Press Enter...' && read && rm -f "+
-			tmpPath)
+			tmpPath+
+			` && printf '\033[2J\033[3J\033[H'`)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
 		return svcActionDoneMsg{}
@@ -930,11 +1187,79 @@ func showInvoiceCmd(invoice string) tea.Cmd {
 	tmpPath := tmpFile.Name()
 	_, _ = tmpFile.WriteString(invoice)
 	_ = tmpFile.Close()
+	// Plain clear at end — invoice isn't sensitive
+	// (the user generated it and likely copied it),
+	// so preserving scrollback is fine.
 	c := exec.Command("bash", "-c",
 		"clear && echo && cat "+tmpPath+
 			" && echo && echo && echo "+
 			"'  Press Enter...' && read && rm -f "+
-			tmpPath)
+			tmpPath+
+			" && clear")
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		_ = os.Remove(tmpPath)
+		return svcActionDoneMsg{}
+	})
+}
+
+// showNodeURIsCmd hands the terminal to a shell that
+// displays the node's advertised URIs (clearnet first,
+// then Tor) so the user can select and copy them with
+// their terminal's native copy mechanism. Same pattern
+// as showInvoiceCmd — non-sensitive data, no scrollback
+// wipe. Preserving scrollback is a feature here: a user
+// who returns to the TUI and later wants the URI again
+// can pull it from their SSH scrollback without
+// reopening the screen.
+func showNodeURIsCmd(uris []string) tea.Cmd {
+	if len(uris) == 0 {
+		return nil
+	}
+	// Format with section labels. Clearnet first to
+	// match the Node Info screen's button order and
+	// LND's typical advertisement order.
+	var b strings.Builder
+	b.WriteString("\n  Node URIs\n")
+	b.WriteString("  =========\n\n")
+	var clearnet, tor []string
+	for _, u := range uris {
+		if strings.Contains(u, ".onion:") {
+			tor = append(tor, u)
+		} else {
+			clearnet = append(clearnet, u)
+		}
+	}
+	if len(clearnet) > 0 {
+		b.WriteString("  Clearnet:\n")
+		for _, u := range clearnet {
+			b.WriteString("  ")
+			b.WriteString(u)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(tor) > 0 {
+		b.WriteString("  Tor:\n")
+		for _, u := range tor {
+			b.WriteString("  ")
+			b.WriteString(u)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	tmpFile, err := os.CreateTemp("", "rlvpn-nodeuris-")
+	if err != nil {
+		return nil
+	}
+	tmpPath := tmpFile.Name()
+	_, _ = tmpFile.WriteString(b.String())
+	_ = tmpFile.Close()
+	c := exec.Command("bash", "-c",
+		"clear && cat "+tmpPath+
+			" && echo && echo "+
+			"'  Press Enter...' && read && rm -f "+
+			tmpPath+
+			" && clear")
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
 		return svcActionDoneMsg{}
@@ -953,16 +1278,34 @@ func runSvcActionCmd(action, svc string) tea.Cmd {
 	default:
 		return nil
 	}
-	c := exec.Command("sudo", "systemctl", verb, svc)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
+	return func() tea.Msg {
+		system.SudoRun("systemctl", verb, svc)
 		return svcActionDoneMsg{}
-	})
+	}
 }
 
 func runUpdatePackagesCmd() tea.Cmd {
+	// Non-interactive environment so beginner users
+	// never see mid-upgrade prompts:
+	//   - DEBIAN_FRONTEND=noninteractive suppresses
+	//     debconf dialogs entirely
+	//   - NEEDRESTART_MODE=a tells needrestart (default
+	//     on Debian 13) to auto-restart services instead
+	//     of showing its blue ncurses picker
+	//   - --force-confdef + --force-confold keeps the
+	//     existing config file on any conffile conflict,
+	//     skipping the pink dpkg prompt
+	// This matches the bootstrap script's Phase 1
+	// upgrade command exactly.
 	c := exec.Command("bash", "-c",
-		"sudo apt-get update && "+
-			"sudo apt-get upgrade -y")
+		"sudo DEBIAN_FRONTEND=noninteractive "+
+			"NEEDRESTART_MODE=a "+
+			"apt-get update -qq && "+
+			"sudo DEBIAN_FRONTEND=noninteractive "+
+			"NEEDRESTART_MODE=a "+
+			"apt-get upgrade -y -qq "+
+			"-o Dpkg::Options::=--force-confdef "+
+			"-o Dpkg::Options::=--force-confold")
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return svcActionDoneMsg{}
 	})

@@ -106,6 +106,16 @@ debuglevel=info
 %s
 %s
 
+# Let LND own its TLS cert lifecycle. tlsautorefresh
+# regenerates the cert when its parameters change
+# (e.g. tlsextraip is added during a P2P upgrade) or
+# when it's near expiry. tlsdisableautofill keeps the
+# cert deterministic — it contains only what we set
+# explicitly here, not autodetected interface IPs.
+# This is the same pattern used by Raspiblitz.
+tlsautorefresh=1
+tlsdisableautofill=1
+
 [Bitcoin]
 %s
 bitcoin.node=bitcoind
@@ -226,6 +236,29 @@ WantedBy=multi-user.target
 	return system.SudoRun("systemctl", "restart", "lnd")
 }
 
+// disableAutoUnlock removes the wallet password file
+// and rewrites the LND systemd service back to its
+// initial (no auto-unlock) form, then restarts LND.
+// After this returns successfully, LND will require
+// manual unlock (e.g. `lncli unlock`) on next startup.
+func disableAutoUnlock() error {
+	// SudoRunSilent because the file may not exist if
+	// called from an inconsistent state — that's fine,
+	// we just want it gone.
+	system.SudoRunSilent(
+		"rm", "-f", paths.LNDWalletPassword)
+
+	if err := writeLNDServiceInitial(systemUser); err != nil {
+		return fmt.Errorf("rewrite service: %w", err)
+	}
+	if err := system.SudoRun(
+		"systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("daemon-reload: %w", err)
+	}
+	return system.SudoRun(
+		"systemctl", "restart", "lnd")
+}
+
 func waitForLND() error {
 	for i := 0; i < 60; i++ {
 		client := buildLNDClient()
@@ -237,6 +270,35 @@ func waitForLND() error {
 		time.Sleep(2 * time.Second)
 	}
 	return fmt.Errorf("LND did not respond after 120 seconds")
+}
+
+// ── Exported wrappers for the welcome package ───────────
+// These wrap the unexported helpers so the welcome
+// package can call them from screens without leaking
+// the rest of the installer package.
+
+// WaitForLND blocks until LND's REST API responds, or
+// returns an error after 120 seconds. Safe to call as a
+// tea.Cmd from a screen.
+func WaitForLND() error {
+	return waitForLND()
+}
+
+// SetupAutoUnlock writes the wallet password to a
+// permission-locked file and rewrites the LND systemd
+// service to start LND with --wallet-unlock-password-file.
+// LND is restarted as the final step.
+func SetupAutoUnlock(password string) error {
+	return setupAutoUnlock(password)
+}
+
+// DisableAutoUnlock removes the wallet password file and
+// rewrites the LND systemd service back to its initial
+// (no-auto-unlock) form. LND is restarted as the final
+// step. After this call, LND will require manual unlock
+// (e.g. `lncli unlock`) on next startup.
+func DisableAutoUnlock() error {
+	return disableAutoUnlock()
 }
 
 func buildLNDClient() *http.Client {

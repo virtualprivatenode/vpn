@@ -1,25 +1,22 @@
 package welcome
 
 import (
-	"strings"
-
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
 // ── OCReceiveScreen ────────────────────────────────────
-// Displays a fresh on-chain address with inline QR code.
-// Single button: "New Address" (ready) / "Generating..."
-// (waiting).
+// Displays a fresh on-chain address. Two buttons:
+// "New Address" (generates another) and "Show QR"
+// (opens fullscreen QR overlay).
 
 type ocRecvStep int
 
 const (
 	ocRecvWaiting ocRecvStep = iota // fetching address
-	ocRecvReady                     // address + QR visible
+	ocRecvReady                     // address visible
 )
 
 type OCReceiveScreen struct {
@@ -27,6 +24,7 @@ type OCReceiveScreen struct {
 	step    ocRecvStep
 	address string
 	errMsg  string
+	btnIdx  int // 0=New Address, 1=Show QR
 }
 
 func NewOCReceiveScreen(
@@ -51,7 +49,16 @@ func (s *OCReceiveScreen) HandleKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.btnIdx > 0 {
+			s.btnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.step == ocRecvReady && s.btnIdx < 1 {
+			s.btnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
@@ -63,7 +70,22 @@ func (s *OCReceiveScreen) HandleKey(
 		// Clean backspace: does nothing
 		return s, nil
 	case "enter":
-		if s.step == ocRecvReady {
+		if s.step != ocRecvReady {
+			return s, nil
+		}
+		switch s.btnIdx {
+		case 0: // Show QR
+			if s.address == "" {
+				return s, nil
+			}
+			addr := s.address
+			return s, func() tea.Msg {
+				return showQRMsg{
+					URL:   addr,
+					Label: "On-Chain Address",
+				}
+			}
+		case 1: // New Address
 			s.address = ""
 			s.errMsg = ""
 			s.step = ocRecvWaiting
@@ -125,19 +147,11 @@ func (s *OCReceiveScreen) viewReady(
 	p.blank()
 	p.dim("Send Bitcoin to this address.")
 	p.dim("Funds appear after 1 confirmation.")
-	p.blank()
 
-	qr := renderQRCode(s.address)
-	if qr != "" {
-		for _, line := range strings.Split(
-			qr, "\n") {
-			lineW := lipgloss.Width(line)
-			pad := (w - lineW) / 2
-			if pad < 0 {
-				pad = 0
-			}
-			p.line(strings.Repeat(" ", pad) + line)
-		}
+	if s.ctx.Status != nil && !s.ctx.Status.btcSynced {
+		p.blank()
+		p.line(" " + theme.Warn.Render(
+			"Funds will not appear until IBD is complete."))
 	}
 
 	if s.errMsg != "" {
@@ -146,7 +160,8 @@ func (s *OCReceiveScreen) viewReady(
 	}
 
 	return p.renderWithBottomButtons(
-		[]string{"New Address"}, 0,
+		[]string{"Show QR", "New Address"},
+		s.btnIdx,
 		s.ctx.ContentFocused, h)
 }
 
@@ -157,7 +172,10 @@ func (s *OCReceiveScreen) HelpBindings() []key.Binding {
 		binds = append(binds,
 			key.NewBinding(
 				key.WithKeys("enter"),
-				key.WithHelp("enter", "new addr")))
+				key.WithHelp("enter", "select")),
+			key.NewBinding(
+				key.WithKeys("left", "right"),
+				key.WithHelp("←→", "buttons")))
 	}
 
 	binds = append(binds, kSidebar)

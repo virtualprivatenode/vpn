@@ -43,7 +43,7 @@ type OnChainHomeScreen struct {
 	labelEditing bool
 	labelInput   textinput.Model
 	labelOnBtn   bool // true when on Save/Cancel buttons
-	labelBtnIdx  int  // 0=Save, 1=Cancel
+	labelBtnIdx  int  // 0=Cancel, 1=Save
 }
 
 func NewOnChainHomeScreen(
@@ -96,6 +96,17 @@ func (s *OnChainHomeScreen) HandleKey(
 		}
 		return s, nil
 	case "enter":
+		// No wallet → trigger wallet creation flow
+		if !s.ctx.Cfg.WalletExists() {
+			screen := NewWalletCreateScreen(s.ctx)
+			return s, func() tea.Msg {
+				return openTabMsg{
+					Kind:   tabWalletCreate,
+					Label:  "Create Wallet",
+					Screen: screen,
+				}
+			}
+		}
 		return s.handleEnter()
 	}
 	return s, nil
@@ -380,7 +391,8 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 	case "down", "tab":
 		if !s.labelOnBtn {
 			s.labelOnBtn = true
-			s.labelBtnIdx = 0
+			// Land on Save (index 1) — the action button.
+			s.labelBtnIdx = 1
 			s.labelInput.Blur()
 		}
 		return s, nil
@@ -409,7 +421,10 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 	case "enter":
 		if s.labelOnBtn {
 			switch s.labelBtnIdx {
-			case 0: // Save
+			case 0: // Cancel
+				s.closeLabelPopup()
+				return s, nil
+			case 1: // Save
 				if s.utxoCursor <
 					len(s.ocCtx.Utxos) {
 					txid := s.ocCtx.Utxos[s.utxoCursor].Txid
@@ -420,14 +435,11 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 				}
 				s.closeLabelPopup()
 				return s, nil
-			case 1: // Cancel
-				s.closeLabelPopup()
-				return s, nil
 			}
 		}
-		// On label field — move to buttons
+		// On label field — move to buttons, land on Save.
 		s.labelOnBtn = true
-		s.labelBtnIdx = 0
+		s.labelBtnIdx = 1
 		s.labelInput.Blur()
 		return s, nil
 	case "backspace":
@@ -484,25 +496,24 @@ func (s *OnChainHomeScreen) View(
 	status := s.ctx.Status
 
 	// ── Fixed header ─────────────────────────────
+
+	if !cfg.HasLND() || !cfg.WalletExists() {
+		return renderWalletPrompt(
+			w, h, s.ctx.ContentFocused)
+	}
+
+	if status == nil || !status.lndResponding {
+		return renderWaitingForLND(w, h)
+	}
+
 	var headerLines []string
 	headerLines = append(headerLines, "")
+
 	headerLines = append(headerLines,
 		centerPad(
 			theme.Header.Render("On-Chain Wallet"),
 			w))
 	headerLines = append(headerLines, "")
-
-	if !cfg.HasLND() || !cfg.WalletExists() {
-		headerLines = append(headerLines,
-			theme.Dim.Render(
-				" Install LND and create wallet."))
-		return strings.Join(headerLines, "\n")
-	}
-	if status == nil || !status.lndResponding {
-		headerLines = append(headerLines,
-			theme.Dim.Render(" Waiting for LND..."))
-		return strings.Join(headerLines, "\n")
-	}
 
 	isFocused := s.ctx.ContentFocused
 	utxos := s.ocCtx.Utxos
@@ -520,6 +531,23 @@ func (s *OnChainHomeScreen) View(
 			theme.Dim.Render(
 				fmt.Sprintf("  (%d UTXOs)",
 					len(utxos))))
+
+	if !status.btcSynced {
+		headerLines = append(headerLines, "")
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"Bitcoin Core is syncing. Funds you have"))
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"received will not appear until sync reaches"))
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"that block. Funds cannot be spent until"))
+		headerLines = append(headerLines,
+			" "+theme.Warn.Render(
+				"sync is complete."))
+	}
+
 	headerLines = append(headerLines, "")
 
 	sendLabel := "Send"
@@ -641,10 +669,7 @@ func (s *OnChainHomeScreen) View(
 				marker = "▸"
 			}
 
-			selStyle := lipgloss.NewStyle().
-				Foreground(
-					theme.ColorAccent).
-				Bold(true)
+			selStyle := theme.NavActive
 
 			switch {
 			case isSelected && s.pencilFocused &&
@@ -779,10 +804,7 @@ func (s *OnChainHomeScreen) View(
 			marker := " "
 			if isSelected {
 				marker = "▸"
-				selStyle := lipgloss.NewStyle().
-					Foreground(
-						theme.ColorAccent).
-					Bold(true)
+				selStyle := theme.NavActive
 				txMidLines = append(txMidLines,
 					marker+
 						selStyle.Render(dateStr)+
@@ -867,14 +889,17 @@ func (s *OnChainHomeScreen) openLabelPopup() {
 	s.labelInput.Focus()
 	s.labelEditing = true
 	s.labelOnBtn = false
-	s.labelBtnIdx = 0
+	// Default to Save (index 1) so the first down/tab
+	// or enter off the label field lands on the action
+	// button, not Cancel.
+	s.labelBtnIdx = 1
 	s.pencilFocused = false
 }
 
 func (s *OnChainHomeScreen) closeLabelPopup() {
 	s.labelEditing = false
 	s.labelOnBtn = false
-	s.labelBtnIdx = 0
+	s.labelBtnIdx = 1
 	s.labelInput.Blur()
 }
 
@@ -917,7 +942,7 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 			border.Render("│"))
 
 	btnStr := renderButtons(
-		[]string{"Save", "Cancel"},
+		[]string{"Cancel", "Save"},
 		s.labelBtnIdx,
 		isFocused && s.labelOnBtn, boxW)
 	btnW := lipgloss.Width(btnStr)
@@ -941,6 +966,15 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
+	if !s.ctx.Cfg.WalletExists() {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "create wallet")),
+			kSidebar,
+			kQuit,
+		}
+	}
 	if s.labelEditing {
 		return s.labelPopupBindings()
 	}

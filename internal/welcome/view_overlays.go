@@ -59,15 +59,27 @@ func (m Model) viewFullURL() string {
 
 // ── QR and encoding utilities ──────────────────────────
 
+// renderQRCode generates a terminal-friendly QR code from
+// the given data using qrterminal's halfblocks mode.
+//
+// All four halfblock character fields are set explicitly,
+// even though qrterminal v3.2.1's GenerateWithConfig fills
+// in defaults for any unset ones. Being explicit means the
+// code no longer depends on that library default-filling
+// behavior — if the library is ever downgraded to a version
+// that doesn't fill defaults, or replaced by a fork that
+// doesn't, the config still produces correct output.
 func renderQRCode(data string) string {
 	var buf bytes.Buffer
 	config := qrterminal.Config{
-		Level:      qrterminal.L,
-		Writer:     &buf,
-		HalfBlocks: true,
-		BlackChar:  qrterminal.BLACK_BLACK,
-		WhiteChar:  qrterminal.WHITE_WHITE,
-		QuietZone:  2,
+		Level:          qrterminal.L,
+		Writer:         &buf,
+		HalfBlocks:     true,
+		BlackChar:      qrterminal.BLACK_BLACK,
+		WhiteChar:      qrterminal.WHITE_WHITE,
+		BlackWhiteChar: qrterminal.BLACK_WHITE,
+		WhiteBlackChar: qrterminal.WHITE_BLACK,
+		QuietZone:      2,
 	}
 	qrterminal.GenerateWithConfig(data, config)
 	return strings.TrimRight(buf.String(), "\n")

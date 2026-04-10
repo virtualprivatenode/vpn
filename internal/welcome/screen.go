@@ -118,14 +118,6 @@ type refreshStatusMsg struct{}
 // selection after a successful on-chain send.
 type clearUtxoSelectionMsg struct{}
 
-// shellActionMsg tells Model to set shellAction and quit.
-// Used by screens that need to trigger install flows
-// (Syncthing install, LndHub install, etc.) which require
-// a full TUI restart via the Show() loop.
-type shellActionMsg struct {
-	action wSubview
-}
-
 // ── Message emitters ────────────────────────────────────
 // Screens use these as tea.Cmd values. Each is a
 // func() tea.Msg that returns instantly — the message
