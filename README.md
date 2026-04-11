@@ -16,7 +16,7 @@ No wrappers, no abstractions. Your keys, your node.
   </tr>
   <tr>
     <td><img src="docs/images/channels_dark.png" alt="Channels Dashboard (Dark)" /></td>
-    <td><img src="docs/images/channels_lights.png" alt="Channels Dashboard (Light)" /></td>
+    <td><img src="docs/images/channels_light.png" alt="Channels Dashboard (Light)" /></td>
   </tr>
 </table>
 
