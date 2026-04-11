@@ -39,7 +39,7 @@ No wrappers, no abstractions. Your keys, your node.
 
 ### Requirements
 
-- Fresh Debian 13+
+- Fresh Debian 13+ Box
 - 2 (v)CPU, 4+ GB RAM, 90+ GB SSD
 - [Mynymbox VPS with exact specs](https://client.mynymbox.io/store/custom/custom-vps-2-4-90-nl?aff=8)
 
@@ -108,9 +108,9 @@ systemctl status syncthing
 apt update && apt install -y git wget sudo curl
 
 cd /tmp
-wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
 source ~/.profile
 
@@ -298,7 +298,7 @@ For the full setup guide, see
 - LND channel backup auto-synced via Syncthing (mutual TLS, direct connection, no cloud)
 - Syncthing sync port (22000) rejects unapproved devices via mutual TLS before any data exchange
 - Syncthing web UI accessible only via Tor
-- Bitcoin Core wallet disabled (Lightning-only node)
+- Bitcoin Core wallet disabled
 - All downloads after Tor installation route through torsocks
 - apt package manager configured to use Tor SOCKS proxy
 - Atomic config writes with fsync + rename (prevents corruption on power loss)
@@ -314,8 +314,10 @@ For the full setup guide, see
 The bootstrap script makes two types of network calls:
 
 **Phase 1 (clearnet, unavoidable):**
+- `apt-get update` — Debian package index refresh
 - `apt-get upgrade` — Debian security updates
 - `apt-get install tor torsocks gnupg sudo wget` — Debian package mirrors
+- NTP time sync enablement — ongoing clock sync queries to the Debian NTP pool (continues after bootstrap)
 
 **Phase 2 (all through Tor):**
 - rlvpn binary download from GitHub
@@ -325,9 +327,10 @@ The bootstrap script makes two types of network calls:
 - Syncthing repository key (when Syncthing is installed)
 - All subsequent apt operations
 
-After bootstrap, the only clearnet traffic is Syncthing sync
-(port 22000) if you install it, and LND P2P if you choose hybrid
-mode. Everything else routes through Tor.
+After bootstrap, the only ongoing clearnet traffic is NTP clock sync
+(to the Debian NTP pool), Syncthing sync (port 22000) if you install
+it, and LND P2P if you choose hybrid mode. Everything else routes
+through Tor.
 
 Verify Tor routing after install:
 ```bash
