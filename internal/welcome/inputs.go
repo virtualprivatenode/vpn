@@ -241,6 +241,28 @@ func newCustomFeeInput() textinput.Model {
 	return ti
 }
 
+func newSSHKeyInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "ssh-ed25519 AAAA..."
+	ti.CharLimit = 2000
+	ti.SetWidth(60)
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Focus()
+	return ti
+}
+
+func newUserPasswordInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "(paste from password manager)"
+	ti.CharLimit = 256
+	ti.SetWidth(60)
+	ti.Prompt = "  "
+	ti.EchoMode = textinput.EchoPassword
+	applyInputStyles(&ti)
+	return ti
+}
+
 func newCloseFeeInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "sat/vB"

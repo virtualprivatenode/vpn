@@ -35,33 +35,38 @@ const (
 type tabKind int
 
 const (
-	tabMain             tabKind = iota // Main view for current section
-	tabChannel                         // Channel detail
-	tabPayment                         // Payment detail
-	tabSend                            // ⚡ Send payment flow
-	tabReceive                         // ⚡ Receive payment flow
-	tabPairing                         // Pairing screen
-	tabOnChain                         // ⛓ On-chain send flow
-	tabOCReceive                       // ⛓ On-chain receive flow
-	tabSyncthing                       //
-	tabSyncthingDevice                 // Syncthing device detail
-	tabSyncthingWebUI                  // Syncthing Web UI
-	tabSyncthingPair                   // Syncthing pair device flow
-	tabLndHub                          //
-	tabLndHubAccount                   // LndHub account detail
-	tabLndHubCreate                    // LndHub create account flow
-	tabOpenChannel                     // Channel open flow
-	tabCloseChannel                    // Channel close flow
-	tabOnChainTx                       // on-chain transaction detail
-	tabUtxoDetail                      // UTXO detail with label edit
-	tabChannelHistory                  // channel history view
-	tabSyncthingInstall                // Syncthing install flow
-	tabLndHubInstall                   // LndHub install flow
-	tabP2PUpgrade                      // P2P mode upgrade flow
-	tabSelfUpdate                      // Self-update flow
-	tabAutoUnlock                      // Auto-unlock configuration flow
-	tabWalletCreate                    // Wallet creation flow
-	tabNodeInfo                        // Receive channel / node info screen
+	tabMain              tabKind = iota // Main view for current section
+	tabChannel                          // Channel detail
+	tabPayment                          // Payment detail
+	tabSend                             // ⚡ Send payment flow
+	tabReceive                          // ⚡ Receive payment flow
+	tabPairing                          // Pairing screen
+	tabOnChain                          // ⛓ On-chain send flow
+	tabOCReceive                        // ⛓ On-chain receive flow
+	tabSyncthing                        //
+	tabSyncthingDevice                  // Syncthing device detail
+	tabSyncthingWebUI                   // Syncthing Web UI
+	tabSyncthingPair                    // Syncthing pair device flow
+	tabLndHub                           //
+	tabLndHubAccount                    // LndHub account detail
+	tabLndHubCreate                     // LndHub create account flow
+	tabOpenChannel                      // Channel open flow
+	tabCloseChannel                     // Channel close flow
+	tabOnChainTx                        // on-chain transaction detail
+	tabUtxoDetail                       // UTXO detail with label edit
+	tabChannelHistory                   // channel history view
+	tabSyncthingInstall                 // Syncthing install flow
+	tabLndHubInstall                    // LndHub install flow
+	tabP2PUpgrade                       // P2P mode upgrade flow
+	tabSelfUpdate                       // Self-update flow
+	tabAutoUnlock                       // Auto-unlock configuration flow
+	tabWalletCreate                     // Wallet creation flow
+	tabNodeInfo                         // Receive channel / node info screen
+	tabSSHKeys                          // SSH key management
+	tabSSHKeyDetail                     // SSH key detail (per-key)
+	tabSSHKeyAdd                        // SSH key add flow
+	tabSSHPasswordAuth                  // SSH password auth toggle
+	tabSSHChangePassword                // change login password
 )
 
 type openTab struct {

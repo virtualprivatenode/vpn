@@ -460,6 +460,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return rm, cmd
 		}
 		return m, nil
+	case sshKeysListMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabSSHKeys, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case sshKeyAddMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabSSHKeyAdd, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case sshKeyRemoveMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabSSHKeyDetail, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case sshPwAuthDoneMsg:
+		// Cfg was mutated by SetSSHPasswordAuth before
+		// the msg was returned; persist before routing.
+		m.saveCfg()
+		if rm, cmd, ok := m.routeToScreen(
+			tabSSHPasswordAuth, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
+	case changePwDoneMsg:
+		if rm, cmd, ok := m.routeToScreen(
+			tabSSHChangePassword, msg); ok {
+			return rm, cmd
+		}
+		return m, nil
 	case walletLNDReadyMsg:
 		if rm, cmd, ok := m.routeToScreen(
 			tabWalletCreate, msg); ok {
@@ -908,6 +941,13 @@ func childKindsOf(parent tabKind) []tabKind {
 		return []tabKind{
 			tabLndHubAccount,
 			tabLndHubCreate,
+		}
+	case tabSSHKeys:
+		return []tabKind{
+			tabSSHKeyDetail,
+			tabSSHKeyAdd,
+			tabSSHPasswordAuth,
+			tabSSHChangePassword,
 		}
 	}
 	return nil

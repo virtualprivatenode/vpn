@@ -43,6 +43,15 @@ type AppConfig struct {
 	LndHubDBPassword   string            `json:"lndhub_db_password,omitempty"`
 	LndHubAccounts     []LndHubAccount   `json:"lndhub_accounts,omitempty"`
 	Theme              string            `json:"theme,omitempty"`
+
+	// SSHPasswordAuthDisabled mirrors the value
+	// 99-rlvpn-hardening.conf writes for sshd's
+	// PasswordAuthentication directive. False = password
+	// auth enabled (matches debian default and the
+	// bootstrap-written drop-in, which is silent on the
+	// directive). True = password auth disabled by the
+	// TUI's SSH Password Auth screen.
+	SSHPasswordAuthDisabled bool `json:"ssh_password_auth_disabled,omitempty"`
 }
 
 type LndHubAccount struct {

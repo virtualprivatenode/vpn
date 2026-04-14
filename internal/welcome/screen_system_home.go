@@ -16,8 +16,11 @@ import (
 
 // ── SystemHomeScreen ──────────────────────────────────
 // Section home for System. Two focus zones: buttons
-// (Update Packages, Update Node, Reboot) and scrollable
-// service list with hotkey actions (r/s/a/l).
+// and scrollable service list with hotkey actions.
+//
+// Buttons are dynamic — only actionable buttons appear:
+//   Update Packages (always), SSH Keys (always),
+//   Update Node (when available), Reboot (when required).
 //
 // Confirms are screen-owned: svcConfirm and sysConfirm
 // live here. When active, they intercept all keys and
@@ -28,9 +31,20 @@ const (
 	sysHomeZoneServices = 1
 )
 
+// sysBtn identifies a logical button action independent
+// of its position in the dynamic button bar.
+type sysBtn int
+
+const (
+	sysBtnUpdatePkg sysBtn = iota
+	sysBtnSSHKeys
+	sysBtnUpdateNode
+	sysBtnReboot
+)
+
 type SystemHomeScreen struct {
 	ctx       *ScreenContext
-	btnIdx    int // 0=Update Packages, 1=Update Node, 2=Reboot
+	btnIdx    int
 	focusZone int
 	svcCursor int
 
@@ -73,11 +87,10 @@ func (s *SystemHomeScreen) HandleKey(
 		}
 	}
 
-	hasUpdate := s.hasUpdate()
-	maxBtn := 1
-	if s.ctx.Status != nil &&
-		s.ctx.Status.rebootRequired {
-		maxBtn = 2
+	actions := s.buttonActions()
+	maxBtn := len(actions) - 1
+	if s.btnIdx > maxBtn {
+		s.btnIdx = maxBtn
 	}
 
 	switch keyStr {
@@ -199,23 +212,31 @@ func (s *SystemHomeScreen) HandleKey(
 		}
 		return s, nil
 	case "enter":
-		if s.focusZone == sysHomeZoneButtons {
-			switch s.btnIdx {
-			case 0:
+		if s.focusZone == sysHomeZoneButtons &&
+			s.btnIdx < len(actions) {
+			switch actions[s.btnIdx] {
+			case sysBtnUpdatePkg:
 				s.sysConfirm = "Update packages"
-			case 1:
-				if hasUpdate {
-					screen := NewSelfUpdateScreen(
-						s.ctx)
-					return s, func() tea.Msg {
-						return openTabMsg{
-							Kind:   tabSelfUpdate,
-							Label:  "Updating",
-							Screen: screen,
-						}
+			case sysBtnSSHKeys:
+				screen := NewSSHKeysScreen(s.ctx)
+				return s, func() tea.Msg {
+					return openTabMsg{
+						Kind:   tabSSHKeys,
+						Label:  "SSH Keys",
+						Screen: screen,
 					}
 				}
-			case 2:
+			case sysBtnUpdateNode:
+				screen := NewSelfUpdateScreen(
+					s.ctx)
+				return s, func() tea.Msg {
+					return openTabMsg{
+						Kind:   tabSelfUpdate,
+						Label:  "Updating",
+						Screen: screen,
+					}
+				}
+			case sysBtnReboot:
 				s.sysConfirm = "Reboot"
 			}
 		}
@@ -313,22 +334,13 @@ func (s *SystemHomeScreen) View(
 
 	headerLines = append(headerLines, "")
 
-	btnLabels := []string{"Update Packages"}
-	if hasUpdate {
-		btnLabels = append(btnLabels, "Update Node")
-	} else {
-		btnLabels = append(btnLabels, "Up to Date")
-	}
-	if status != nil && status.rebootRequired {
-		btnLabels = append(btnLabels, "Reboot")
-	}
+	btnLabels := s.buttonLabels()
 
 	headerLines = append(headerLines,
-		renderButtonsWithGray(
+		renderButtons(
 			btnLabels, s.btnIdx,
 			isFocused &&
-				s.focusZone == sysHomeZoneButtons, w,
-			1, !hasUpdate))
+				s.focusZone == sysHomeZoneButtons, w))
 	headerLines = append(headerLines, "")
 
 	if s.sysConfirm != "" {
@@ -726,6 +738,34 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 func (s *SystemHomeScreen) hasUpdate() bool {
 	return s.ctx.LatestVersion != "" &&
 		s.ctx.LatestVersion != s.ctx.Version
+}
+
+func (s *SystemHomeScreen) buttonActions() []sysBtn {
+	actions := []sysBtn{sysBtnUpdatePkg, sysBtnSSHKeys}
+	if s.hasUpdate() {
+		actions = append(actions, sysBtnUpdateNode)
+	}
+	if s.ctx.Status != nil &&
+		s.ctx.Status.rebootRequired {
+		actions = append(actions, sysBtnReboot)
+	}
+	return actions
+}
+
+var sysBtnLabel = map[sysBtn]string{
+	sysBtnUpdatePkg:  "Update Packages",
+	sysBtnSSHKeys:    "SSH Keys",
+	sysBtnUpdateNode: "Update Node",
+	sysBtnReboot:     "Reboot",
+}
+
+func (s *SystemHomeScreen) buttonLabels() []string {
+	actions := s.buttonActions()
+	labels := make([]string, len(actions))
+	for i, a := range actions {
+		labels[i] = sysBtnLabel[a]
+	}
+	return labels
 }
 
 func (s *SystemHomeScreen) svcCount() int {

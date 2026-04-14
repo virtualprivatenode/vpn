@@ -86,10 +86,15 @@ const (
 // ── System ───────────────────────────────────────────────
 
 const (
-	SyncthingConfigXML  = "/etc/syncthing/config.xml"
-	UFWDefault          = "/etc/default/ufw"
-	SSHDConfig          = "/etc/ssh/sshd_config"
-	SSHDDropIn          = "/etc/ssh/sshd_config.d/99-no-root.conf"
+	SyncthingConfigXML = "/etc/syncthing/config.xml"
+	UFWDefault         = "/etc/default/ufw"
+	SSHDConfig         = "/etc/ssh/sshd_config"
+	// SSHDDropIn uses a 00- prefix so it is parsed before
+	// other drop-ins (notably 50-cloud-init.conf which
+	// declares PasswordAuthentication yes on cloud
+	// images). sshd's first-match-wins semantics mean
+	// loading first = winning.
+	SSHDDropIn          = "/etc/ssh/sshd_config.d/00-rlvpn-hardening.conf"
 	Fail2banJail        = "/etc/fail2ban/jail.local"
 	AutoUpgrades        = "/etc/apt/apt.conf.d/20auto-upgrades"
 	UnattendedUpgrades  = "/etc/apt/apt.conf.d/50unattended-upgrades"
@@ -122,8 +127,9 @@ const (
 // ── User ─────────────────────────────────────────────────
 
 const (
-	AdminUser   = "ripsline"
-	AdminBashrc = "/home/ripsline/.bashrc"
+	AdminUser          = "ripsline"
+	AdminBashrc        = "/home/ripsline/.bashrc"
+	AuthorizedKeysFile = "/home/" + AdminUser + "/.ssh/authorized_keys"
 )
 
 // ── Cache ────────────────────────────────────────────────
