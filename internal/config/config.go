@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ripsline/virtual-private-node/internal/paths"
 )
@@ -162,4 +163,88 @@ func (c *AppConfig) WalletExists() bool {
 
 func (c *AppConfig) NetworkConfig() *NetworkConfig {
 	return NetworkConfigFromName(c.Network)
+}
+
+// ── State mutations ──────────────────────────────────────
+//
+// Named methods on *AppConfig for state transitions that
+// callers otherwise inline. Each one encapsulates the
+// "construct a record, append/update/remove in slice"
+// operation so callers can't accidentally forget a field
+// or reach into slice internals.
+//
+// These methods do NOT call Save — persistence is the
+// caller's responsibility. The split keeps mutation and
+// persistence composable (e.g. two mutations then one
+// save, or a mutation applied speculatively then reverted
+// without a disk write).
+//
+// See go-style-review.md Q4 and design-decisions.md for
+// the rationale behind this pattern.
+
+// AddLndHubAccount appends a new active LndHub account
+// record with today's date. Extracts only the primitives
+// it needs (label, login) from callers rather than taking
+// the installer.LndHubAccount type — keeps the config
+// package free of installer-side dependencies.
+func (c *AppConfig) AddLndHubAccount(label, login string) {
+	c.LndHubAccounts = append(c.LndHubAccounts,
+		LndHubAccount{
+			Label:     label,
+			Login:     login,
+			CreatedAt: time.Now().Format("2006-01-02"),
+			Active:    true,
+		})
+}
+
+// DeactivateLndHubAccount marks the account with the given
+// login inactive and records today's date and the balance
+// at deactivation. Returns true if a matching account was
+// found and updated, false if no account had that login.
+//
+// The caller uses the bool to decide whether to Save —
+// a false return means nothing changed, so no disk write
+// is needed.
+func (c *AppConfig) DeactivateLndHubAccount(
+	login, balance string,
+) bool {
+	for i := range c.LndHubAccounts {
+		if c.LndHubAccounts[i].Login == login {
+			c.LndHubAccounts[i].Active = false
+			c.LndHubAccounts[i].DeactivatedAt =
+				time.Now().Format("2006-01-02")
+			c.LndHubAccounts[i].BalanceOnDeactivate = balance
+			return true
+		}
+	}
+	return false
+}
+
+// AddSyncthingDevice appends a new device record with an
+// auto-generated Name ("Device N" where N is the new
+// device's 1-indexed position) and today's date.
+func (c *AppConfig) AddSyncthingDevice(deviceID string) {
+	c.SyncthingDevices = append(c.SyncthingDevices,
+		SyncthingDevice{
+			Name: fmt.Sprintf("Device %d",
+				len(c.SyncthingDevices)+1),
+			DeviceID: deviceID,
+			PairedAt: time.Now().Format("2006-01-02"),
+		})
+}
+
+// RemoveSyncthingDevice deletes the device with the given
+// ID from the list. Returns true if a device was removed,
+// false if no device had that ID. Caller uses the bool to
+// decide whether to Save.
+func (c *AppConfig) RemoveSyncthingDevice(deviceID string) bool {
+	for i, d := range c.SyncthingDevices {
+		if d.DeviceID == deviceID {
+			c.SyncthingDevices = append(
+				c.SyncthingDevices[:i],
+				c.SyncthingDevices[i+1:]...)
+			return true
+		}
+	}
+	return false
 }

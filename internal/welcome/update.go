@@ -2,11 +2,9 @@ package welcome
 
 import (
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
@@ -224,114 +222,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case lndhubAccountCreatedMsg:
 		if msg.err == nil && msg.account != nil {
-			m.cfg.LndHubAccounts = append(
-				m.cfg.LndHubAccounts,
-				config.LndHubAccount{
-					Label: msg.label,
-					Login: msg.account.Login,
-					CreatedAt: time.Now().
-						Format("2006-01-02"),
-					Active: true,
-				})
+			m.cfg.AddLndHubAccount(
+				msg.label, msg.account.Login)
 			m.saveCfg()
 		}
 		// Route to screen for step/error state
-		if rm, cmd, ok := m.routeToScreen(
-			tabLndHubCreate, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabLndHubCreate, msg)
 	case lndhubDeactivatedMsg:
 		if msg.err == nil {
-			// Find account by login and deactivate
-			for i := range m.cfg.LndHubAccounts {
-				if m.cfg.LndHubAccounts[i].Login ==
-					msg.login {
-					m.cfg.LndHubAccounts[i].Active = false
-					m.cfg.LndHubAccounts[i].DeactivatedAt =
-						time.Now().Format("2006-01-02")
-					m.cfg.LndHubAccounts[i].
-						BalanceOnDeactivate = msg.balance
-					m.saveCfg()
-					break
-				}
+			if m.cfg.DeactivateLndHubAccount(
+				msg.login, msg.balance) {
+				m.saveCfg()
 			}
 		}
 		// Route to screen for state transition
-		if rm, cmd, ok := m.routeToScreen(
-			tabLndHubAccount, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabLndHubAccount, msg)
 	case syncthingPairedMsg:
 		if msg.err == nil {
-			m.cfg.SyncthingDevices = append(
-				m.cfg.SyncthingDevices,
-				config.SyncthingDevice{
-					Name: fmt.Sprintf("Device %d",
-						len(m.cfg.SyncthingDevices)+1),
-					DeviceID: msg.deviceID,
-					PairedAt: time.Now().
-						Format("2006-01-02"),
-				})
+			m.cfg.AddSyncthingDevice(msg.deviceID)
 			m.saveCfg()
 		}
 		// Route to screen for step/error state
-		if rm, cmd, ok := m.routeToScreen(
-			tabSyncthingPair, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSyncthingPair, msg)
 	case syncthingRemovedMsg:
 		if msg.err == nil {
-			// Remove device from config by ID
-			for i, d := range m.cfg.SyncthingDevices {
-				if d.DeviceID == msg.deviceID {
-					m.cfg.SyncthingDevices = append(
-						m.cfg.SyncthingDevices[:i],
-						m.cfg.SyncthingDevices[i+1:]...)
-					m.saveCfg()
-					break
-				}
+			if m.cfg.RemoveSyncthingDevice(msg.deviceID) {
+				m.saveCfg()
 			}
 		}
 		// Route to screen — screen emits closeTab
 		// on success, sets error on failure
-		if rm, cmd, ok := m.routeToScreen(
-			tabSyncthingDevice, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSyncthingDevice, msg)
 	case channelOpenResultMsg:
-		// L16: route to channel open screen
-		if rm, cmd, ok := m.routeToScreen(
-			tabOpenChannel, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabOpenChannel, msg)
 	case newAddressMsg:
-		// Route to OCReceiveScreen if open
-		if rm, cmd, ok := m.routeToScreen(
-			tabOCReceive, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabOCReceive, msg)
 	case invoiceCreatedMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabReceive, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabReceive, msg)
 	case invoiceSettledMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabReceive, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabReceive, msg)
 	case payReqDecodedMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabSend, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabSend, msg)
 	case sendPaymentResultMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabSend, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabSend, msg)
 	case paymentHistoryMsg:
 		// Route to wallet home screen
 		if cmd, ok := m.routeToSectionScreen(
@@ -357,20 +290,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case sendCoinsResultMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabOnChain, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabOnChain, msg)
 	case closeChannelMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabCloseChannel, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabCloseChannel, msg)
 	case closedChannelsMsg:
 		// Route to history screen so it gets the data
-		if rm, cmd, ok := m.routeToScreen(
-			tabChannelHistory, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabChannelHistory, msg)
 	case labelTxMsg:
 		// Route to on-chain home screen
 		if cmd, ok := m.routeToSectionScreen(
@@ -420,87 +345,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case feeEstimateMsg:
-		rm, cmd, _ := m.routeToScreen(
-			tabOnChain, msg)
-		return rm, cmd
+		return m.dispatchToTab(tabOnChain, msg)
 	case installStepDoneMsg:
 		// Route to whichever install flow tab is open.
-		// Try each install tab kind; only one will
-		// match at a time.
-		if rm, cmd, ok := m.routeToScreen(
-			tabSyncthingInstall, msg); ok {
-			return rm, cmd
-		}
-		if rm, cmd, ok := m.routeToScreen(
-			tabLndHubInstall, msg); ok {
-			return rm, cmd
-		}
-		if rm, cmd, ok := m.routeToScreen(
-			tabP2PUpgrade, msg); ok {
-			return rm, cmd
-		}
-		if rm, cmd, ok := m.routeToScreen(
-			tabSelfUpdate, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		// Only one install runs at a time, so first
+		// match wins.
+		return m.dispatchToFirstTab([]tabKind{
+			tabSyncthingInstall, tabLndHubInstall,
+			tabP2PUpgrade, tabSelfUpdate,
+		}, msg)
 	case autoUnlockSetupDoneMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabAutoUnlock, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabAutoUnlock, msg)
 	case autoUnlockDisableDoneMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabAutoUnlock, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabAutoUnlock, msg)
 	case sshKeysListMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabSSHKeys, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSSHKeys, msg)
 	case sshKeyAddMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabSSHKeyAdd, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSSHKeyAdd, msg)
 	case sshKeyRemoveMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabSSHKeyDetail, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSSHKeyDetail, msg)
 	case sshPwAuthDoneMsg:
 		// Cfg was mutated by SetSSHPasswordAuth before
 		// the msg was returned; persist before routing.
 		m.saveCfg()
-		if rm, cmd, ok := m.routeToScreen(
-			tabSSHPasswordAuth, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSSHPasswordAuth, msg)
 	case changePwDoneMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabSSHChangePassword, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabSSHChangePassword, msg)
 	case walletLNDReadyMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabWalletCreate, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabWalletCreate, msg)
 	case walletExecDoneMsg:
-		if rm, cmd, ok := m.routeToScreen(
-			tabWalletCreate, msg); ok {
-			return rm, cmd
-		}
-		return m, nil
+		return m.dispatchToTab(tabWalletCreate, msg)
 	case walletCreatedMsg:
 		// Wallet was successfully created. Persist
 		// the flag, create the lndClient (it didn't
@@ -1167,4 +1041,44 @@ func (m *Model) routeToSectionScreen(
 		m.sectionScreens[sec].HandleMsg(msg)
 	m.sectionScreens[sec] = newScreen
 	return cmd, true
+}
+
+// dispatchToTab routes msg to the screen on the tab of the
+// given kind and returns the updated model + cmd in the
+// shape every Update-switch arm needs. If no matching tab
+// is open, returns (m, nil) — the msg is dropped.
+//
+// This is the boilerplate collapsed: any async message
+// whose only job is "deliver to the screen that started
+// the work" uses this. Pre-routing state mutations do NOT
+// go here — those stay inline in Update so ordering stays
+// visible. See go-style-review.md Q4 for the pattern that
+// covers cases with both routing and state mutation.
+func (m Model) dispatchToTab(
+	kind tabKind, msg tea.Msg,
+) (Model, tea.Cmd) {
+	if rm, cmd, ok := m.routeToScreen(kind, msg); ok {
+		return rm, cmd
+	}
+	return m, nil
+}
+
+// dispatchToFirstTab routes msg to the first tab whose
+// kind appears in kinds. Returns (m, nil) if none match.
+//
+// Used when a single async message class can arrive for
+// any of several mutually-exclusive tabs (e.g.
+// installStepDoneMsg can come from a Syncthing install,
+// an LndHub install, a P2P upgrade, or a self-update —
+// but only one flow runs at a time). Order in kinds is
+// the match priority if more than one were somehow open.
+func (m Model) dispatchToFirstTab(
+	kinds []tabKind, msg tea.Msg,
+) (Model, tea.Cmd) {
+	for _, k := range kinds {
+		if rm, cmd, ok := m.routeToScreen(k, msg); ok {
+			return rm, cmd
+		}
+	}
+	return m, nil
 }
