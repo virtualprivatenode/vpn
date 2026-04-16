@@ -607,13 +607,13 @@ func fetchPaymentHistoryCmd(
 			return paymentHistoryMsg{
 				err: fmt.Errorf("LND not connected")}
 		}
-		invoices, err := client.ListInvoices(50)
-		if err != nil {
-			logger.TUI("ListInvoices: %v", err)
+		invoices, invErr := client.ListInvoices(50)
+		if invErr != nil {
+			logger.TUI("ListInvoices: %v", invErr)
 		}
-		payments, err := client.ListPayments(50)
-		if err != nil {
-			logger.TUI("ListPayments: %v", err)
+		payments, payErr := client.ListPayments(50)
+		if payErr != nil {
+			logger.TUI("ListPayments: %v", payErr)
 		}
 		var all []lndrpc.PaymentEntry
 		all = append(all, invoices...)
@@ -622,7 +622,18 @@ func fetchPaymentHistoryCmd(
 			return all[i].CreationDate >
 				all[j].CreationDate
 		})
-		return paymentHistoryMsg{entries: all}
+		var rpcErr error
+		switch {
+		case invErr != nil && payErr != nil:
+			rpcErr = fmt.Errorf(
+				"invoices and payments: %v", invErr)
+		case invErr != nil:
+			rpcErr = fmt.Errorf("invoices: %v", invErr)
+		case payErr != nil:
+			rpcErr = fmt.Errorf("payments: %v", payErr)
+		}
+		return paymentHistoryMsg{
+			entries: all, err: rpcErr}
 	}
 }
 
