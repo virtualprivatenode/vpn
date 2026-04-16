@@ -2,16 +2,12 @@ package welcome
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/system"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -541,12 +537,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchStatus(m.cfg, m.lndClient)
 	case tickMsg:
 		if m.fetchInFlight {
-			return m, tickEvery(m.pollInterval())
+			return m, tickEveryCmd(m.pollInterval())
 		}
 		m.fetchInFlight = true
 		return m, tea.Batch(
 			fetchStatus(m.cfg, m.lndClient),
-			tickEvery(m.pollInterval()))
+			tickEveryCmd(m.pollInterval()))
 	}
 	return m, nil
 }
@@ -605,20 +601,6 @@ func (m Model) handleKey(
 	}
 
 	return m, nil
-}
-
-func labelTxCmd(
-	client *lndrpc.Client, txid, label string,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return labelTxMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		err := client.LabelTransaction(
-			txid, label, true)
-		return labelTxMsg{err: err}
-	}
 }
 
 // ── Coin control helpers ─────────────────────────────────
@@ -1185,175 +1167,4 @@ func (m *Model) routeToSectionScreen(
 		m.sectionScreens[sec].HandleMsg(msg)
 	m.sectionScreens[sec] = newScreen
 	return cmd, true
-}
-
-// ── Shell commands ───────────────────────────────────────
-
-func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
-	mac := readMacaroonHex(cfg)
-	if mac == "" {
-		return nil
-	}
-	tmpFile, err := os.CreateTemp("", "rlvpn-macaroon-")
-	if err != nil {
-		return nil
-	}
-	tmpPath := tmpFile.Name()
-	_, _ = tmpFile.WriteString(mac)
-	_ = tmpFile.Close()
-	// Macaroon hex is a credential — wipe scrollback
-	// on exit so it doesn't sit in the user's terminal
-	// history after they return to the TUI.
-	c := exec.Command("bash", "-c",
-		"clear && echo && cat "+tmpPath+
-			" && echo && echo && echo "+
-			"'  Press Enter...' && read && rm -f "+
-			tmpPath+
-			` && printf '\033[2J\033[3J\033[H'`)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		_ = os.Remove(tmpPath)
-		return svcActionDoneMsg{}
-	})
-}
-
-func showInvoiceCmd(invoice string) tea.Cmd {
-	if invoice == "" {
-		return nil
-	}
-	tmpFile, err := os.CreateTemp("", "rlvpn-invoice-")
-	if err != nil {
-		return nil
-	}
-	tmpPath := tmpFile.Name()
-	_, _ = tmpFile.WriteString(invoice)
-	_ = tmpFile.Close()
-	// Plain clear at end — invoice isn't sensitive
-	// (the user generated it and likely copied it),
-	// so preserving scrollback is fine.
-	c := exec.Command("bash", "-c",
-		"clear && echo && cat "+tmpPath+
-			" && echo && echo && echo "+
-			"'  Press Enter...' && read && rm -f "+
-			tmpPath+
-			" && clear")
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		_ = os.Remove(tmpPath)
-		return svcActionDoneMsg{}
-	})
-}
-
-// showNodeURIsCmd hands the terminal to a shell that
-// displays the node's advertised URIs (clearnet first,
-// then Tor) so the user can select and copy them with
-// their terminal's native copy mechanism. Same pattern
-// as showInvoiceCmd — non-sensitive data, no scrollback
-// wipe. Preserving scrollback is a feature here: a user
-// who returns to the TUI and later wants the URI again
-// can pull it from their SSH scrollback without
-// reopening the screen.
-func showNodeURIsCmd(uris []string) tea.Cmd {
-	if len(uris) == 0 {
-		return nil
-	}
-	// Format with section labels. Clearnet first to
-	// match the Node Info screen's button order and
-	// LND's typical advertisement order.
-	var b strings.Builder
-	b.WriteString("\n  Node URIs\n")
-	b.WriteString("  =========\n\n")
-	var clearnet, tor []string
-	for _, u := range uris {
-		if strings.Contains(u, ".onion:") {
-			tor = append(tor, u)
-		} else {
-			clearnet = append(clearnet, u)
-		}
-	}
-	if len(clearnet) > 0 {
-		b.WriteString("  Clearnet:\n")
-		for _, u := range clearnet {
-			b.WriteString("  ")
-			b.WriteString(u)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	if len(tor) > 0 {
-		b.WriteString("  Tor:\n")
-		for _, u := range tor {
-			b.WriteString("  ")
-			b.WriteString(u)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	tmpFile, err := os.CreateTemp("", "rlvpn-nodeuris-")
-	if err != nil {
-		return nil
-	}
-	tmpPath := tmpFile.Name()
-	_, _ = tmpFile.WriteString(b.String())
-	_ = tmpFile.Close()
-	c := exec.Command("bash", "-c",
-		"clear && cat "+tmpPath+
-			" && echo && echo "+
-			"'  Press Enter...' && read && rm -f "+
-			tmpPath+
-			" && clear")
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		_ = os.Remove(tmpPath)
-		return svcActionDoneMsg{}
-	})
-}
-
-func runSvcActionCmd(action, svc string) tea.Cmd {
-	var verb string
-	switch action {
-	case "Restart":
-		verb = "restart"
-	case "Stop":
-		verb = "stop"
-	case "Start":
-		verb = "start"
-	default:
-		return nil
-	}
-	return func() tea.Msg {
-		system.SudoRun("systemctl", verb, svc)
-		return svcActionDoneMsg{}
-	}
-}
-
-func runUpdatePackagesCmd() tea.Cmd {
-	// Non-interactive environment so beginner users
-	// never see mid-upgrade prompts:
-	//   - DEBIAN_FRONTEND=noninteractive suppresses
-	//     debconf dialogs entirely
-	//   - NEEDRESTART_MODE=a tells needrestart (default
-	//     on Debian 13) to auto-restart services instead
-	//     of showing its blue ncurses picker
-	//   - --force-confdef + --force-confold keeps the
-	//     existing config file on any conffile conflict,
-	//     skipping the pink dpkg prompt
-	// This matches the bootstrap script's Phase 1
-	// upgrade command exactly.
-	c := exec.Command("bash", "-c",
-		"sudo DEBIAN_FRONTEND=noninteractive "+
-			"NEEDRESTART_MODE=a "+
-			"apt-get update -qq && "+
-			"sudo DEBIAN_FRONTEND=noninteractive "+
-			"NEEDRESTART_MODE=a "+
-			"apt-get upgrade -y -qq "+
-			"-o Dpkg::Options::=--force-confdef "+
-			"-o Dpkg::Options::=--force-confold")
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return svcActionDoneMsg{}
-	})
-}
-
-func runRebootCmd() tea.Cmd {
-	c := exec.Command("sudo", "reboot")
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return svcActionDoneMsg{}
-	})
 }
