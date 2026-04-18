@@ -59,7 +59,7 @@ type ChannelOpenScreen struct {
 
 	// Amount selection
 	amountPreset int
-	amountInput  textinput.Model
+	amountInput  AmountInput
 	amount       int64
 
 	// Toggles
@@ -93,7 +93,7 @@ func NewChannelOpenScreen(
 		ctx:          ctx,
 		step:         coStepInput,
 		peerList:     channelOpenPeers(),
-		amountInput:  newChanAmountInput(),
+		amountInput:  NewAmountInput(),
 		private:      true,
 		taproot:      true,
 		btnIdx:       1,
@@ -261,18 +261,14 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 		return s, tea.Quit
 	case "left":
 		if isCustom &&
-			s.amountInput.Value() != "" {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			!s.amountInput.Empty() {
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 	case "right":
 		if isCustom {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, nil
@@ -286,8 +282,11 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 			s.amountPreset--
 			s.amountConfirmed = false
 		} else {
-			// Top of amount list: cross to peers
-			s.focusZone = coZonePeers
+			// Top of amount list: cross to peers.
+			// Land on the last peer row — the user is
+			// coming from below and this is the closest
+			// row to where they were.
+			s.enterPeersBackward()
 			s.peerIdx = len(s.peerList)
 		}
 		return s, nil
@@ -296,18 +295,32 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 			s.amountPreset < len(amountPresets)-1 {
 			s.amountPreset++
 			s.amountConfirmed = false
-		} else {
-			// Bottom of amount list: cross to toggles
-			if isCustom {
-				s.amountInput.Blur()
+			if s.amountPreset == len(amountPresets)-1 {
+				s.amountInput.Focus()
 			}
-			s.focusZone = coZoneToggles
-			s.toggleIdx = 0
+			return s, nil
 		}
+		// Bottom of amount list: cross to toggles.
+		// Custom mode auto-confirms on the way out —
+		// typing a value and moving away should use
+		// that value. Invalid → error and stay.
+		if isCustom {
+			if !s.confirmCustomAmountAndAdvance(
+				coZoneToggles) {
+				return s, nil
+			}
+			return s, nil
+		}
+		s.focusZone = coZoneToggles
+		s.toggleIdx = 0
 		return s, nil
 	case "tab":
 		if isCustom {
-			s.amountInput.Blur()
+			if !s.confirmCustomAmountAndAdvance(
+				coZoneToggles) {
+				return s, nil
+			}
+			return s, nil
 		}
 		s.focusZone = coZoneToggles
 		s.toggleIdx = 0
@@ -316,39 +329,29 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 		if isCustom {
 			s.amountInput.Blur()
 		}
-		s.focusZone = coZonePeers
+		s.enterPeersBackward()
 		return s, nil
 	case "backspace":
 		if isCustom {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, nil
 	case "enter":
 		if isCustom {
-			// Validate before confirming
-			_, err := parseCustomAmount(
-				s.amountInput.Value())
-			if err != nil {
-				s.error = err.Error()
+			if !s.confirmCustomAmountAndAdvance(
+				coZoneToggles) {
 				return s, nil
 			}
-			s.error = ""
+			return s, nil
 		}
 		s.amountConfirmed = true
-		if isCustom {
-			s.amountInput.Blur()
-		}
 		s.focusZone = coZoneToggles
 		s.toggleIdx = 0
 		return s, nil
 	}
 	if isCustom {
-		var cmd tea.Cmd
-		s.amountInput, cmd =
-			s.amountInput.Update(tea.Msg(msg))
+		cmd := s.amountInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
 	return s, nil
@@ -376,7 +379,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		if s.toggleIdx > 0 {
 			s.toggleIdx--
 		} else {
-			s.focusZone = coZoneAmounts
+			s.enterAmountsBackward()
 		}
 		return s, nil
 	case "down":
@@ -390,7 +393,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		s.focusZone = coZoneButtons
 		return s, nil
 	case "shift+tab":
-		s.focusZone = coZoneAmounts
+		s.enterAmountsBackward()
 		return s, nil
 	case "enter":
 		switch s.toggleIdx {
@@ -423,12 +426,12 @@ func (s *ChannelOpenScreen) handleButtonKey(
 		}
 		return s, nil
 	case "up":
-		s.focusZone = coZoneToggles
+		s.enterTogglesBackward()
 		return s, nil
 	case "tab":
 		return s, nil
 	case "shift+tab":
-		s.focusZone = coZoneToggles
+		s.enterTogglesBackward()
 		return s, nil
 	case "enter":
 		switch s.btnIdx {
@@ -730,9 +733,7 @@ func (s *ChannelOpenScreen) handlePaste(
 	if s.step == coStepInput &&
 		s.focusZone == coZoneAmounts &&
 		s.amountPreset == len(amountPresets)-1 {
-		var cmd tea.Cmd
-		s.amountInput, cmd =
-			s.amountInput.Update(msg)
+		cmd := s.amountInput.Update(msg)
 		return s, cmd
 	}
 	return s, nil
@@ -756,6 +757,100 @@ func (s *ChannelOpenScreen) handleOpenResult(
 
 // ── Form actions ───────────────────────────────────────
 
+// validateCustomAmount checks the custom amount field is
+// non-empty and within the 20,000 — 16,777,215 sats
+// channel-size bounds. Returns the validated sats count,
+// or an error string suitable for display.
+func (s *ChannelOpenScreen) validateCustomAmount() (int64, string) {
+	if s.amountInput.Empty() {
+		return 0, "empty amount"
+	}
+	n := s.amountInput.Sats()
+	if n < 20000 {
+		return 0, "min 20,000 sats"
+	}
+	if n > 16777215 {
+		return 0, "max 16,777,215 sats"
+	}
+	return n, ""
+}
+
+// confirmCustomAmountAndAdvance validates the custom
+// amount, commits it to s.amount, and moves focus to the
+// given zone. On validation failure, sets the error and
+// returns false without changing focus. Called from the
+// three forward-navigation handlers (enter, down, tab)
+// when the user is on the custom amount row.
+func (s *ChannelOpenScreen) confirmCustomAmountAndAdvance(
+	toZone int,
+) bool {
+	n, errMsg := s.validateCustomAmount()
+	if errMsg != "" {
+		s.error = errMsg
+		return false
+	}
+	s.error = ""
+	s.amount = n
+	s.amountConfirmed = true
+	s.amountInput.Blur()
+	s.focusZone = toZone
+	if toZone == coZoneToggles {
+		s.toggleIdx = 0
+	}
+	return true
+}
+
+// ── Backward-entry helpers ─────────────────────────────
+//
+// When focus returns to a zone from forward (via
+// shift+tab or up), that zone's "confirmed" state is
+// dropped — the user is re-entering to potentially make
+// changes. The cursor lands on the same item they
+// previously committed (so they can see where they were),
+// but there's no checkmark. Committing requires explicit
+// forward navigation (enter/tab/down).
+//
+// Each helper owns one zone's reset logic. Handlers in
+// other zones call these when their keystrokes cause a
+// backward transition, rather than inlining the reset.
+// See design-decisions.md: "Backward-entry helpers for
+// multi-zone form screens."
+
+// enterPeersBackward: focus returned to peers from the
+// amounts zone. Decommits the peer while keeping the
+// cursor on the previously-selected row.
+func (s *ChannelOpenScreen) enterPeersBackward() {
+	s.focusZone = coZonePeers
+	s.peerConfirmed = false
+	s.error = ""
+}
+
+// enterAmountsBackward: focus returned to amounts from
+// the toggles zone. Decommits the amount. If on the
+// Custom row, refocuses the input so the cursor is
+// visible for immediate editing. The entered value
+// (if any) is preserved in s.amountInput.
+func (s *ChannelOpenScreen) enterAmountsBackward() {
+	s.focusZone = coZoneAmounts
+	s.amountConfirmed = false
+	s.error = ""
+	isCustom := s.amountPreset == len(amountPresets)-1
+	if isCustom {
+		s.amountInput.Focus()
+	}
+}
+
+// enterTogglesBackward: focus returned to toggles from
+// the buttons zone. Toggles have no "draft vs committed"
+// distinction — each toggle is its own commit — so the
+// only state to reset is the error message. Included for
+// symmetry so the navigation handlers in the buttons zone
+// don't inline the focus assignment.
+func (s *ChannelOpenScreen) enterTogglesBackward() {
+	s.focusZone = coZoneToggles
+	s.error = ""
+}
+
 func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 	s.peerIdx = 0
 	s.peerConfirmed = false
@@ -764,7 +859,7 @@ func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 	s.customAlias = ""
 	s.amountPreset = 0
 	s.amountConfirmed = false
-	s.amountInput = newChanAmountInput()
+	s.amountInput.Clear()
 	s.private = true
 	s.taproot = true
 	s.toggleIdx = 0
@@ -798,13 +893,12 @@ func (s *ChannelOpenScreen) submitOpenChannel() (
 	isCustom :=
 		s.amountPreset == len(amountPresets)-1
 	if isCustom {
-		amt, err := parseCustomAmount(
-			s.amountInput.Value())
-		if err != nil {
-			s.error = err.Error()
+		n, errMsg := s.validateCustomAmount()
+		if errMsg != "" {
+			s.error = errMsg
 			return s, nil
 		}
-		s.amount = amt
+		s.amount = n
 	} else {
 		s.amount = amountPresets[s.amountPreset]
 	}
@@ -894,7 +988,9 @@ func (s *ChannelOpenScreen) viewInput(
 
 	balText := "unknown"
 	if s.ctx.Status.lndBalance != "" {
-		balText = s.ctx.Status.lndBalance + " sats"
+		balText = formatSats(
+			parseBalance(s.ctx.Status.lndBalance)) +
+			" sats"
 	}
 	p.field("On-chain: ", balText)
 	p.blank()
@@ -985,9 +1081,8 @@ func (s *ChannelOpenScreen) viewInput(
 			if inputW > 20 {
 				inputW = 20
 			}
-			ai := s.amountInput
-			ai.SetWidth(inputW)
-			p.line("   " + ai.View())
+			s.amountInput.SetWidth(inputW)
+			p.line("   " + s.amountInput.View())
 			continue
 		}
 		p.line(fmt.Sprintf(" %s %s",
@@ -1071,12 +1166,12 @@ func (s *ChannelOpenScreen) viewCustomPeer(
 	isFocused := s.ctx.ContentFocused
 
 	p.input("Node Pubkey:",
-		s.pubkeyInput,
+		s.pubkeyInput.View(),
 		isFocused &&
 			s.customZone == coCustomZonePubkey)
 	p.blank()
 	p.input("Host (host:port):",
-		s.hostInput,
+		s.hostInput.View(),
 		isFocused &&
 			s.customZone == coCustomZoneHost)
 

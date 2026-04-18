@@ -367,7 +367,7 @@ func (s *P2PUpgradeScreen) viewConfirm(
 
 	p.blank()
 	p.input("Type PUBLISH MY IP to proceed:",
-		s.input,
+		s.input.View(),
 		isFocused &&
 			s.focusZone == p2pZoneInput)
 

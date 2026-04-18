@@ -108,18 +108,6 @@ func newSendPayReqInput() textinput.Model {
 	return ti
 }
 
-func newRecvAmountInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "amount in sats"
-	ti.CharLimit = 10
-	ti.SetWidth(20)
-	ti.Validate = validateDigits
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
-	return ti
-}
-
 func newRecvMemoInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "optional memo"
@@ -157,18 +145,6 @@ func newChanHostInput() textinput.Model {
 	return ti
 }
 
-func newChanAmountInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "amount in sats"
-	ti.CharLimit = 10
-	ti.SetWidth(20)
-	ti.Validate = validateDigits
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
-	return ti
-}
-
 func newHubNameInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "account name"
@@ -199,18 +175,6 @@ func newOnChainAddrInput() textinput.Model {
 	ti.CharLimit = 90
 	ti.SetWidth(62)
 	ti.Validate = validateOnChainAddr
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
-	return ti
-}
-
-func newOnChainAmtInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "amount in sats"
-	ti.CharLimit = 16
-	ti.SetWidth(20)
-	ti.Validate = validateDigits
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()

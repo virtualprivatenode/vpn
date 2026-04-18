@@ -37,7 +37,7 @@ type ReceiveScreen struct {
 	step recvStep
 
 	// Input state
-	amountInput textinput.Model
+	amountInput AmountInput
 	memoInput   textinput.Model
 	focusZone   int // 0=amount, 1=memo, 2=buttons
 	btnIdx      int // 0=Clear, 1=Create Invoice
@@ -60,10 +60,11 @@ type ReceiveScreen struct {
 func NewReceiveScreen(
 	ctx *ScreenContext,
 ) *ReceiveScreen {
+	amt := NewAmountInput()
 	return &ReceiveScreen{
 		ctx:         ctx,
 		step:        recvStepInput,
-		amountInput: newRecvAmountInput(),
+		amountInput: amt,
 		memoInput:   newRecvMemoInput(),
 		focusZone:   recvZoneAmount,
 		btnIdx:      1, // default to Create Invoice
@@ -253,11 +254,9 @@ func (s *ReceiveScreen) handleInputKey(
 		}
 		// Text inputs: pass through for cursor
 		if s.focusZone == recvZoneAmount {
-			if s.amountInput.Value() != "" {
-				var cmd tea.Cmd
-				s.amountInput, cmd =
-					s.amountInput.Update(
-						tea.Msg(msg))
+			if !s.amountInput.Empty() {
+				cmd := s.amountInput.Update(
+					tea.Msg(msg))
 				return s, cmd
 			}
 		}
@@ -281,9 +280,7 @@ func (s *ReceiveScreen) handleInputKey(
 		}
 		// Text inputs: pass through for cursor
 		if s.focusZone == recvZoneAmount {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		if s.focusZone == recvZoneMemo {
@@ -298,10 +295,8 @@ func (s *ReceiveScreen) handleInputKey(
 		// Clean backspace: only deletes characters,
 		// never navigates.
 		if s.focusZone == recvZoneAmount &&
-			s.amountInput.Value() != "" {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			!s.amountInput.Empty() {
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		if s.focusZone == recvZoneMemo &&
@@ -368,7 +363,7 @@ func (s *ReceiveScreen) handleInputKey(
 		if s.focusZone == recvZoneButtons {
 			switch s.btnIdx {
 			case 0: // Clear
-				s.amountInput = newRecvAmountInput()
+				s.amountInput.Clear()
 				s.memoInput = newRecvMemoInput()
 				s.inputError = ""
 				s.focusZone = recvZoneAmount
@@ -389,8 +384,7 @@ func (s *ReceiveScreen) handleInputKey(
 	default:
 		var cmd tea.Cmd
 		if s.focusZone == recvZoneAmount {
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd = s.amountInput.Update(tea.Msg(msg))
 		} else if s.focusZone == recvZoneMemo {
 			s.memoInput, cmd =
 				s.memoInput.Update(tea.Msg(msg))
@@ -403,14 +397,13 @@ func (s *ReceiveScreen) handleInputKey(
 func (s *ReceiveScreen) submitInvoice() (
 	Screen, tea.Cmd,
 ) {
-	val := s.amountInput.Value()
-	if val == "" {
+	if s.amountInput.Empty() {
 		s.inputError = "Enter an amount"
 		return s, nil
 	}
-	amt, err := parseRecvAmount(val)
-	if err != nil {
-		s.inputError = err.Error()
+	amt := s.amountInput.Sats()
+	if amt < 1 {
+		s.inputError = "Minimum 1 sat"
 		return s, nil
 	}
 	s.amountSats = amt
@@ -521,8 +514,7 @@ func (s *ReceiveScreen) handlePaste(
 	}
 	var cmd tea.Cmd
 	if s.focusZone == recvZoneAmount {
-		s.amountInput, cmd =
-			s.amountInput.Update(msg)
+		cmd = s.amountInput.Update(msg)
 	} else if s.focusZone == recvZoneMemo {
 		s.memoInput, cmd =
 			s.memoInput.Update(msg)
@@ -589,10 +581,10 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 		s.focusZone == recvZoneMemo
 
 	p.input("Amount (sats):",
-		s.amountInput, amtFocused)
+		s.amountInput.View(), amtFocused)
 	p.blank()
 	p.input("Memo (optional):",
-		s.memoInput, memoFocused)
+		s.memoInput.View(), memoFocused)
 
 	p.appendError(s.inputError)
 

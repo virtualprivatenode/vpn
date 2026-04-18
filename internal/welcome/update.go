@@ -166,11 +166,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
+					if msg.Replace &&
+						msg.Screen != nil {
+						m.setTabScreen(i, msg.Screen)
+					}
 					if msg.FocusTabBar {
 						m.focusTabBar()
 						m.tabCursorX = 0
 					} else {
 						m.focusContent()
+					}
+					if msg.Replace &&
+						msg.Screen != nil {
+						return m, msg.Screen.Init()
 					}
 					return m, nil
 				}

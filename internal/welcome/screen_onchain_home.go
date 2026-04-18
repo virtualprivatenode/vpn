@@ -39,6 +39,10 @@ type OnChainHomeScreen struct {
 	txCursor      int
 	pencilFocused bool
 
+	// Coin control dirty flag — set on any spacebar
+	// toggle, cleared when openSend reads it.
+	utxoChanged bool
+
 	// Label popup state
 	labelEditing bool
 	labelInput   textinput.Model
@@ -93,6 +97,7 @@ func (s *OnChainHomeScreen) HandleKey(
 		if s.focusZone == ocHomeZoneUtxos &&
 			s.utxoCursor < len(s.ocCtx.Utxos) {
 			s.toggleSelection(s.utxoCursor)
+			s.utxoChanged = true
 		}
 		return s, nil
 	case "enter":
@@ -304,23 +309,26 @@ func (s *OnChainHomeScreen) openSend() (
 ) {
 	screen := NewOnChainSendScreen(
 		s.ctx, s.ocCtx)
-	// Pre-fill amount from UTXO selection
-	if len(s.ocCtx.UtxoSelected) > 0 {
-		screen.amtInput.SetValue(
-			fmt.Sprintf("%d",
-				s.ocCtx.UtxoSelectedTotal))
-	}
-	// Pre-fill fee from cached tiers
+	// Pre-fill fee before Max so the computation
+	// uses the real fee rate, not the default of 1.
 	if s.ocCtx.SendFeeTiers[0].SatPerVB > 0 {
 		screen.feeInput.SetValue(
 			fmt.Sprintf("%.0f",
 				s.ocCtx.SendFeeTiers[0].SatPerVB))
 	}
+	// Engage Max for UTXO selection (send_all +
+	// amount = selectedTotal - estFee).
+	if len(s.ocCtx.UtxoSelected) > 0 {
+		screen.EngageMaxForSelection()
+	}
+	replace := s.utxoChanged
+	s.utxoChanged = false
 	return s, func() tea.Msg {
 		return openTabMsg{
-			Kind:   tabOnChain,
-			Label:  "⛓ Send",
-			Screen: screen,
+			Kind:    tabOnChain,
+			Label:   "⛓ Send",
+			Screen:  screen,
+			Replace: replace,
 		}
 	}
 }

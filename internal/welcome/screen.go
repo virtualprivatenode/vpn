@@ -88,6 +88,7 @@ type openTabMsg struct {
 	Index       int // for detail tabs (dedup key)
 	Screen      Screen
 	FocusTabBar bool // true = tab bar focused on open
+	Replace     bool // true = replace existing screen on dedup
 }
 
 // focusSidebarMsg tells Model to move focus to the

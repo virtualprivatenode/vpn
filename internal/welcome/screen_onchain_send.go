@@ -39,7 +39,7 @@ type OnChainSendScreen struct {
 
 	// Inputs (steps 0–3)
 	addrInput  textinput.Model
-	amtInput   textinput.Model
+	amtInput   AmountInput
 	labelInput textinput.Model
 	feeInput   textinput.Model
 	sendAll    bool
@@ -72,7 +72,7 @@ func NewOnChainSendScreen(
 		ocCtx:      ocCtx,
 		step:       ocStepAddr,
 		addrInput:  newOnChainAddrInput(),
-		amtInput:   newOnChainAmtInput(),
+		amtInput:   NewAmountInput(),
 		labelInput: newOCSendLabelInput(),
 		feeInput:   newCustomFeeInput(),
 		sendBtnIdx: 1, // default to Create Transaction
@@ -211,17 +211,13 @@ func (s *OnChainSendScreen) handleInputLeft(
 	// Amount step: Max focused → back to input
 	if s.step == ocStepAmount && s.maxFocused {
 		s.maxFocused = false
-		if !s.sendAll {
-			s.amtInput.Focus()
-		}
+		s.amtInput.Focus()
 		return s, nil
 	}
 	// Amount input: pass through for cursor
-	if s.step == ocStepAmount && !s.sendAll {
-		if s.amtInput.Value() != "" {
-			var cmd tea.Cmd
-			s.amtInput, cmd =
-				s.amtInput.Update(tea.Msg(msg))
+	if s.step == ocStepAmount {
+		if !s.amtInput.Empty() {
+			cmd := s.amtInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 	}
@@ -262,11 +258,18 @@ func (s *OnChainSendScreen) handleInputRight(
 			s.addrInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
-	// Amount step: focus Max button (two-step)
+	// Amount step: cursor inside value passes
+	// through. At end of value (or empty), jump
+	// to Max button (two-step preserved).
 	if s.step == ocStepAmount && !s.maxFocused {
-		s.maxFocused = true
-		s.amtInput.Blur()
-		return s, nil
+		if s.amtInput.Empty() ||
+			s.amtInput.CursorAtEnd() {
+			s.maxFocused = true
+			s.amtInput.Blur()
+			return s, nil
+		}
+		cmd := s.amtInput.Update(tea.Msg(msg))
+		return s, cmd
 	}
 	// Label input: pass through for cursor
 	if s.step == ocStepLabel {
@@ -297,12 +300,10 @@ func (s *OnChainSendScreen) handleInputBackspace(
 			s.addrInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
-	if s.step == ocStepAmount && !s.sendAll &&
-		!s.maxFocused {
-		if s.amtInput.Value() != "" {
-			var cmd tea.Cmd
-			s.amtInput, cmd =
-				s.amtInput.Update(tea.Msg(msg))
+	if s.step == ocStepAmount && !s.maxFocused {
+		if !s.amtInput.Empty() {
+			s.disengageMax()
+			cmd := s.amtInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 	}
@@ -319,6 +320,7 @@ func (s *OnChainSendScreen) handleInputBackspace(
 			var cmd tea.Cmd
 			s.feeInput, cmd =
 				s.feeInput.Update(tea.Msg(msg))
+			s.syncMaxIfEngaged()
 			return s, cmd
 		}
 	}
@@ -375,9 +377,9 @@ func (s *OnChainSendScreen) handleInputShiftTab() (
 func (s *OnChainSendScreen) handleInputEnter() (
 	Screen, tea.Cmd,
 ) {
-	// Amount step: Max focused → toggle Max
+	// Amount step: Max focused → engage Max
 	if s.step == ocStepAmount && s.maxFocused {
-		s.toggleMax()
+		s.applyMax()
 		return s, nil
 	}
 	// Bottom buttons
@@ -411,10 +413,9 @@ func (s *OnChainSendScreen) handleInputDefault(
 			s.addrInput.Update(tea.Msg(msg))
 		return s, cmd
 	case ocStepAmount:
-		if !s.sendAll && !s.maxFocused {
-			var cmd tea.Cmd
-			s.amtInput, cmd =
-				s.amtInput.Update(tea.Msg(msg))
+		if !s.maxFocused {
+			s.disengageMax()
+			cmd := s.amtInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 	case ocStepLabel:
@@ -426,6 +427,7 @@ func (s *OnChainSendScreen) handleInputDefault(
 		var cmd tea.Cmd
 		s.feeInput, cmd =
 			s.feeInput.Update(tea.Msg(msg))
+		s.syncMaxIfEngaged()
 		return s, cmd
 	}
 	return s, nil
@@ -512,13 +514,20 @@ func (s *OnChainSendScreen) handleResultKey(
 func (s *OnChainSendScreen) handlePaste(
 	msg tea.PasteMsg,
 ) (Screen, tea.Cmd) {
-	if s.step != ocStepAddr {
-		return s, nil
+	switch s.step {
+	case ocStepAddr:
+		var cmd tea.Cmd
+		s.addrInput, cmd =
+			s.addrInput.Update(msg)
+		return s, cmd
+	case ocStepAmount:
+		if !s.maxFocused {
+			s.disengageMax()
+			cmd := s.amtInput.Update(msg)
+			return s, cmd
+		}
 	}
-	var cmd tea.Cmd
-	s.addrInput, cmd =
-		s.addrInput.Update(msg)
-	return s, cmd
+	return s, nil
 }
 
 // ── Async message handlers ─────────────────────────────
@@ -559,6 +568,7 @@ func (s *OnChainSendScreen) handleFeeTiers(
 			fmt.Sprintf("%.0f",
 				msg.tiers[0].SatPerVB))
 	}
+	s.syncMaxIfEngaged()
 	return s, nil
 }
 
@@ -587,9 +597,7 @@ func (s *OnChainSendScreen) focusStep() {
 	case ocStepAddr:
 		s.addrInput.Focus()
 	case ocStepAmount:
-		if !s.sendAll {
-			s.amtInput.Focus()
-		}
+		s.amtInput.Focus()
 	case ocStepLabel:
 		s.labelInput.Focus()
 	case ocStepFee:
@@ -597,50 +605,85 @@ func (s *OnChainSendScreen) focusStep() {
 	}
 }
 
-// toggleMax toggles send-all / max mode. When coin
-// control is active, uses the selected UTXO total.
-// Otherwise uses the full wallet balance.
-func (s *OnChainSendScreen) toggleMax() {
-	if s.sendAll {
-		s.sendAll = false
-		s.amtInput.SetValue("")
-		s.amtInput.Focus()
-		return
-	}
+// ── Max-family helpers (Sparrow model) ────────────────
+//
+// Max is a one-way engage: pressing the Max button sets
+// sendAll and fills the amount. Typing or backspace
+// disengages silently. Fee edits auto-sync the amount
+// while engaged. The Max button is a no-op when already
+// engaged.
+
+// computeMaxAmount returns the max sendable amount in
+// sats given the current fee rate and UTXO selection
+// (or full wallet balance if no selection).
+func (s *OnChainSendScreen) computeMaxAmount() int64 {
+	feeRate := s.getFeeRate()
 	if len(s.ocCtx.UtxoSelected) > 0 {
-		feeRate := s.getFeeRate()
 		numInputs := max(
 			len(s.ocCtx.UtxoOutpoints), 1)
 		estFee := estimateSimpleFee(
 			numInputs, 1, feeRate)
 		maxAmt := s.ocCtx.UtxoSelectedTotal - estFee
 		if maxAmt < 0 {
-			maxAmt = 0
+			return 0
 		}
-		s.sendAll = true
-		s.amtInput.SetValue(
-			fmt.Sprintf("%d", maxAmt))
-		s.amtInput.Blur()
-	} else {
-		s.sendAll = true
-		if s.ctx.Status != nil &&
-			s.ctx.Status.lndBalance != "" {
-			bal := parseBalance(
-				s.ctx.Status.lndBalance)
-			feeRate := s.getFeeRate()
-			numInputs := max(
-				len(s.ocCtx.Utxos), 1)
-			estFee := estimateSimpleFee(
-				numInputs, 1, feeRate)
-			maxAmt := bal - estFee
-			if maxAmt < 0 {
-				maxAmt = 0
-			}
-			s.amtInput.SetValue(
-				fmt.Sprintf("%d", maxAmt))
-		}
-		s.amtInput.Blur()
+		return maxAmt
 	}
+	if s.ctx.Status != nil &&
+		s.ctx.Status.lndBalance != "" {
+		bal := parseBalance(
+			s.ctx.Status.lndBalance)
+		numInputs := max(
+			len(s.ocCtx.Utxos), 1)
+		estFee := estimateSimpleFee(
+			numInputs, 1, feeRate)
+		maxAmt := bal - estFee
+		if maxAmt < 0 {
+			return 0
+		}
+		return maxAmt
+	}
+	return 0
+}
+
+// applyMax engages send-all mode. No-op when already
+// engaged. Called from enter on the Max button.
+func (s *OnChainSendScreen) applyMax() {
+	if s.sendAll {
+		return
+	}
+	s.sendAll = true
+	s.amtInput.SetSats(s.computeMaxAmount())
+}
+
+// disengageMax exits send-all mode. No-op when not
+// engaged. Called from typed-digit and backspace
+// handlers — the keystroke itself goes through to
+// AmountInput after this returns.
+func (s *OnChainSendScreen) disengageMax() {
+	if !s.sendAll {
+		return
+	}
+	s.sendAll = false
+}
+
+// syncMaxIfEngaged recomputes the max amount when
+// sendAll is active. No-op otherwise. Called after any
+// fee-rate mutation so the amount field stays in sync.
+func (s *OnChainSendScreen) syncMaxIfEngaged() {
+	if !s.sendAll {
+		return
+	}
+	s.amtInput.SetSats(s.computeMaxAmount())
+}
+
+// EngageMaxForSelection is the entry point called from
+// OnChainHomeScreen.openSend when UTXOs are pre-selected.
+// Sets sendAll and fills the amount from the selection
+// total minus estimated fee.
+func (s *OnChainSendScreen) EngageMaxForSelection() {
+	s.sendAll = true
+	s.amtInput.SetSats(s.computeMaxAmount())
 }
 
 // getFeeRate returns the current fee rate from the fee
@@ -685,33 +728,18 @@ func (s *OnChainSendScreen) validateAndConfirm() (
 	var amountSats int64
 	if s.sendAll {
 		amountSats = 0
-		displayVal := parseSendAmount(
-			s.amtInput.Value())
+		displayVal := s.amtInput.Sats()
 		if displayVal > 0 {
 			s.amtVal = displayVal
 		}
 	} else {
-		val := strings.TrimSpace(
-			s.amtInput.Value())
-		val = strings.ReplaceAll(val, ",", "")
-		if val == "" {
+		if s.amtInput.Empty() {
 			s.error = "Enter an amount"
 			s.step = ocStepAmount
 			s.focusStep()
 			return s, nil
 		}
-		for _, c := range val {
-			if c < '0' || c > '9' {
-				s.error = "Invalid number"
-				s.step = ocStepAmount
-				s.focusStep()
-				return s, nil
-			}
-		}
-		var n int64
-		for _, c := range val {
-			n = n*10 + int64(c-'0')
-		}
+		n := s.amtInput.Sats()
 		if n < 546 {
 			s.error =
 				"Minimum 546 sats (dust limit)"
@@ -782,7 +810,7 @@ func (s *OnChainSendScreen) backToInput() {
 // input-phase state.
 func (s *OnChainSendScreen) resetInputs() {
 	s.addrInput = newOnChainAddrInput()
-	s.amtInput = newOnChainAmtInput()
+	s.amtInput = NewAmountInput()
 	s.labelInput = newOCSendLabelInput()
 	s.feeInput = newCustomFeeInput()
 	s.sendAll = false
@@ -857,37 +885,26 @@ func (s *OnChainSendScreen) viewInput(
 
 	lines = append(lines,
 		" "+amtLabel.Render("Amount (sats):"))
-	if s.sendAll {
-		amtVal := s.amtInput.Value()
-		if amtVal == "" {
-			amtVal = "calculating..."
-		} else {
-			parsed := parseSendAmount(amtVal)
-			if parsed > 0 {
-				amtVal = formatSats(parsed)
-			}
-		}
-		clearStyle := theme.BtnNormal
-		if amtActive && s.maxFocused {
-			clearStyle = theme.BtnFocused
-		}
-		lines = append(lines,
-			"  "+theme.Value.Render(amtVal+" sats")+
-				"  "+clearStyle.Render("Clear Max"))
-	} else {
-		maxStyle := theme.BtnNormal
-		if amtActive && s.maxFocused {
-			maxStyle = theme.BtnFocused
-		}
-		maxLabel := "Max"
-		if len(s.ocCtx.UtxoSelected) > 0 {
-			maxLabel = fmt.Sprintf("Max (%s)",
-				formatSats(s.ocCtx.UtxoSelectedTotal))
-		}
-		lines = append(lines,
-			amtMarker+" "+s.amtInput.View()+
-				"  "+maxStyle.Render(maxLabel))
+	maxStyle := theme.BtnNormal
+	if amtActive && s.maxFocused {
+		maxStyle = theme.BtnFocused
 	}
+	maxLabel := "Max"
+	if n := len(s.ocCtx.UtxoSelected); n == 1 {
+		maxLabel = "Max (1 UTXO selected)"
+	} else if n > 1 {
+		maxLabel = fmt.Sprintf(
+			"Max (%d UTXOs selected)", n)
+	}
+	renderedMax := maxStyle.Render(maxLabel)
+	leftPart := amtMarker + " " + s.amtInput.View()
+	gap := w - lipgloss.Width(leftPart) -
+		lipgloss.Width(renderedMax) - 2
+	if gap < 2 {
+		gap = 2
+	}
+	lines = append(lines,
+		leftPart+strings.Repeat(" ", gap)+renderedMax)
 	lines = append(lines, "")
 
 	// ── Label input (step 2) ────────────────────
@@ -928,8 +945,7 @@ func (s *OnChainSendScreen) viewInput(
 	lines = append(lines, "")
 
 	// ── Transaction preview diagram ─────────────
-	sendAmt := parseSendAmount(
-		s.amtInput.Value())
+	sendAmt := s.amtInput.Sats()
 	feeRate := s.getFeeRate()
 	showPreview := sendAmt > 0
 

@@ -396,8 +396,8 @@ func (s *ChangePasswordScreen) viewInput(w, h int) string {
 	confFocused := isFocused &&
 		s.focusZone == changePwZoneInputConfirm
 
-	p.input("New Password:", s.newInput, newFocused)
-	p.input("Confirm:     ", s.confInput, confFocused)
+	p.input("New Password:", s.newInput.View(), newFocused)
+	p.input("Confirm:     ", s.confInput.View(), confFocused)
 
 	p.appendError(s.inputErr)
 

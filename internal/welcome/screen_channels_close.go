@@ -478,7 +478,7 @@ func (s *ChannelCloseScreen) viewConfirm(
 		isFeeZone := s.ctx.ContentFocused &&
 			s.focusZone == closeZoneFee
 		p.input("Fee rate (sat/vB):",
-			s.feeInput, isFeeZone)
+			s.feeInput.View(), isFeeZone)
 
 		// Estimated total fee
 		feeRate := parseFeeInputRate(

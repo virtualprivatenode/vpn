@@ -282,7 +282,7 @@ func (s *SSHKeyAddScreen) viewInput(w, h int) string {
 	isFocused := s.ctx.ContentFocused
 	inputFocused := isFocused &&
 		s.focusZone == sshAddZoneInput
-	p.input("Public Key:", s.keyInput, inputFocused)
+	p.input("Public Key:", s.keyInput.View(), inputFocused)
 
 	p.appendError(s.addErr)
 

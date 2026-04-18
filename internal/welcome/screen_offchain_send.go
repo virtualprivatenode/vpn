@@ -452,7 +452,7 @@ func (s *SendScreen) viewInput(w, h int) string {
 	inputFocused := isFocused &&
 		s.focusZone == sendZoneInput
 	p.input("Payment Request:",
-		s.sendInput, inputFocused)
+		s.sendInput.View(), inputFocused)
 	p.blank()
 	p.dim("Paste a bolt11 invoice")
 

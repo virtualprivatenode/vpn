@@ -255,7 +255,7 @@ func (s *LndHubCreateScreen) viewInput(
 
 	inputFocused := s.ctx.ContentFocused &&
 		s.focusZone == hubCreateZoneInput
-	p.input("Name:", s.nameInput, inputFocused)
+	p.input("Name:", s.nameInput.View(), inputFocused)
 	p.blank()
 	p.dim("Letters, numbers, spaces, hyphens")
 

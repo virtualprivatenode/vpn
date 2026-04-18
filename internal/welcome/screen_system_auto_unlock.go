@@ -480,11 +480,11 @@ func (s *AutoUnlockScreen) viewEnable(
 	p.blank()
 
 	p.input("Wallet password:",
-		s.pw1,
+		s.pw1.View(),
 		isFocused && s.focusZone == auZoneInput1)
 	p.blank()
 	p.input("Confirm password:",
-		s.pw2,
+		s.pw2.View(),
 		isFocused && s.focusZone == auZoneInput2)
 
 	p.appendError(s.errMsg)
