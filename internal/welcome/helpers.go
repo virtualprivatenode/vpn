@@ -62,9 +62,6 @@ func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
 	var tiers [4]feeTier
 
 	cliName := "bitcoin-cli"
-	if cfg.Network == "testnet" {
-		cliName = "bitcoin-cli"
-	}
 
 	for i, target := range targets {
 		tiers[i] = feeTier{
