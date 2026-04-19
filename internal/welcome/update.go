@@ -51,6 +51,31 @@ func (m *Model) rememberTabPosition() {
 	m.sectionFocus[sec] = m.activeTab
 }
 
+// activateTab delivers a tabActivatedMsg to the active
+// tab's screen, giving it a chance to refresh stale data.
+// Returns the screen's cmd (typically a fetch) or nil if
+// no screen is mounted or the active tab is the section
+// home. Only called when the user "commits" to viewing a
+// detail tab — not during tab bar browsing or sidebar
+// navigation.
+func (m *Model) activateTab() tea.Cmd {
+	tabs := m.effectiveTabs()
+	if m.activeTab <= 0 ||
+		m.activeTab >= len(tabs) {
+		return nil
+	}
+	tab := tabs[m.activeTab]
+	if tab.Screen == nil {
+		return nil
+	}
+	m.screenCtx.HasTabs = m.hasDetailTabs()
+	m.screenCtx.ContentFocused = m.contentFocused
+	newScreen, cmd :=
+		tab.Screen.HandleMsg(tabActivatedMsg{})
+	m.setTabScreen(m.activeTab, newScreen)
+	return cmd
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -150,10 +175,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if msg.FocusTabBar {
 						m.focusTabBar()
 						m.tabCursorX = 0
-					} else {
-						m.focusContent()
+						return m, nil
 					}
-					return m, nil
+					m.focusContent()
+					return m, m.activateTab()
 				}
 			}
 		}
@@ -179,6 +204,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if msg.Replace &&
 						msg.Screen != nil {
 						return m, msg.Screen.Init()
+					}
+					if !msg.FocusTabBar {
+						return m, m.activateTab()
 					}
 					return m, nil
 				}
@@ -300,7 +328,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sendCoinsResultMsg:
 		return m.dispatchToTab(tabOnChain, msg)
 	case closeChannelMsg:
-		return m.dispatchToTab(tabCloseChannel, msg)
+		// Broadcast to all channel detail tabs — only
+		// the one with an active close flow (embedded
+		// ChannelCloseScreen) will consume the message.
+		// Broadcast is needed because multiple detail
+		// tabs can be open simultaneously, and
+		// dispatchToTab's first-match would miss the
+		// active close flow if it's not on the first
+		// detail tab.
+		tabs := m.effectiveTabs()
+		var cmds []tea.Cmd
+		for i, tab := range tabs {
+			if tab.Kind == tabChannel &&
+				tab.Screen != nil {
+				m.screenCtx.HasTabs = m.hasDetailTabs()
+				m.screenCtx.ContentFocused =
+					m.contentFocused
+				newScreen, cmd :=
+					tab.Screen.HandleMsg(msg)
+				m.setTabScreen(i, newScreen)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
 	case closedChannelsMsg:
 		// Route to history screen so it gets the data
 		return m.dispatchToTab(tabChannelHistory, msg)
@@ -340,7 +392,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reason.
 		var cmds []tea.Cmd
 		for _, kind := range []tabKind{
-			tabCloseChannel, tabChannel, tabOnChain,
+			tabChannel, tabOnChain,
 		} {
 			rm, cmd, ok := m.routeToScreen(kind, msg)
 			if !ok {
@@ -717,7 +769,7 @@ func (m Model) handleTabBarKey(
 		if m.activeTab == 0 {
 			m.subview = svNone
 		}
-		return m, nil
+		return m, m.activateTab()
 
 	case "left":
 		if m.tabCursorX == 1 {
@@ -769,7 +821,7 @@ func (m Model) handleTabBarKey(
 		if m.activeTab == 0 {
 			m.subview = svNone
 		}
-		return m, nil
+		return m, m.activateTab()
 
 	case "backspace":
 		if m.activeTab > 0 {
@@ -950,7 +1002,7 @@ func (m Model) closeTab(
 		}
 	}
 
-	return m, nil
+	return m, m.activateTab()
 }
 
 func (m Model) handleGenericSubviewKey(

@@ -95,7 +95,7 @@ func NewChannelOpenScreen(
 		peerList:     channelOpenPeers(),
 		amountInput:  NewAmountInput(),
 		private:      true,
-		taproot:      true,
+		taproot:      false,
 		btnIdx:       1,
 		pubkeyInput:  newChanPubkeyInput(),
 		hostInput:    newChanHostInput(),
@@ -758,9 +758,10 @@ func (s *ChannelOpenScreen) handleOpenResult(
 // ── Form actions ───────────────────────────────────────
 
 // validateCustomAmount checks the custom amount field is
-// non-empty and within the 20,000 — 16,777,215 sats
-// channel-size bounds. Returns the validated sats count,
-// or an error string suitable for display.
+// non-empty and within the 20,000 — 1,000,000,000 sats
+// channel-size bounds. The upper bound matches LND's wumbo
+// channel limit (10 BTC) enabled via protocol.wumbo-channels
+// in lnd.conf.
 func (s *ChannelOpenScreen) validateCustomAmount() (int64, string) {
 	if s.amountInput.Empty() {
 		return 0, "empty amount"
@@ -769,8 +770,8 @@ func (s *ChannelOpenScreen) validateCustomAmount() (int64, string) {
 	if n < 20000 {
 		return 0, "min 20,000 sats"
 	}
-	if n > 16777215 {
-		return 0, "max 16,777,215 sats"
+	if n > 1000000000 {
+		return 0, "max 1,000,000,000 sats (10 BTC)"
 	}
 	return n, ""
 }
@@ -861,7 +862,7 @@ func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 	s.amountConfirmed = false
 	s.amountInput.Clear()
 	s.private = true
-	s.taproot = true
+	s.taproot = false
 	s.toggleIdx = 0
 	s.focusZone = coZonePeers
 	s.btnIdx = 1
@@ -1120,41 +1121,50 @@ func (s *ChannelOpenScreen) addToggles(
 		focused && s.toggleIdx == 1))
 }
 
-// renderToggleSwitch renders a Sparrow-style toggle:
+// renderToggleSwitch renders a bracket-style toggle with
+// both options visible. The knob slides left/right inside
+// the housing to indicate the active selection.
 //
-//	Private    ●━━○   (off)
-//	Private    ○━━●   (on, highlighted with theme color)
+//	Public [ ━━● ] Private   (on=true, Private selected)
+//	Legacy [ ●━━ ] Taproot   (on=false, Legacy selected)
 func renderToggleSwitch(
 	label string, altLabel string,
 	on bool, focused bool,
 ) string {
-	displayLabel := altLabel
-	if on {
-		displayLabel = label
-	}
-	padded := fmt.Sprintf("%-12s", displayLabel)
+	leftW := 8 // right-align left labels for alignment
 
-	var toggle string
+	activeStyle := theme.Value
+	if focused {
+		activeStyle = theme.Action
+	}
+
+	var leftStyled, rightStyled, toggle string
+	bracket := theme.Dim
 	if on {
-		knob := theme.Action.Render("●")
-		track := theme.Action.Render("━━")
-		dot := theme.Dim.Render("○")
-		toggle = dot + track + knob
+		leftStyled = theme.Dim.Render(
+			fmt.Sprintf("%*s", leftW, altLabel))
+		rightStyled = activeStyle.Render(label)
+		toggle = bracket.Render("[ ") +
+			theme.Dim.Render("━━") +
+			activeStyle.Render("●") +
+			bracket.Render(" ]")
 	} else {
-		knob := theme.Value.Render("●")
-		track := theme.Dim.Render("━━")
-		dot := theme.Dim.Render("○")
-		toggle = knob + track + dot
+		leftStyled = activeStyle.Render(
+			fmt.Sprintf("%*s", leftW, altLabel))
+		rightStyled = theme.Dim.Render(label)
+		toggle = bracket.Render("[ ") +
+			activeStyle.Render("●") +
+			theme.Dim.Render("━━") +
+			bracket.Render(" ]")
 	}
 
 	prefix := "  "
-	labelStyle := theme.Value
 	if focused {
 		prefix = " " + theme.Action.Render("▸")
-		labelStyle = theme.Action
 	}
 
-	return prefix + " " + labelStyle.Render(padded) + toggle
+	return prefix + leftStyled + " " +
+		toggle + " " + rightStyled
 }
 
 func (s *ChannelOpenScreen) viewCustomPeer(

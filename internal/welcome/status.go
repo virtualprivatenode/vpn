@@ -132,16 +132,17 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 				if errCh == nil {
 					for _, ch := range channels {
 						merged = append(merged, channelInfo{
-							ChanID:        ch.ChanID,
-							ChannelPoint:  ch.ChannelPoint,
-							PeerAlias:     ch.PeerAlias,
-							RemotePubkey:  ch.RemotePubkey,
-							Capacity:      ch.Capacity,
-							LocalBalance:  ch.LocalBalance,
-							RemoteBalance: ch.RemoteBalance,
-							Active:        ch.Active,
-							Private:       ch.Private,
-							Initiator:     ch.Initiator,
+							ChanID:         ch.ChanID,
+							ChannelPoint:   ch.ChannelPoint,
+							PeerAlias:      ch.PeerAlias,
+							RemotePubkey:   ch.RemotePubkey,
+							Capacity:       ch.Capacity,
+							LocalBalance:   ch.LocalBalance,
+							RemoteBalance:  ch.RemoteBalance,
+							Active:         ch.Active,
+							Private:        ch.Private,
+							Initiator:      ch.Initiator,
+							CommitmentType: ch.CommitmentType,
 						})
 					}
 				}

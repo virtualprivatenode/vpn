@@ -116,6 +116,19 @@ debuglevel=info
 tlsautorefresh=1
 tlsdisableautofill=1
 
+# Accept keysend (spontaneous) and AMP (multi-path)
+# payments. Many Lightning apps depend on keysend.
+accept-keysend=true
+accept-amp=true
+
+# Auto-delete canceled invoices to prevent database
+# bloat on long-running nodes.
+gc-canceled-invoices-on-the-fly=true
+
+# Allow routing payments that arrive and depart on the
+# same channel. Required for circular rebalancing.
+allow-circular-route=true
+
 [Bitcoin]
 %s
 bitcoin.node=bitcoind
@@ -135,6 +148,30 @@ tor.control=127.0.0.1:9051
 tor.targetipaddress=127.0.0.1
 tor.v3=true
 tor.streamisolation=true
+
+[protocol]
+# Taproot channels: smaller, cheaper cooperative closes
+# with better on-chain privacy (MuSig2 key spend).
+protocol.simple-taproot-chans=true
+# Accept channels larger than 0.16 BTC.
+protocol.wumbo-channels=true
+# Channels referenced by alias instead of on-chain UTXO
+# for better privacy in gossip.
+protocol.option-scid-alias=true
+
+[db]
+# Compact the bolt database on startup to reclaim disk
+# space from deleted records. Runs at most once per week.
+db.bolt.auto-compact=true
+db.bolt.auto-compact-min-age=168h
+
+[healthcheck]
+# Graceful shutdown if disk space falls below 5%%. On a
+# 90GB SSD this triggers at ~4.5GB free — enough headroom
+# for bolt compaction while avoiding false shutdowns.
+healthcheck.diskspace.diskrequired=0.05
+healthcheck.diskspace.attempts=2
+healthcheck.diskspace.interval=12h
 `, listenLine, restListenLine, externalLine, tlsExtraDomain, tlsExtraIP,
 		net.LNDBitcoinFlag, cookiePath,
 		net.RPCPort, net.ZMQBlockPort, net.ZMQTxPort)

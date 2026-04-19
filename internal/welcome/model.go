@@ -48,7 +48,6 @@ const (
 	tabLndHubAccount                    // LndHub account detail
 	tabLndHubCreate                     // LndHub create account flow
 	tabOpenChannel                      // Channel open flow
-	tabCloseChannel                     // Channel close flow
 	tabOnChainTx                        // on-chain transaction detail
 	tabUtxoDetail                       // UTXO detail with label edit
 	tabChannelHistory                   // channel history view
@@ -92,6 +91,14 @@ type feeTier struct {
 type svcActionDoneMsg struct{}
 type tickMsg time.Time
 type latestVersionMsg string
+
+// tabActivatedMsg is delivered to a screen's HandleMsg
+// when the user navigates to (or lands on) the screen's
+// tab. Screens opt in by handling it — those that don't
+// care silently ignore it via the default fall-through.
+// Used to refresh stale data without replacing the screen
+// or its in-progress state.
+type tabActivatedMsg struct{}
 
 type lndhubAccountCreatedMsg struct {
 	account *installer.LndHubAccount
@@ -183,17 +190,18 @@ type labelTxMsg struct {
 }
 
 type channelInfo struct {
-	ChanID        uint64
-	ChannelPoint  string
-	PeerAlias     string
-	RemotePubkey  string
-	Capacity      int64
-	LocalBalance  int64
-	RemoteBalance int64
-	Active        bool
-	Private       bool
-	Initiator     bool
-	Pending       bool
+	ChanID         uint64
+	ChannelPoint   string
+	PeerAlias      string
+	RemotePubkey   string
+	Capacity       int64
+	LocalBalance   int64
+	RemoteBalance  int64
+	Active         bool
+	Private        bool
+	Initiator      bool
+	Pending        bool
+	CommitmentType string
 }
 
 type channelHistoryEntry struct {

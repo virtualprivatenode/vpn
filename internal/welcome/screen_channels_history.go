@@ -69,6 +69,15 @@ func (s *ChannelHistoryScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tabActivatedMsg:
+		// Re-fetch closed channels so the table
+		// reflects any changes since this tab was
+		// last viewed (e.g. a channel closed from
+		// the detail tab). The closedChannelsMsg
+		// handler below rebuilds entries from
+		// current status + fresh closed data.
+		return s, fetchClosedChannelsCmd(
+			s.ctx.LndClient)
 	case closedChannelsMsg:
 		if msg.err == nil {
 			// Rebuild entries with current channel

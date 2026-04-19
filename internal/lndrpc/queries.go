@@ -34,16 +34,17 @@ type WalletBalance struct {
 }
 
 type Channel struct {
-	ChanID        uint64
-	ChannelPoint  string // "txid:index"
-	RemotePubkey  string
-	Capacity      int64
-	LocalBalance  int64
-	RemoteBalance int64
-	Active        bool
-	Private       bool
-	Initiator     bool
-	PeerAlias     string
+	ChanID         uint64
+	ChannelPoint   string // "txid:index"
+	RemotePubkey   string
+	Capacity       int64
+	LocalBalance   int64
+	RemoteBalance  int64
+	Active         bool
+	Private        bool
+	Initiator      bool
+	PeerAlias      string
+	CommitmentType string // "SIMPLE_TAPROOT", "ANCHORS", etc.
 }
 
 type PendingChannelInfo struct {
@@ -177,15 +178,16 @@ func (c *Client) ListChannels() ([]Channel, error) {
 	channels := make([]Channel, 0, len(resp.GetChannels()))
 	for _, ch := range resp.GetChannels() {
 		channels = append(channels, Channel{
-			ChanID:        ch.GetChanId(),
-			ChannelPoint:  ch.GetChannelPoint(),
-			RemotePubkey:  ch.GetRemotePubkey(),
-			Capacity:      ch.GetCapacity(),
-			LocalBalance:  ch.GetLocalBalance(),
-			RemoteBalance: ch.GetRemoteBalance(),
-			Active:        ch.GetActive(),
-			Private:       ch.GetPrivate(),
-			Initiator:     ch.GetInitiator(),
+			ChanID:         ch.GetChanId(),
+			ChannelPoint:   ch.GetChannelPoint(),
+			RemotePubkey:   ch.GetRemotePubkey(),
+			Capacity:       ch.GetCapacity(),
+			LocalBalance:   ch.GetLocalBalance(),
+			RemoteBalance:  ch.GetRemoteBalance(),
+			Active:         ch.GetActive(),
+			Private:        ch.GetPrivate(),
+			Initiator:      ch.GetInitiator(),
+			CommitmentType: ch.GetCommitmentType().String(),
 		})
 	}
 	for i := range channels {
@@ -452,10 +454,10 @@ func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, tap
 		Private:            private,
 		MinConfs:           1,
 		SpendUnconfirmed:   false,
+		ScidAlias:          private,
 	}
 	if taproot {
-		req.CommitmentType = lnrpc.CommitmentType_SIMPLE_TAPROOT_OVERLAY
-		req.ScidAlias = true
+		req.CommitmentType = lnrpc.CommitmentType_SIMPLE_TAPROOT
 	}
 	resp, err := rpc.OpenChannelSync(ctx, req)
 	if err != nil {
