@@ -41,7 +41,7 @@ type OnChainSendScreen struct {
 	addrInput  textinput.Model
 	amtInput   AmountInput
 	labelInput textinput.Model
-	feeInput   textinput.Model
+	feeInput   AmountInput
 	sendAll    bool
 	maxFocused bool // Max button highlighted on amount step
 
@@ -74,7 +74,7 @@ func NewOnChainSendScreen(
 		addrInput:  newOnChainAddrInput(),
 		amtInput:   NewAmountInput(),
 		labelInput: newOCSendLabelInput(),
-		feeInput:   newCustomFeeInput(),
+		feeInput:   NewFeeInput(),
 		sendBtnIdx: 1, // default to Create Transaction
 	}
 }
@@ -143,11 +143,12 @@ func (s *OnChainSendScreen) HelpBindings() []key.Binding {
 	case ocStepButtons:
 		return s.inputButtonBindings()
 	case ocStepConfirm:
-		return s.confirmBindings()
+		return actionButtonBindings(
+			s.confirmBtnIdx, s.ctx.HasTabs)
 	case ocStepBroadcast:
-		return s.broadcastBindings()
+		return waitingBindings()
 	case ocStepResult:
-		return newResultBindings().ShortHelp()
+		return resultBindings()
 	}
 	return nil
 }
@@ -232,10 +233,8 @@ func (s *OnChainSendScreen) handleInputLeft(
 	}
 	// Fee input: pass through for cursor
 	if s.step == ocStepFee {
-		if s.feeInput.Value() != "" {
-			var cmd tea.Cmd
-			s.feeInput, cmd =
-				s.feeInput.Update(tea.Msg(msg))
+		if !s.feeInput.Empty() {
+			cmd := s.feeInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 	}
@@ -280,9 +279,7 @@ func (s *OnChainSendScreen) handleInputRight(
 	}
 	// Fee input: pass through for cursor
 	if s.step == ocStepFee {
-		var cmd tea.Cmd
-		s.feeInput, cmd =
-			s.feeInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
 	return s, nil
@@ -291,38 +288,33 @@ func (s *OnChainSendScreen) handleInputRight(
 func (s *OnChainSendScreen) handleInputBackspace(
 	msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// Clean backspace: only deletes characters,
-	// never navigates.
-	if s.step == ocStepAddr &&
-		s.addrInput.Value() != "" {
+	switch s.step {
+	case ocStepAddr:
 		var cmd tea.Cmd
 		s.addrInput, cmd =
 			s.addrInput.Update(tea.Msg(msg))
 		return s, cmd
-	}
-	if s.step == ocStepAmount && !s.maxFocused {
-		if !s.amtInput.Empty() {
+	case ocStepAmount:
+		if !s.maxFocused {
 			s.disengageMax()
 			cmd := s.amtInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-	}
-	if s.step == ocStepLabel {
-		if s.labelInput.Value() != "" {
-			var cmd tea.Cmd
-			s.labelInput, cmd =
-				s.labelInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-	}
-	if s.step == ocStepFee {
-		if s.feeInput.Value() != "" {
-			var cmd tea.Cmd
-			s.feeInput, cmd =
-				s.feeInput.Update(tea.Msg(msg))
-			s.syncMaxIfEngaged()
-			return s, cmd
-		}
+		// Max button focused — non-input zone,
+		// navigate to parent.
+		return s, emitFocusParent
+	case ocStepLabel:
+		var cmd tea.Cmd
+		s.labelInput, cmd =
+			s.labelInput.Update(tea.Msg(msg))
+		return s, cmd
+	case ocStepFee:
+		cmd := s.feeInput.Update(tea.Msg(msg))
+		s.syncMaxIfEngaged()
+		return s, cmd
+	case ocStepButtons:
+		// Non-input zone — navigate to parent.
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -424,9 +416,7 @@ func (s *OnChainSendScreen) handleInputDefault(
 			s.labelInput.Update(tea.Msg(msg))
 		return s, cmd
 	case ocStepFee:
-		var cmd tea.Cmd
-		s.feeInput, cmd =
-			s.feeInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		s.syncMaxIfEngaged()
 		return s, cmd
 	}
@@ -459,6 +449,9 @@ func (s *OnChainSendScreen) handleConfirmKey(
 		}
 		return s, nil
 	case "down", "tab", "shift+tab":
+		return s, nil
+	case "backspace":
+		s.backToInput()
 		return s, nil
 	case "enter":
 		switch s.confirmBtnIdx {
@@ -526,6 +519,15 @@ func (s *OnChainSendScreen) handlePaste(
 			cmd := s.amtInput.Update(msg)
 			return s, cmd
 		}
+	case ocStepLabel:
+		var cmd tea.Cmd
+		s.labelInput, cmd =
+			s.labelInput.Update(msg)
+		return s, cmd
+	case ocStepFee:
+		cmd := s.feeInput.Update(msg)
+		s.syncMaxIfEngaged()
+		return s, cmd
 	}
 	return s, nil
 }
@@ -562,11 +564,10 @@ func (s *OnChainSendScreen) handleFeeTiers(
 		return s, nil
 	}
 	// Pre-fill fee input if still empty
-	if s.feeInput.Value() == "" &&
+	if s.feeInput.Empty() &&
 		msg.tiers[0].SatPerVB > 0 {
-		s.feeInput.SetValue(
-			fmt.Sprintf("%.0f",
-				msg.tiers[0].SatPerVB))
+		s.feeInput.SetSats(
+			int64(msg.tiers[0].SatPerVB))
 	}
 	s.syncMaxIfEngaged()
 	return s, nil
@@ -689,18 +690,11 @@ func (s *OnChainSendScreen) EngageMaxForSelection() {
 // getFeeRate returns the current fee rate from the fee
 // input, defaulting to 1 sat/vB.
 func (s *OnChainSendScreen) getFeeRate() int64 {
-	val := strings.TrimSpace(s.feeInput.Value())
-	if val == "" {
+	n := s.feeInput.Sats()
+	if n < 1 {
 		return 1
 	}
-	var n int64
-	for _, c := range val {
-		if c < '0' || c > '9' {
-			return 1
-		}
-		n = n*10 + int64(c-'0')
-	}
-	return max(n, 1)
+	return n
 }
 
 // validateAndConfirm validates all fields and transitions
@@ -751,32 +745,19 @@ func (s *OnChainSendScreen) validateAndConfirm() (
 	}
 
 	// Validate fee rate
-	var feeRateVal int64
-	feeVal := strings.TrimSpace(
-		s.feeInput.Value())
-	if feeVal == "" {
+	feeRateVal := s.feeInput.Sats()
+	if s.feeInput.Empty() {
 		s.error = "Enter a fee rate"
 		s.step = ocStepFee
 		s.focusStep()
 		return s, nil
 	}
-	var fn int64
-	for _, c := range feeVal {
-		if c < '0' || c > '9' {
-			s.error = "Invalid fee rate"
-			s.step = ocStepFee
-			s.focusStep()
-			return s, nil
-		}
-		fn = fn*10 + int64(c-'0')
-	}
-	if fn < 1 {
+	if feeRateVal < 1 {
 		s.error = "Minimum 1 sat/vB"
 		s.step = ocStepFee
 		s.focusStep()
 		return s, nil
 	}
-	feeRateVal = fn
 
 	s.addrVal = addr
 	s.amtVal = amountSats
@@ -812,7 +793,7 @@ func (s *OnChainSendScreen) resetInputs() {
 	s.addrInput = newOnChainAddrInput()
 	s.amtInput = NewAmountInput()
 	s.labelInput = newOCSendLabelInput()
-	s.feeInput = newCustomFeeInput()
+	s.feeInput = NewFeeInput()
 	s.sendAll = false
 	s.maxFocused = false
 	s.step = ocStepAddr
@@ -826,9 +807,8 @@ func (s *OnChainSendScreen) resetInputs() {
 	s.error = ""
 	// Re-fill fee from cached tiers
 	if s.ocCtx.SendFeeTiers[0].SatPerVB > 0 {
-		s.feeInput.SetValue(
-			fmt.Sprintf("%.0f",
-				s.ocCtx.SendFeeTiers[0].SatPerVB))
+		s.feeInput.SetSats(
+			int64(s.ocCtx.SendFeeTiers[0].SatPerVB))
 	}
 }
 
@@ -1285,98 +1265,24 @@ func (s *OnChainSendScreen) viewResult(
 
 func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "fields")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "cursor")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "continue")),
+		kUpDownFields, kTabNext, kLeftRightCursor,
+		bind("enter", "continue", "enter"),
 		kSidebar,
 	}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
+		binds = append(binds, kShiftTabBar)
 	}
 	binds = append(binds, kQuit)
 	return binds
 }
 
 func (s *OnChainSendScreen) inputButtonBindings() []key.Binding {
-	var binds []key.Binding
-
-	if s.sendBtnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-
+	binds := buttonNav(s.sendBtnIdx)
 	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")),
-		key.NewBinding(
-			key.WithKeys("up"),
-			key.WithHelp("↑", "fields")),
-		kQuit)
+		kEnter, kShiftTabBack,
+		bind("↑", "fields", "up"),
+		kBack, kQuit)
 	return binds
-}
-
-func (s *OnChainSendScreen) confirmBindings() []key.Binding {
-	var binds []key.Binding
-
-	if s.confirmBtnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")))
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *OnChainSendScreen) broadcastBindings() []key.Binding {
-	return []key.Binding{kQuit}
 }
 
 // ── Diagram helpers ────────────────────────────────────

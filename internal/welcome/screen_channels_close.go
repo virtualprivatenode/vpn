@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
@@ -50,11 +49,11 @@ type ChannelCloseScreen struct {
 
 	// Type step
 	typeIdx    int // 0=cooperative, 1=force
-	typeBtnIdx int // 0=Cancel, 1=Confirm
+	typeBtnIdx int // 0=Go Back, 1=Confirm
 
 	// Confirm step
 	force         bool
-	feeInput      textinput.Model
+	feeInput      AmountInput
 	feeTiers      [4]feeTier
 	focusZone     int // type step: 0=options, 1=buttons; confirm step: 0=fee, 1=buttons
 	confirmBtnIdx int // 0=Go Back, 1=Close/Force Close
@@ -124,6 +123,14 @@ func (s *ChannelCloseScreen) HandleMsg(
 			s.feeTiers = msg.tiers
 		}
 		return s, nil
+	case tea.PasteMsg:
+		if s.step == closeStepConfirm &&
+			!s.force &&
+			s.focusZone == closeZoneFee {
+			cmd := s.feeInput.Update(msg)
+			return s, cmd
+		}
+		return s, nil
 	}
 	return s, nil
 }
@@ -151,9 +158,9 @@ func (s *ChannelCloseScreen) HelpBindings() []key.Binding {
 	case closeStepConfirm:
 		return s.confirmBindings()
 	case closeStepClosing:
-		return []key.Binding{kQuit}
+		return waitingBindings()
 	case closeStepResult:
-		return newResultBindings().ShortHelp()
+		return resultBindings()
 	}
 	return nil
 }
@@ -206,7 +213,7 @@ func (s *ChannelCloseScreen) handleTypeKey(
 		return s, nil
 
 	case "backspace":
-		// Clean backspace: does nothing
+		s.Cancelled = true
 		return s, nil
 
 	case "enter":
@@ -242,9 +249,10 @@ func (s *ChannelCloseScreen) handleTypeBtnKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
+		s.Cancelled = true
 		return s, nil
 	case "enter":
-		if s.typeBtnIdx == 0 { // Cancel
+		if s.typeBtnIdx == 0 { // Go Back
 			s.Cancelled = true
 			return s, nil
 		}
@@ -254,11 +262,10 @@ func (s *ChannelCloseScreen) handleTypeBtnKey(
 		s.error = ""
 
 		if !s.force {
-			s.feeInput = newCloseFeeInput()
+			s.feeInput = NewFeeInput()
 			if s.feeTiers[0].SatPerVB > 0 {
-				s.feeInput.SetValue(
-					fmt.Sprintf("%.0f",
-						s.feeTiers[0].SatPerVB))
+				s.feeInput.SetSats(
+					int64(s.feeTiers[0].SatPerVB))
 			}
 			s.focusZone = closeZoneFee
 		} else {
@@ -297,29 +304,19 @@ func (s *ChannelCloseScreen) handleConfirmFeeKey(
 		return s, tea.Quit
 
 	case "left":
-		if s.feeInput.Value() != "" {
-			var cmd tea.Cmd
-			s.feeInput, cmd =
-				s.feeInput.Update(tea.Msg(msg))
+		if !s.feeInput.Empty() {
+			cmd := s.feeInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 
 	case "right":
-		var cmd tea.Cmd
-		s.feeInput, cmd =
-			s.feeInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 
 	case "backspace":
-		// Clean backspace: delete only
-		if s.feeInput.Value() != "" {
-			var cmd tea.Cmd
-			s.feeInput, cmd =
-				s.feeInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
+		cmd := s.feeInput.Update(tea.Msg(msg))
+		return s, cmd
 
 	case "down", "tab", "enter":
 		// Advance to buttons (pattern 19)
@@ -336,10 +333,7 @@ func (s *ChannelCloseScreen) handleConfirmFeeKey(
 		return s, nil
 
 	default:
-		// Pass to text input
-		var cmd tea.Cmd
-		s.feeInput, cmd =
-			s.feeInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
 }
@@ -381,7 +375,9 @@ func (s *ChannelCloseScreen) handleConfirmBtnKey(
 		return s, nil
 
 	case "backspace":
-		// Clean backspace: does nothing on buttons
+		s.step = closeStepType
+		s.focusZone = closeTypeZoneOptions
+		s.error = ""
 		return s, nil
 
 	case "enter":
@@ -401,8 +397,7 @@ func (s *ChannelCloseScreen) handleConfirmBtnKey(
 
 			var feeRate uint64
 			if !s.force {
-				r := parseFeeInputRate(
-					s.feeInput.Value())
+				r := s.feeInput.Sats()
 				if r > 0 {
 					feeRate = uint64(r)
 				}
@@ -519,7 +514,7 @@ func (s *ChannelCloseScreen) viewType(
 		"Unilateral. Funds locked ~2 weeks."))
 
 	return p.renderWithBottomButtons(
-		[]string{"Cancel", "Confirm"},
+		[]string{"Go Back", "Confirm"},
 		s.typeBtnIdx, onButtons, h)
 }
 
@@ -555,8 +550,7 @@ func (s *ChannelCloseScreen) viewConfirm(
 			s.feeInput.View(), isFeeZone)
 
 		// Estimated total fee
-		feeRate := parseFeeInputRate(
-			s.feeInput.Value())
+		feeRate := s.feeInput.Sats()
 		if feeRate > 0 {
 			estFee := int64(feeRate * 170)
 			p.line(" " + theme.Dim.Render(
@@ -662,86 +656,44 @@ func (s *ChannelCloseScreen) viewResult(
 
 func (s *ChannelCloseScreen) typeBindings() []key.Binding {
 	var binds []key.Binding
-
 	if s.focusZone == closeTypeZoneButtons {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "back")),
+			kLeftRightButtons, kEnter,
+			bind("↑", "back", "up"),
 			kSidebar)
 	} else {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up", "down"),
-				key.WithHelp("↑↓", "close type")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			kSidebar)
-
+			bind("↑↓", "close type", "up", "down"),
+			kEnter, kSidebar)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 	}
-
-	binds = append(binds, kQuit)
+	binds = append(binds, kBack, kQuit)
 	return binds
 }
 
 func (s *ChannelCloseScreen) confirmBindings() []key.Binding {
 	var binds []key.Binding
-
 	if !s.force && s.focusZone == closeZoneFee {
-		// Fee input zone
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "next")),
-			kSidebar)
+			kTabNext, kEnterNext, kSidebar)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 	} else {
-		// Buttons zone (or force close buttons)
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")))
-
+			kLeftRightButtons, kEnter)
 		if !s.force {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "back")))
+			binds = append(binds, kShiftTabBack)
 		} else {
 			binds = append(binds, kSidebar)
 			if s.ctx.HasTabs {
-				binds = append(binds,
-					key.NewBinding(
-						key.WithKeys("up"),
-						key.WithHelp("↑", "tab bar")))
+				binds = append(binds, kUpTabBar)
 			}
 		}
+		binds = append(binds, kBack)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
 }

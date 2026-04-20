@@ -79,7 +79,17 @@ type openTab struct {
 	// auto-unlock swap in update.go) explicitly
 	// preserves this field for that reason.
 	Section int
-	Screen  Screen // L16: owns all state for this tab's content (nil = legacy path)
+	// Parent declares which tab kind owns this tab.
+	// Zero means "section home is the parent" (top-
+	// level detail tabs opened from home screens).
+	// Non-zero means this tab is a child of another
+	// detail tab (e.g. tabSyncthingDevice's Parent is
+	// tabSyncthing). Used by closeTab for cascade-
+	// close and by focusParentMsg for backspace
+	// navigation. No grandchild tabs exist — depth
+	// is at most two levels.
+	Parent tabKind
+	Screen Screen // L16: owns all state for this tab's content (nil = legacy path)
 }
 
 type feeTier struct {

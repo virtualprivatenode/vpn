@@ -161,7 +161,7 @@ func (s *SSHKeysScreen) HandleKey(
 		return s, nil
 
 	case "backspace":
-		return s, emitCloseTab
+		return s, emitFocusParent
 
 	case "enter":
 		if s.focusZone == sshZoneButtons {
@@ -201,44 +201,12 @@ func (s *SSHKeysScreen) View(w, h int) string {
 }
 
 func (s *SSHKeysScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
 	if s.focusZone == sshZoneButtons {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")))
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("down"),
-				key.WithHelp("↓", "keys")))
-		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
-		}
-		binds = append(binds, kSidebar)
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "open")),
-			key.NewBinding(
-				key.WithKeys("up", "down"),
-				key.WithHelp("↑↓", "navigate")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "buttons")),
-			kSidebar)
+		return manageButtonBindings(
+			"keys", s.btnIdx, s.ctx.HasTabs)
 	}
-
-	binds = append(binds, kBack, kQuit)
-	return binds
+	return homeListBindings(
+		"navigate", "open", "buttons")
 }
 
 // ── Tab openers ────────────────────────────────────────
@@ -251,6 +219,7 @@ func (s *SSHKeysScreen) openAddTab() (Screen, tea.Cmd) {
 			Label:       "Add Key",
 			Screen:      screen,
 			FocusTabBar: true,
+			Parent:      tabSSHKeys,
 		}
 	}
 }
@@ -265,6 +234,7 @@ func (s *SSHKeysScreen) openPasswordAuthTab() (
 			Label:       "Password Auth",
 			Screen:      screen,
 			FocusTabBar: true,
+			Parent:      tabSSHKeys,
 		}
 	}
 }
@@ -279,6 +249,7 @@ func (s *SSHKeysScreen) openChangePasswordTab() (
 			Label:       "Change Password",
 			Screen:      screen,
 			FocusTabBar: true,
+			Parent:      tabSSHKeys,
 		}
 	}
 }
@@ -305,6 +276,7 @@ func (s *SSHKeysScreen) openDetailTab() (Screen, tea.Cmd) {
 			Index:       idx,
 			Screen:      screen,
 			FocusTabBar: true,
+			Parent:      tabSSHKeys,
 		}
 	}
 }

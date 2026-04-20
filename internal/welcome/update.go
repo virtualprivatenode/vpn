@@ -149,6 +149,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case focusParentMsg:
+		// Navigate to the active tab's parent. If
+		// the parent is 0 (section home), focus the
+		// section home. Otherwise find the open tab
+		// whose kind matches the parent and focus it.
+		tabs := m.effectiveTabs()
+		if m.activeTab > 0 &&
+			m.activeTab < len(tabs) {
+			parent := tabs[m.activeTab].Parent
+			if parent != 0 {
+				for i, t := range tabs {
+					if t.Kind == parent {
+						m.activeTab = i
+						m.focusContent()
+						return m, m.activateTab()
+					}
+				}
+			}
+		}
+		// Parent is section home or not found —
+		// fall back to section home.
+		m.activeTab = 0
+		m.focusContent()
+		return m, nil
 	case showQRMsg:
 		m.urlTarget = msg.URL
 		m.qrLabel = msg.Label
@@ -217,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Label:   msg.Label,
 			Index:   msg.Index,
 			Section: m.nav.ActiveSection(),
+			Parent:  msg.Parent,
 			Screen:  msg.Screen,
 		})
 		m.activeTab = len(m.effectiveTabs()) - 1
@@ -834,41 +859,6 @@ func (m Model) handleTabBarKey(
 	return m, nil
 }
 
-// childKindsOf returns the tab kinds that consider
-// `parent` their parent. Used by closeTab to cascade-
-// close children when their parent tab is closed.
-// Returns nil for kinds that aren't parents.
-//
-// Today only Syncthing manage and LndHub manage have
-// children. If you add a new sub-tree (e.g. another
-// add-on with detail flows), add a case here. The
-// future cleanup is to make this a field on openTab
-// (Parent tabKind) so each tab declares its own parent
-// at construction time.
-func childKindsOf(parent tabKind) []tabKind {
-	switch parent {
-	case tabSyncthing:
-		return []tabKind{
-			tabSyncthingDevice,
-			tabSyncthingWebUI,
-			tabSyncthingPair,
-		}
-	case tabLndHub:
-		return []tabKind{
-			tabLndHubAccount,
-			tabLndHubCreate,
-		}
-	case tabSSHKeys:
-		return []tabKind{
-			tabSSHKeyDetail,
-			tabSSHKeyAdd,
-			tabSSHPasswordAuth,
-			tabSSHChangePassword,
-		}
-	}
-	return nil
-}
-
 func (m Model) closeTab(
 	tabIdx int,
 ) (tea.Model, tea.Cmd) {
@@ -885,9 +875,9 @@ func (m Model) closeTab(
 
 	// Build a set of tabs to remove. Always includes
 	// the closing tab itself; if the closing tab is a
-	// parent (Syncthing manage, LndHub manage), also
-	// includes all of its children in the same
-	// section. Cascade is silent — no confirmation.
+	// parent, also includes all tabs in the same
+	// section whose Parent matches the closing tab's
+	// kind. Cascade is silent — no confirmation.
 	//
 	// Async results that arrive after a child is
 	// cascade-closed will land in routeToScreen,
@@ -900,7 +890,6 @@ func (m Model) closeTab(
 	// effect persists even if the tab is gone.
 	// Future flows that change state only via screen
 	// handlers would break this assumption.
-	childKinds := childKindsOf(closingTab.Kind)
 	shouldRemove := func(t openTab) bool {
 		if t.Section != closingTab.Section {
 			return false
@@ -909,10 +898,10 @@ func (m Model) closeTab(
 			t.Index == closingTab.Index {
 			return true
 		}
-		for _, ck := range childKinds {
-			if t.Kind == ck {
-				return true
-			}
+		// Cascade: remove children whose Parent is
+		// the closing tab's kind.
+		if t.Parent == closingTab.Kind {
+			return true
 		}
 		return false
 	}
@@ -927,7 +916,6 @@ func (m Model) closeTab(
 	m.tabs = newTabs
 
 	m.tabCursorX = 0
-	m.focusContent()
 
 	// Close-to-neighbor: land on whatever tab now
 	// occupies the closed parent's index. If that
@@ -950,10 +938,12 @@ func (m Model) closeTab(
 			landing = newTabCount - 1
 		}
 		m.activeTab = landing
+		m.focusTabBar()
 	} else {
 		// No detail tabs left — fall back to section
-		// home.
+		// home. Focus content since there's no tab bar.
 		m.activeTab = 0
+		m.focusContent()
 	}
 
 	// Save the resolved landing index into
@@ -1002,7 +992,7 @@ func (m Model) closeTab(
 		}
 	}
 
-	return m, m.activateTab()
+	return m, nil
 }
 
 func (m Model) handleGenericSubviewKey(

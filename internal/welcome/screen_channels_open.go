@@ -17,7 +17,7 @@ type chanOpenStep int
 
 const (
 	coStepInput      chanOpenStep = iota // peer + amount + toggles + buttons
-	coStepCustomPeer                     // pubkey + host fields + Cancel/Continue
+	coStepCustomPeer                     // pubkey + host fields + Go Back/Continue
 	coStepConfirm                        // summary + Go Back / Confirm
 	coStepOpening                        // in-flight
 	coStepResult                         // success or error
@@ -162,11 +162,12 @@ func (s *ChannelOpenScreen) HelpBindings() []key.Binding {
 	case coStepCustomPeer:
 		return s.customPeerBindings()
 	case coStepConfirm:
-		return s.confirmBindings()
+		return actionButtonBindings(
+			s.confirmBtnIdx, s.ctx.HasTabs)
 	case coStepOpening:
-		return s.openingBindings()
+		return waitingBindings()
 	case coStepResult:
-		return newResultBindings().ShortHelp()
+		return resultBindings()
 	}
 	return nil
 }
@@ -248,6 +249,8 @@ func (s *ChannelOpenScreen) handlePeerListKey(
 		s.focusZone = coZoneAmounts
 		s.amountPreset = 0
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -336,7 +339,7 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if isCustom {
 			if !s.confirmCustomAmountAndAdvance(
@@ -403,6 +406,8 @@ func (s *ChannelOpenScreen) handleToggleKey(
 			s.taproot = !s.taproot
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -441,6 +446,8 @@ func (s *ChannelOpenScreen) handleButtonKey(
 			return s.submitOpenChannel()
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -504,13 +511,10 @@ func (s *ChannelOpenScreen) handleCustomPubkeyKey(
 		}
 		return s, nil
 	case "backspace":
-		if s.pubkeyInput.Value() != "" {
-			var cmd tea.Cmd
-			s.pubkeyInput, cmd =
-				s.pubkeyInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
+		var cmd tea.Cmd
+		s.pubkeyInput, cmd =
+			s.pubkeyInput.Update(tea.Msg(msg))
+		return s, cmd
 	case "enter":
 		s.pubkeyInput.Blur()
 		s.hostInput.Focus()
@@ -565,13 +569,10 @@ func (s *ChannelOpenScreen) handleCustomHostKey(
 		s.customZone = coCustomZonePubkey
 		return s, nil
 	case "backspace":
-		if s.hostInput.Value() != "" {
-			var cmd tea.Cmd
-			s.hostInput, cmd =
-				s.hostInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
+		var cmd tea.Cmd
+		s.hostInput, cmd =
+			s.hostInput.Update(tea.Msg(msg))
+		return s, cmd
 	case "enter":
 		s.hostInput.Blur()
 		s.customZone = coCustomZoneButtons
@@ -614,13 +615,17 @@ func (s *ChannelOpenScreen) handleCustomButtonKey(
 		return s, nil
 	case "enter":
 		switch s.customBtnIdx {
-		case 0: // Cancel
+		case 0: // Go Back
 			s.error = ""
 			s.step = coStepInput
 			return s, nil
 		case 1: // Continue
 			return s.submitCustomPeer()
 		}
+		return s, nil
+	case "backspace":
+		s.error = ""
+		s.step = coStepInput
 		return s, nil
 	}
 	return s, nil
@@ -1190,7 +1195,7 @@ func (s *ChannelOpenScreen) viewCustomPeer(
 	btnFocused := isFocused &&
 		s.customZone == coCustomZoneButtons
 	return p.renderWithBottomButtons(
-		[]string{"Cancel", "Continue"},
+		[]string{"Go Back", "Continue"},
 		s.customBtnIdx, btnFocused, h)
 }
 
@@ -1215,7 +1220,7 @@ func (s *ChannelOpenScreen) viewConfirm(
 	p.blank()
 
 	p.labelLine("Pubkey:")
-	p.monoWrap(s.selectedPubkey())
+	p.mono(s.selectedPubkey())
 	p.blank()
 	p.warn("Spend " +
 		formatSats(s.amount) + " sats?")
@@ -1286,172 +1291,49 @@ func (s *ChannelOpenScreen) inputBindings() []key.Binding {
 
 func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "select")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "confirm")),
+		kUpDownSelect, kTabNext, kEnterConfirm,
 		kSidebar,
 	}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
+		binds = append(binds, kShiftTabBack)
 	}
-	binds = append(binds, kQuit)
+	binds = append(binds, kBack, kQuit)
 	return binds
 }
 
 func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "select")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "confirm")),
-		kSidebar,
+	return []key.Binding{
+		kUpDownSelect, kTabNext, kShiftTabBack,
+		kEnterConfirm, kSidebar, kBack, kQuit,
 	}
-	binds = append(binds, kQuit)
-	return binds
 }
 
 func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "toggle")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "toggle")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")),
+	return []key.Binding{
+		bind("←→", "toggle", "left", "right"),
+		kEnterToggle, kTabNext, kShiftTabBack, kBack, kQuit,
 	}
-	binds = append(binds, kQuit)
-	return binds
 }
 
 func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")))
-	binds = append(binds, kQuit)
+	binds := buttonNav(s.btnIdx)
+	binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
 	return binds
 }
 
 func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 	switch s.customZone {
 	case coCustomZonePubkey, coCustomZoneHost:
-		binds := []key.Binding{
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "cursor")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")),
-			kSidebar,
+		return []key.Binding{
+			kLeftRightCursor, kTabNext,
+			kShiftTabBack, kSidebar, kQuit,
 		}
-		binds = append(binds, kQuit)
-		return binds
 	case coCustomZoneButtons:
-		var binds []key.Binding
-		if s.customBtnIdx == 0 {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left"),
-					key.WithHelp("←", "sidebar")),
-				key.NewBinding(
-					key.WithKeys("right"),
-					key.WithHelp("→", "button")))
-		} else {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left", "right"),
-					key.WithHelp("←→", "buttons")))
-		}
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
-		binds = append(binds, kQuit)
+		binds := buttonNav(s.customBtnIdx)
+		binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
 		return binds
 	}
 	return nil
-}
-
-func (s *ChannelOpenScreen) confirmBindings() []key.Binding {
-	var binds []key.Binding
-	if s.confirmBtnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kBack)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *ChannelOpenScreen) openingBindings() []key.Binding {
-	return []key.Binding{kQuit}
 }
 
 // ── channelOpenPeers ───────────────────────────────────

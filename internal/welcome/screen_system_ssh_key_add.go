@@ -121,14 +121,9 @@ func (s *SSHKeyAddScreen) HelpBindings() []key.Binding {
 	case sshAddStepInput:
 		return s.inputBindings()
 	case sshAddStepWorking:
-		return []key.Binding{kQuit}
+		return waitingBindings()
 	case sshAddStepResult:
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "done")),
-			kQuit,
-		}
+		return resultBindings()
 	}
 	return nil
 }
@@ -209,15 +204,13 @@ func (s *SSHKeyAddScreen) handleInputKey(
 		return s, nil
 
 	case "backspace":
-		if s.focusZone == sshAddZoneInput &&
-			s.keyInput.Value() != "" {
+		if s.focusZone == sshAddZoneInput {
 			var cmd tea.Cmd
 			s.keyInput, cmd =
 				s.keyInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		// Empty input + backspace = cancel = close tab
-		return s, emitCloseTab
+		return s, emitFocusParent
 
 	case "enter":
 		if s.focusZone == sshAddZoneButtons {
@@ -298,24 +291,15 @@ func (s *SSHKeyAddScreen) inputBindings() []key.Binding {
 
 	if s.focusZone == sshAddZoneButtons &&
 		!s.keyInput.Focused() {
+		binds = append(binds, buttonNav(s.btnIdx)...)
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
+			kEnter,
+			kShiftTabBack,
+			kBack)
 	} else {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "add")),
+			kTabButtons,
+			bind("enter", "add", "enter"),
 			kSidebar)
 	}
 

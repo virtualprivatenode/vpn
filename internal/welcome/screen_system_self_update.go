@@ -96,13 +96,13 @@ func (s *SelfUpdateScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
-	case "backspace":
-		return s, emitCloseTab
 	case "enter":
 		if s.btnIdx == 0 {
 			return s, emitCloseTab
 		}
 		return s.startInstall()
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -184,33 +184,5 @@ func (s *SelfUpdateScreen) HelpBindings() []key.Binding {
 		s.progress != nil {
 		return s.progress.HelpBindings()
 	}
-
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kBack)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
+	return actionButtonBindings(s.btnIdx, s.ctx.HasTabs)
 }

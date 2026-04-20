@@ -147,8 +147,6 @@ func (s *SystemHomeScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
-	case "backspace":
-		return s, emitFocusSidebar
 	case "r":
 		if s.focusZone == sysHomeZoneServices {
 			s.svcConfirm = "Restart"
@@ -211,6 +209,8 @@ func (s *SystemHomeScreen) HandleKey(
 			}
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusSidebar
 	case "enter":
 		if s.focusZone == sysHomeZoneButtons &&
 			s.btnIdx < len(actions) {
@@ -653,64 +653,28 @@ func (s *SystemHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *SystemHomeScreen) HelpBindings() []key.Binding {
-	// Confirm dialogs override everything
 	if s.svcConfirm != "" || s.sysConfirm != "" {
-		return newConfirmBindings().ShortHelp()
+		return confirmDialogBindings()
 	}
-
 	if s.focusZone == sysHomeZoneServices {
 		return s.serviceBindings()
 	}
-	return s.buttonBindings()
-}
-
-func (s *SystemHomeScreen) buttonBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("down"),
-			key.WithHelp("↓", "services")),
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kSidebar,
-	}
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
+	return homeButtonBindings(
+		"services", s.btnIdx, s.ctx.HasTabs)
 }
 
 func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "services")),
-		key.NewBinding(
-			key.WithKeys("r"),
-			key.WithHelp("r", "restart")),
-		key.NewBinding(
-			key.WithKeys("s"),
-			key.WithHelp("s", "stop")),
-		key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "start")),
-		key.NewBinding(
-			key.WithKeys("l"),
-			key.WithHelp("l", "logs")),
+		bind("↑↓", "services", "up", "down"),
+		bind("r", "restart", "r"),
+		bind("s", "stop", "s"),
+		bind("a", "start", "a"),
+		bind("l", "logs", "l"),
 	}
 	if s.svcName(s.svcCursor) == "lnd" &&
 		s.ctx.Cfg.P2PMode == "tor" {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("p"),
-				key.WithHelp("p", "p2p")))
+			bind("p", "p2p", "p"))
 	}
 	if s.svcName(s.svcCursor) == "lnd" &&
 		s.ctx.Cfg.WalletExists() {
@@ -719,17 +683,9 @@ func (s *SystemHomeScreen) serviceBindings() []key.Binding {
 			uHelp = "lock"
 		}
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("u"),
-				key.WithHelp("u", uHelp)))
+			bind("u", uHelp, "u"))
 	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "buttons")),
-		kSidebar,
-	)
-	binds = append(binds, kQuit)
+	binds = append(binds, kShiftTabButtons, kSidebar, kBack, kQuit)
 	return binds
 }
 

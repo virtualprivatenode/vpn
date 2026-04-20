@@ -40,9 +40,8 @@ import (
 // view-only informational screen like channel-history
 // or channel-detail, not a flow — the user exits via
 // the tab bar (up arrow → close), the sidebar (left
-// arrow), or by switching tabs. This matches the
-// "clean backspace does nothing" convention used by
-// other non-flow tabs.
+// arrow), backspace (focus parent tab), or by
+// switching tabs.
 //
 // QR buttons are always type-labeled even when there's
 // only one URI, because sovereignty-focused users want
@@ -201,8 +200,7 @@ func (s *NodeInfoScreen) HandleKey(
 		}
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		return s, s.buttonAction(s.buttonIdx)
 	}
@@ -363,22 +361,11 @@ func (s *NodeInfoScreen) View(w, h int) string {
 }
 
 func (s *NodeInfoScreen) HelpBindings() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(
-			key.WithKeys("left"),
-			key.WithHelp("←", "sidebar/button"),
-		),
-		key.NewBinding(
-			key.WithKeys("right"),
-			key.WithHelp("→", "button"),
-		),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select"),
-		),
-		key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
-		),
+	binds := buttonNav(s.buttonIdx)
+	binds = append(binds, kEnter)
+	if s.ctx.HasTabs {
+		binds = append(binds, kShiftTabBar)
 	}
+	binds = append(binds, kQuit)
+	return binds
 }

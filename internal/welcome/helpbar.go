@@ -86,16 +86,14 @@ func (m Model) currentBindings() []key.Binding {
 	// Fullscreen views
 	if m.subview == svQR || m.subview == svFullURL {
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "back")),
+			bind("enter", "back", "enter"),
 			kQuit,
 		}
 	}
 
 	// Sidebar focused
 	if m.nav.Focused {
-		return newSidebarBindings().ShortHelp()
+		return sidebarBindings()
 	}
 
 	// Tab bar focused
@@ -110,8 +108,7 @@ func (m Model) currentBindings() []key.Binding {
 				viewOnly = true
 			}
 		}
-		return newTabBarBindings(viewOnly, onTab).
-			ShortHelp()
+		return tabBarBindings(viewOnly, onTab)
 	}
 
 	// Detail tab content (view-only)

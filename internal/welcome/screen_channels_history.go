@@ -59,8 +59,7 @@ func (s *ChannelHistoryScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -247,21 +246,10 @@ func (s *ChannelHistoryScreen) View(
 }
 
 func (s *ChannelHistoryScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "channels")),
-		kSidebar)
-
+	binds := []key.Binding{kUpDownChannels, kSidebar}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
+		binds = append(binds, kShiftTabBar)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
 }

@@ -43,7 +43,7 @@ func (s *AddonsHomeScreen) HandleKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "left", "backspace":
+	case "left":
 		return s, emitFocusSidebar
 	case "up":
 		if s.cursor > 0 {
@@ -71,6 +71,8 @@ func (s *AddonsHomeScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusSidebar
 	case "enter", "right":
 		return s.handleEnter()
 	}
@@ -301,19 +303,12 @@ func (s *AddonsHomeScreen) View(
 
 func (s *AddonsHomeScreen) HelpBindings() []key.Binding {
 	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "select")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "open")),
-		kSidebar,
+		kUpDownSelect,
+		kEnterOpen,
+		bind("←/⌫", "sidebar", "left", "backspace"),
 	}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
+		binds = append(binds, kUpTabBar)
 	}
 	binds = append(binds, kQuit)
 	return binds

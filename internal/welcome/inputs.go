@@ -8,15 +8,6 @@ import (
 
 // ── Validators ───────────────────────────────────────────
 
-func validateDigits(s string) error {
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return errInvalidChar{}
-		}
-	}
-	return nil
-}
-
 func isBolt11Char(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') ||
 		(ch >= '0' && ch <= '9') ||
@@ -193,16 +184,15 @@ func newOCSendLabelInput() textinput.Model {
 	return ti
 }
 
-func newCustomFeeInput() textinput.Model {
+func NewFeeInput() AmountInput {
 	ti := textinput.New()
 	ti.Placeholder = "sat/vB"
-	ti.CharLimit = 6
-	ti.SetWidth(10)
-	ti.Validate = validateDigits
+	ti.CharLimit = 10
+	ti.SetWidth(12)
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()
-	return ti
+	return AmountInput{ti: ti}
 }
 
 func newSSHKeyInput() textinput.Model {
@@ -224,18 +214,6 @@ func newUserPasswordInput() textinput.Model {
 	ti.Prompt = "  "
 	ti.EchoMode = textinput.EchoPassword
 	applyInputStyles(&ti)
-	return ti
-}
-
-func newCloseFeeInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "sat/vB"
-	ti.CharLimit = 6
-	ti.SetWidth(10)
-	ti.Validate = validateDigits
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
 	return ti
 }
 

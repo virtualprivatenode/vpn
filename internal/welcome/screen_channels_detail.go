@@ -28,6 +28,9 @@ type ChannelDetailScreen struct {
 	ctx     *ScreenContext
 	channel channelInfo
 
+	// Button index for detail view (0=Cancel, 1=Close)
+	viewBtnIdx int
+
 	// Fee tiers snapshot for passing to close screen
 	feeTiers [4]feeTier
 
@@ -78,24 +81,35 @@ func (s *ChannelDetailScreen) HandleKey(
 		return s, emitFocusTabBar
 	}
 
-	// Non-pending: button is always focused
+	// Non-pending: Cancel / Close Channel buttons
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.viewBtnIdx > 0 {
+			s.viewBtnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.viewBtnIdx < 1 {
+			s.viewBtnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
 		}
 		return s, nil
 	case "down", "tab":
-		// Already on button, nowhere to go
+		// Already on buttons, nowhere to go
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
+		if s.viewBtnIdx == 0 {
+			return s, emitCloseTab
+		}
 		return s.launchClose()
 	}
 	return s, nil
@@ -193,7 +207,7 @@ func (s *ChannelDetailScreen) View(
 
 	p.blank()
 	p.labelLine("Pubkey:")
-	p.monoWrap(ch.RemotePubkey)
+	p.mono(ch.RemotePubkey)
 
 	if ch.ChanID > 0 {
 		p.blank()
@@ -201,12 +215,12 @@ func (s *ChannelDetailScreen) View(
 			fmt.Sprintf("%d", ch.ChanID))
 	}
 
-	// Close button pinned to bottom (not for pending)
+	// Cancel / Close Channel pinned to bottom (not for pending)
 	if !ch.Pending {
 		btnFocused := s.ctx.ContentFocused
 		return p.renderWithBottomButtons(
-			[]string{"Close Channel"},
-			0, btnFocused, h)
+			[]string{"Cancel", "Close Channel"},
+			s.viewBtnIdx, btnFocused, h)
 	}
 
 	return p.render()
@@ -217,10 +231,10 @@ func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
 		return s.closeScreen.HelpBindings()
 	}
 	if s.channel.Pending {
-		return newDetailTabBindings(s.ctx.HasTabs).
-			ShortHelp()
+		return viewDetailBindings(s.ctx.HasTabs)
 	}
-	return s.detailBindings()
+	return detailActionBindings(
+		"close channel", s.viewBtnIdx, s.ctx.HasTabs)
 }
 
 // ── Close channel launch ───────────────────────────────
@@ -237,26 +251,4 @@ func (s *ChannelDetailScreen) launchClose() (
 		s.channel.RemoteBalance,
 		s.feeTiers)
 	return s, fetchFeeTiersCmd(s.ctx.Cfg)
-}
-
-// ── Helpbar bindings ───────────────────────────────────
-
-func (s *ChannelDetailScreen) detailBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "close channel")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
 }

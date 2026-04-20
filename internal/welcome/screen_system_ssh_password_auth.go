@@ -46,6 +46,7 @@ func setSSHPasswordAuthCmd(
 type SSHPasswordAuthScreen struct {
 	ctx        *ScreenContext
 	step       sshPwAuthStep
+	viewBtnIdx int // 0 = Cancel, 1 = toggle action
 	confirmIdx int // 0 = Go Back, 1 = Apply
 	resultErr  string
 	resultMsg  string
@@ -118,28 +119,17 @@ func (s *SSHPasswordAuthScreen) View(w, h int) string {
 func (s *SSHPasswordAuthScreen) HelpBindings() []key.Binding {
 	switch s.step {
 	case sshPwAuthStepView:
-		var binds []key.Binding
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "toggle")),
-			kSidebar)
+		binds := buttonNav(s.viewBtnIdx)
+		binds = append(binds, kEnter)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 		binds = append(binds, kBack, kQuit)
 		return binds
 	case sshPwAuthStepConfirm:
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
+			kLeftRightButtons,
+			kEnter,
 			kBack,
 			kQuit,
 		}
@@ -147,9 +137,7 @@ func (s *SSHPasswordAuthScreen) HelpBindings() []key.Binding {
 		return []key.Binding{kQuit}
 	case sshPwAuthStepResult:
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "done")),
+			kEnterDone,
 			kQuit,
 		}
 	}
@@ -165,7 +153,16 @@ func (s *SSHPasswordAuthScreen) handleViewKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.viewBtnIdx > 0 {
+			s.viewBtnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.viewBtnIdx < 1 {
+			s.viewBtnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
@@ -174,8 +171,11 @@ func (s *SSHPasswordAuthScreen) handleViewKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
+		if s.viewBtnIdx == 0 {
+			return s, emitCloseTab
+		}
 		s.step = sshPwAuthStepConfirm
 		s.confirmIdx = 0
 		return s, nil
@@ -226,7 +226,7 @@ func (s *SSHPasswordAuthScreen) viewState(
 		label = "Enable Password Auth"
 	}
 	return p.renderWithBottomButtons(
-		[]string{label}, 0,
+		[]string{"Cancel", label}, s.viewBtnIdx,
 		s.ctx.ContentFocused, h)
 }
 

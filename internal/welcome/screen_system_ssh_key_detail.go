@@ -9,7 +9,7 @@ import (
 )
 
 // ── SSHKeyDetailScreen ─────────────────────────────────
-// View-only key detail with Remove button + confirm step.
+// Key detail with Cancel / Remove buttons + confirm step.
 // Opened as its own tab from SSHKeysScreen list. Mirrors
 // SyncthingDeviceScreen (detail + confirm in-screen, close
 // the tab on remove success).
@@ -27,6 +27,7 @@ type SSHKeyDetailScreen struct {
 	step       sshKeyDetailStep
 	keyInfo    installer.SSHKeyInfo
 	keyCount   int // snapshot at open time, for warning threshold
+	viewBtnIdx int // 0=Cancel, 1=Remove
 	confirmIdx int
 	removeErr  string
 }
@@ -95,11 +96,12 @@ func (s *SSHKeyDetailScreen) View(w, h int) string {
 func (s *SSHKeyDetailScreen) HelpBindings() []key.Binding {
 	switch s.step {
 	case sshKeyDetailStepView:
-		return s.detailBindings()
+		return detailActionBindings(
+			"remove", s.viewBtnIdx, s.ctx.HasTabs)
 	case sshKeyDetailStepConfirm:
-		return s.confirmBindings()
+		return tabButtonBindings(s.ctx.HasTabs)
 	case sshKeyDetailStepWorking:
-		return []key.Binding{kQuit}
+		return waitingBindings()
 	}
 	return nil
 }
@@ -113,7 +115,16 @@ func (s *SSHKeyDetailScreen) handleViewKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.viewBtnIdx > 0 {
+			s.viewBtnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.viewBtnIdx < 1 {
+			s.viewBtnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
@@ -122,8 +133,11 @@ func (s *SSHKeyDetailScreen) handleViewKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
+		if s.viewBtnIdx == 0 {
+			return s, emitCloseTab
+		}
 		s.step = sshKeyDetailStepConfirm
 		s.confirmIdx = 0
 		s.removeErr = ""
@@ -154,28 +168,8 @@ func (s *SSHKeyDetailScreen) viewDetail(
 	p.appendError(s.removeErr)
 
 	return p.renderWithBottomButtons(
-		[]string{"Remove"}, 0,
+		[]string{"Cancel", "Remove"}, s.viewBtnIdx,
 		s.ctx.ContentFocused, h)
-}
-
-func (s *SSHKeyDetailScreen) detailBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "remove")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kBack, kQuit)
-	return binds
 }
 
 // ── Confirm step ────────────────────────────────────────
@@ -289,19 +283,6 @@ func (s *SSHKeyDetailScreen) viewConfirm(
 	return p.renderWithBottomButtons(
 		buttons, confirmIdx,
 		s.ctx.ContentFocused, h)
-}
-
-func (s *SSHKeyDetailScreen) confirmBindings() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kBack,
-		kQuit,
-	}
 }
 
 // ── Working step ────────────────────────────────────────

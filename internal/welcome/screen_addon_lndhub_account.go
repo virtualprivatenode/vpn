@@ -24,6 +24,7 @@ type LndHubAccountScreen struct {
 	step         hubAccountStep
 	account      config.LndHubAccount // snapshot
 	accountIndex int                  // index in config
+	viewBtnIdx   int                  // 0=Cancel, 1=Deactivate
 	confirmIdx   int                  // 0=Go Back, 1=Deactivate
 	deactError   string
 }
@@ -96,9 +97,14 @@ func (s *LndHubAccountScreen) View(
 func (s *LndHubAccountScreen) HelpBindings() []key.Binding {
 	switch s.step {
 	case hubAcctStepDetail:
-		return s.detailBindings()
+		if s.account.Active {
+			return detailActionBindings(
+				"deactivate", s.viewBtnIdx,
+				s.ctx.HasTabs)
+		}
+		return viewDetailBindings(s.ctx.HasTabs)
 	case hubAcctStepConfirm:
-		return s.confirmBindings()
+		return tabButtonBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -112,7 +118,16 @@ func (s *LndHubAccountScreen) handleDetailKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.account.Active && s.viewBtnIdx > 0 {
+			s.viewBtnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.account.Active && s.viewBtnIdx < 1 {
+			s.viewBtnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
@@ -121,17 +136,19 @@ func (s *LndHubAccountScreen) handleDetailKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if s.account.Active {
+			if s.viewBtnIdx == 0 {
+				return s, emitCloseTab
+			}
 			s.step = hubAcctStepConfirm
 			s.confirmIdx = 0
 			s.deactError = ""
 			return s, nil
 		}
-		// Deactivated account: enter closes tab
-		return s, emitCloseTab
+		// Deactivated account: no action
+		return s, nil
 	}
 	return s, nil
 }
@@ -166,41 +183,12 @@ func (s *LndHubAccountScreen) viewDetail(
 
 	if acct.Active {
 		return p.renderWithBottomButtons(
-			[]string{"Deactivate"}, 0,
+			[]string{"Cancel", "Deactivate"},
+			s.viewBtnIdx,
 			s.ctx.ContentFocused, h)
 	}
 
-	return p.renderWithBottomButtons(
-		[]string{"Done"}, 0,
-		s.ctx.ContentFocused, h)
-}
-
-func (s *LndHubAccountScreen) detailBindings() []key.Binding {
-	var binds []key.Binding
-
-	if s.account.Active {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "deactivate")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "done")))
-	}
-
-	binds = append(binds, kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return p.render()
 }
 
 // ── Confirm step ───────────────────────────────────────
@@ -230,7 +218,7 @@ func (s *LndHubAccountScreen) handleConfirmKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
+		s.step = hubAcctStepDetail
 		return s, nil
 	case "enter":
 		switch s.confirmIdx {
@@ -262,27 +250,4 @@ func (s *LndHubAccountScreen) viewConfirm(
 		[]string{"Go Back", "Deactivate"},
 		s.confirmIdx,
 		s.ctx.ContentFocused, h)
-}
-
-func (s *LndHubAccountScreen) confirmBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
 }

@@ -485,67 +485,18 @@ func (s *WalletHomeScreen) View(
 func (s *WalletHomeScreen) HelpBindings() []key.Binding {
 	if !s.ctx.Cfg.WalletExists() {
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "create wallet")),
+			kEnterCreateWallet,
 			kSidebar,
+			kBack,
 			kQuit,
 		}
 	}
 	if s.focusZone == walletHomeZoneList {
-		return s.listBindings()
+		return homeListBindings(
+			"payments", "details", "buttons")
 	}
-	return s.buttonBindings()
-}
-
-func (s *WalletHomeScreen) buttonBindings() []key.Binding {
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("down"),
-			key.WithHelp("↓", "payments")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")))
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *WalletHomeScreen) listBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "payments")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "details")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "buttons")),
-		kSidebar,
-	}
-	binds = append(binds, kQuit)
-	return binds
+	return homeButtonBindings(
+		"payments", s.btnIdx, s.ctx.HasTabs)
 }
 
 // ── Helpers ─────────────────────────────────────────────

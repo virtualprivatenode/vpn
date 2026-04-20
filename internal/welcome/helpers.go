@@ -147,23 +147,6 @@ func formatFeeHints(tiers [4]feeTier) string {
 	return strings.Join(parts, "  ·  ")
 }
 
-// parseFeeInputRate parses a fee rate string from a text
-// input. Returns the rate as int64, minimum 1.
-func parseFeeInputRate(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	var n int64
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int64(c-'0')
-	}
-	return n
-}
-
 // estimateSimpleFee estimates the transaction fee in
 // sats given the number of inputs, outputs, and the
 // fee rate in sat/vB. Uses simplified vbyte estimation.

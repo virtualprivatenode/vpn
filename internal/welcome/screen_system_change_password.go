@@ -175,24 +175,15 @@ func (s *ChangePasswordScreen) HelpBindings() []key.Binding {
 	case changePwStepInput:
 		var binds []key.Binding
 		if s.focusZone == changePwZoneButtons {
+			binds = append(binds, buttonNav(s.btnIdx)...)
 			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left", "right"),
-					key.WithHelp("←→", "buttons")),
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "select")),
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "back")))
+				kEnter,
+				kShiftTabBack,
+				kBack)
 		} else {
 			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("tab"),
-					key.WithHelp("tab", "next field")),
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "next")),
+				kTabNextField,
+				kEnterNext,
 				kSidebar)
 		}
 		binds = append(binds, kQuit)
@@ -201,9 +192,7 @@ func (s *ChangePasswordScreen) HelpBindings() []key.Binding {
 		return []key.Binding{kQuit}
 	case changePwStepResult:
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "done")),
+			kEnterDone,
 			kQuit,
 		}
 	}
@@ -303,11 +292,10 @@ func (s *ChangePasswordScreen) handleInputKey(
 		return s, nil
 
 	case "backspace":
-		if s.isOnInput() && s.activeInputValue() != "" {
+		if s.isOnInput() {
 			return s.routeKeyToInput(msg)
 		}
-		// Empty input + backspace = cancel = close tab
-		return s, emitCloseTab
+		return s, emitFocusParent
 
 	case "enter":
 		if s.focusZone == changePwZoneButtons {

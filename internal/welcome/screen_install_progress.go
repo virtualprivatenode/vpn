@@ -207,12 +207,7 @@ func (s *InstallProgressScreen) View(
 
 func (s *InstallProgressScreen) HelpBindings() []key.Binding {
 	if s.done {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "close")),
-			kQuit,
-		}
+		return resultBindings()
 	}
-	return []key.Binding{}
+	return waitingBindings()
 }

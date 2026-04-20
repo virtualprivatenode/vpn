@@ -121,7 +121,7 @@ func (s *LndHubCreateScreen) HelpBindings() []key.Binding {
 	case hubCreateStepInput:
 		return s.inputBindings()
 	case hubCreateStepCreating:
-		return s.creatingBindings()
+		return waitingBindings()
 	case hubCreateStepCreated:
 		return s.createdBindings()
 	}
@@ -140,8 +140,9 @@ func (s *LndHubCreateScreen) handleInputKey(
 		if s.focusZone == hubCreateZoneButtons {
 			if s.btnIdx > 0 {
 				s.btnIdx--
+				return s, nil
 			}
-			return s, nil
+			return s, emitFocusSidebar
 		}
 		if s.nameInput.Value() != "" {
 			var cmd tea.Cmd
@@ -192,16 +193,13 @@ func (s *LndHubCreateScreen) handleInputKey(
 		}
 		return s, nil
 	case "backspace":
-		if s.focusZone == hubCreateZoneInput &&
-			s.nameInput.Value() != "" {
+		if s.focusZone == hubCreateZoneInput {
 			var cmd tea.Cmd
 			s.nameInput, cmd =
 				s.nameInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		// Clean backspace: does nothing when empty
-		// or on buttons
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if s.focusZone == hubCreateZoneButtons {
 			switch s.btnIdx {
@@ -269,35 +267,18 @@ func (s *LndHubCreateScreen) viewInput(
 
 func (s *LndHubCreateScreen) inputBindings() []key.Binding {
 	var binds []key.Binding
-
 	if s.focusZone == hubCreateZoneInput {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "create")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "buttons")),
-			kSidebar)
+			kEnterCreate, kTabButtons, kSidebar)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "input")))
+		binds = append(binds, kEnter)
+		binds = append(binds, buttonNav(s.btnIdx)...)
+		binds = append(binds, kShiftTabInput,
+			kBack)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
 }
@@ -325,10 +306,6 @@ func (s *LndHubCreateScreen) viewCreating(
 	return p.renderWithBottomButtons(
 		[]string{"Clear", "Create Account"},
 		1, false, h)
-}
-
-func (s *LndHubCreateScreen) creatingBindings() []key.Binding {
-	return []key.Binding{kQuit}
 }
 
 // ── Created step ───────────────────────────────────────
@@ -381,8 +358,7 @@ func (s *LndHubCreateScreen) handleCreatedKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if s.btnIdx >= 0 && s.btnIdx < len(buttons) {
 			label := buttons[s.btnIdx]
@@ -479,31 +455,16 @@ func (s *LndHubCreateScreen) viewCreated(
 }
 
 func (s *LndHubCreateScreen) createdBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")))
-
-	buttons := s.createdButtons()
-	if len(buttons) > 1 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
+	binds := []key.Binding{kEnter}
+	if len(s.createdButtons()) > 1 {
+		binds = append(binds, buttonNav(s.btnIdx)...)
+	} else {
+		binds = append(binds, kSidebar)
 	}
-
-	binds = append(binds, kSidebar)
-
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
+		binds = append(binds, kShiftTabBar)
 	}
-
-	binds = append(binds, kQuit)
+	binds = append(binds, kBack, kQuit)
 	return binds
 }
 
