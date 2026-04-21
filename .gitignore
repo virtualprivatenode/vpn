@@ -1,20 +1,22 @@
 # Binary
+/rlvpn
 rlvpn-test*
-rlvpn-linux-*
 
 # Build
 release/
-*.exe
 
 # Go
 /vendor/
+*.test
+*.out
 
-# IDE / OS
-.DS_Store
+# IDE
 .idea/
 .vscode/
 
-# Test
-important.json
-testrun.sh
-whitepaper.md
+# OS
+.DS_Store
+
+# Dev
+notes/
+test-run.sh
