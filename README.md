@@ -12,11 +12,11 @@ No wrappers, no abstractions. Your keys, your node.
 <table>
   <tr>
     <td><img src="docs/images/create_wallet_dark.png" alt="Create Wallet Screen (Dark)" /></td>
-    <td><img src="docs/images/create_wallet_light.png" alt="Create Wallet Screen (Light)" /></td>
+    <td><img src="docs/images/channels_home_dark.png" alt="Channels Dashboard (Dark)" /></td>
   </tr>
   <tr>
-    <td><img src="docs/images/channels_dark.png" alt="Channels Dashboard (Dark)" /></td>
-    <td><img src="docs/images/channels_light.png" alt="Channels Dashboard (Light)" /></td>
+    <td><img src="docs/images/channels_home_light.png" alt="Channels Dashboard (Light)" /></td>
+    <td><img src="docs/images/system_home_light.png" alt="System Home (Light)" /></td>
   </tr>
 </table>
 
@@ -41,11 +41,10 @@ No wrappers, no abstractions. Your keys, your node.
 
 - Fresh Debian 13+ Box
 - 2 (v)CPU, 4+ GB RAM, 90+ GB SSD
-- [Mynymbox VPS with exact specs](https://client.mynymbox.io/store/custom/custom-vps-2-4-90-nl?aff=8)
 
 ### Quick Start
 
-SSH into your Server (computer) and run:
+SSH into your Server (Box) and run:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
@@ -82,7 +81,7 @@ five sections plus a dark/light theme toggle:
 - **Wallet** — send and receive Lightning payments; payment history
 - **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
 - **Add-On** — install and manage Syncthing (channel backup) and LndHub (Lightning accounts)
-- **System** — service status and logs; auto-unlock configuration; P2P mode upgrade; self-update
+- **System** — service status and logs; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
 
 Detail views open in tabs within each section. Press `ctrl+c` to quit
 and drop to a shell:
@@ -288,7 +287,7 @@ For the full setup guide, see
 - UFW firewall: SSH only (+ 9735, 8080 for hybrid P2P, 3000 for LndHub hybrid, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
 - Root SSH disabled after bootstrap
-- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled (password auth left on by default — toggle from the TUI once you've verified key auth works)
+- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth on by default (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
 - Services run as dedicated bitcoin system user
 - GPG signature verification for all software
 - Signing key hosted on independent keyserver with pinned fingerprint, downloaded as a file through Tor
