@@ -54,7 +54,7 @@ First, assign a temporary variable in your shell for the specific
 release you want to build:
 
 ```bash
-GIT_TAG="v0.4.0"
+GIT_TAG="v0.4.1"
 ```
 
 The project can then be cloned as follows:
@@ -92,7 +92,7 @@ Download the released binary from
 [GitHub Releases](https://github.com/ripsline/virtual-private-node/releases):
 
 ```bash
-VERSION="0.4.0"
+VERSION="0.4.1"
 
 wget -q "https://github.com/ripsline/virtual-private-node/releases/download/v${VERSION}/rlvpn-${VERSION}-amd64.tar.gz"
 wget -q "https://github.com/ripsline/virtual-private-node/releases/download/v${VERSION}/SHA256SUMS"

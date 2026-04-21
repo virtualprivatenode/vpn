@@ -4,7 +4,7 @@ set -eo pipefail
 # ═══════════════════════════════════════════════════════════
 # Virtual Private Node — Bootstrap Script
 #
-# This script runs as root on a fresh Debian 13+.
+# This script runs as root on a fresh Debian 13+ Box.
 # It creates the ripsline user, downloads the rlvpn binary,
 # configures auto-launch, and disables root SSH.
 #
@@ -12,11 +12,11 @@ set -eo pipefail
 # Phase 2: All remaining downloads route through Tor
 #
 # Usage:
-#   curl -sL ripsline.com/virtual-private-node.sh | bash
-#   curl -sL ripsline.com/virtual-private-node.sh | bash -s -- --testnet4
+#   curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
+#   curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash -s -- --testnet4
 # ═══════════════════════════════════════════════════════════
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 BINARY_NAME="rlvpn"
 ADMIN_USER="ripsline"
 
