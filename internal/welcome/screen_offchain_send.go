@@ -127,7 +127,7 @@ func (s *SendScreen) HelpBindings() []key.Binding {
 	case sendStepInFlight:
 		return waitingBindings()
 	case sendStepResult:
-		return resultBindings()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -359,12 +359,20 @@ func (s *SendScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus,
 			fetchPaymentHistoryCmd(
 				s.ctx.LndClient))
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }

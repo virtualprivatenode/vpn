@@ -101,19 +101,21 @@ func (s *P2PUpgradeScreen) Init() tea.Cmd {
 func (s *P2PUpgradeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// No-IP state: Done button only
+	// No-IP state
 	if s.step == p2pNoIP {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
-		case "up":
+		case "up", "shift+tab":
 			if s.ctx.HasTabs {
 				return s, emitFocusTabBar
 			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 		return s, nil
 	}
@@ -477,11 +479,7 @@ func (s *P2PUpgradeScreen) viewConfirm2(
 
 func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	if s.step == p2pNoIP {
-		return []key.Binding{
-			kEnterClose,
-			kSidebar,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 
 	if s.step == p2pProgress && s.progress != nil {

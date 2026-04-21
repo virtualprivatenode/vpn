@@ -167,7 +167,7 @@ func (s *ChannelOpenScreen) HelpBindings() []key.Binding {
 	case coStepOpening:
 		return waitingBindings()
 	case coStepResult:
-		return resultBindings()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -711,10 +711,18 @@ func (s *ChannelOpenScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus)
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }

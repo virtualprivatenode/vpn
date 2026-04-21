@@ -31,6 +31,7 @@ var (
 	kLeftRightCursor  = bind("←→", "cursor", "left", "right")
 	kUpTabBar         = bind("↑", "tab bar", "up")
 	kShiftTabBar      = bind("⇧tab", "tab bar", "shift+tab")
+	kUpShiftTabBar    = bind("↑/⇧tab", "tab bar", "up", "shift+tab")
 	kShiftTabBack     = bind("⇧tab", "back", "shift+tab")
 	kShiftTabButtons  = bind("⇧tab", "buttons", "shift+tab")
 	kShiftTabInput    = bind("⇧tab", "input", "shift+tab")
@@ -43,7 +44,6 @@ var (
 	kUpDownChannels   = bind("↑↓", "channels", "up", "down")
 
 	// Enter variants
-	kEnterDone         = bind("enter", "done", "enter")
 	kEnterOpen         = bind("enter", "open", "enter")
 	kEnterClose        = bind("enter", "close", "enter")
 	kEnterDetails      = bind("enter", "details", "enter")
@@ -124,7 +124,7 @@ func homeListBindings(
 func viewDetailBindings(hasTabs bool) []key.Binding {
 	binds := []key.Binding{kSidebar}
 	if hasTabs {
-		binds = append(binds, kShiftTabBar)
+		binds = append(binds, kUpShiftTabBar)
 	}
 	binds = append(binds, kBack, kQuit)
 	return binds
@@ -186,13 +186,19 @@ func waitingBindings() []key.Binding {
 }
 
 // ── Archetype: result screen ────────────────────────────
-// Completed action — dismiss with enter or backspace.
+// Completed action — enter closes tab, backspace goes to
+// parent, standard navigation (left→sidebar, up→tab bar).
 
-func resultBindings() []key.Binding {
-	return []key.Binding{
-		bind("enter/⌫", "close", "enter", "backspace"),
-		kQuit,
+func resultBindings(hasTabs bool) []key.Binding {
+	binds := []key.Binding{
+		kEnterClose,
+		kSidebar,
 	}
+	if hasTabs {
+		binds = append(binds, kUpShiftTabBar)
+	}
+	binds = append(binds, kBack, kQuit)
+	return binds
 }
 
 // ── Archetype: confirm dialog ───────────────────────────

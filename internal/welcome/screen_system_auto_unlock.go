@@ -145,20 +145,22 @@ func (s *AutoUnlockScreen) HandleKey(
 		return s, nil
 	}
 
-	// Done states: Done button only
+	// Done states
 	if s.state == auState_doneOK ||
 		s.state == auState_doneErr {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
-		case "up":
+		case "up", "shift+tab":
 			if s.ctx.HasTabs {
 				return s, emitFocusTabBar
 			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 		return s, nil
 	}
@@ -630,11 +632,7 @@ func (s *AutoUnlockScreen) HelpBindings() []key.Binding {
 	}
 	if s.state == auState_doneOK ||
 		s.state == auState_doneErr {
-		return []key.Binding{
-			kEnterClose,
-			kSidebar,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 
 	if s.mode == autoUnlockDisable {

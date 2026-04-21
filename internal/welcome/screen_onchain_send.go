@@ -148,7 +148,7 @@ func (s *OnChainSendScreen) HelpBindings() []key.Binding {
 	case ocStepBroadcast:
 		return waitingBindings()
 	case ocStepResult:
-		return resultBindings()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -492,12 +492,20 @@ func (s *OnChainSendScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			listUnspentCmd(s.ctx.LndClient),
 			fetchOnChainTxCmd(s.ctx.LndClient),
 			fetchStatus(s.ctx.Cfg, s.ctx.LndClient))
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }

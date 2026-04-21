@@ -123,7 +123,7 @@ func (s *SSHKeyAddScreen) HelpBindings() []key.Binding {
 	case sshAddStepWorking:
 		return waitingBindings()
 	case sshAddStepResult:
-		return resultBindings()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -328,9 +328,17 @@ func (s *SSHKeyAddScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		// Close this tab and refresh the parent list.
 		return s, tea.Batch(emitCloseTab, listSSHKeysCmd())
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }

@@ -108,19 +108,21 @@ func (s *WalletCreateScreen) Init() tea.Cmd {
 func (s *WalletCreateScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// Error state — Done button only
+	// Error state
 	if s.step == walletErr {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
-		case "up":
+		case "up", "shift+tab":
 			if s.ctx.HasTabs {
 				return s, emitFocusTabBar
 			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 		return s, nil
 	}
@@ -438,11 +440,7 @@ func (s *WalletCreateScreen) HelpBindings() []key.Binding {
 	}
 
 	if s.step == walletErr {
-		return []key.Binding{
-			kEnterClose,
-			kSidebar,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 
 	// Confirm step

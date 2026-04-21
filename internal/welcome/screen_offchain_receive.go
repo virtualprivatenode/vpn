@@ -133,7 +133,7 @@ func (s *ReceiveScreen) HelpBindings() []key.Binding {
 		return actionButtonBindings(
 			s.buttonIdx, s.ctx.HasTabs)
 	case recvStepPaid, recvStepExpired, recvStepError:
-		return resultBindings()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -401,12 +401,20 @@ func (s *ReceiveScreen) handlePaidKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus,
 			fetchPaymentHistoryCmd(
 				s.ctx.LndClient))
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -419,8 +427,16 @@ func (s *ReceiveScreen) handleExpiredKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, emitCloseTab
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -433,8 +449,16 @@ func (s *ReceiveScreen) handleErrorKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, emitCloseTab
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }

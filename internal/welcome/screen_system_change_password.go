@@ -191,10 +191,7 @@ func (s *ChangePasswordScreen) HelpBindings() []key.Binding {
 	case changePwStepWorking:
 		return []key.Binding{kQuit}
 	case changePwStepResult:
-		return []key.Binding{
-			kEnterDone,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -417,8 +414,16 @@ func (s *ChangePasswordScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, emitCloseTab
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
