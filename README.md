@@ -9,16 +9,14 @@ No wrappers, no abstractions. Your keys, your node.
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td><img src="docs/images/create_wallet_dark.png" alt="Create Wallet Screen (Dark)" /></td>
-    <td><img src="docs/images/create_wallet_light.png" alt="Create Wallet Screen (Light)" /></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/channels_dark.png" alt="Channels Dashboard (Dark)" /></td>
-    <td><img src="docs/images/channels_light.png" alt="Channels Dashboard (Light)" /></td>
-  </tr>
-</table>
+<p>
+  <img src="docs/images/create_wallet_dark.png" width="49%" />
+  <img src="docs/images/channels_home_dark.png" width="49%" />
+</p>
+<p>
+  <img src="docs/images/channels_home_light.png" width="49%" />
+  <img src="docs/images/system_home_light.png" width="49%" />
+</p>
 
 ## What gets installed
 
@@ -41,11 +39,10 @@ No wrappers, no abstractions. Your keys, your node.
 
 - Fresh Debian 13+ Box
 - 2 (v)CPU, 4+ GB RAM, 90+ GB SSD
-- [Mynymbox VPS with exact specs](https://client.mynymbox.io/store/custom/custom-vps-2-4-90-nl?aff=8)
 
 ### Quick Start
 
-SSH into your Server (computer) and run:
+SSH into your Server (Box) and run:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
@@ -73,87 +70,6 @@ This works for `curl | sudo bash`, `sudo su -` followed by curl, and
 bare-metal root installs. If no key is found, a random password is
 printed at the end and you can add a key later from the TUI.
 
-### Dashboard
-
-Every SSH login as `ripsline` opens a terminal UI with a sidebar of
-five sections plus a dark/light theme toggle:
-
-- **Channels** — open, close, and manage Lightning channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
-- **Wallet** — send and receive Lightning payments; payment history
-- **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
-- **Add-On** — install and manage Syncthing (channel backup) and LndHub (Lightning accounts)
-- **System** — service status and logs; auto-unlock configuration; P2P mode upgrade; self-update
-
-Detail views open in tabs within each section. Press `ctrl+c` to quit
-and drop to a shell:
-
-```bash
-bitcoin-cli getblockchaininfo
-bitcoin-cli getpeerinfo
-
-lncli getinfo
-lncli walletbalance
-
-# Services
-systemctl status bitcoind
-systemctl status tor@default
-systemctl status lnd
-systemctl status lndhub
-systemctl status syncthing
-```
-
-### Build from Source
-
-```bash
-apt update && apt install -y git wget sudo curl
-
-cd /tmp
-wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
-source ~/.profile
-
-cd ~
-git clone https://github.com/ripsline/virtual-private-node.git
-cd virtual-private-node
-go mod tidy
-go build -o rlvpn ./cmd/
-sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
-```
-
-The bootstrap script detects that `rlvpn` is already installed and
-skips the download.
-
-### Software Verification
-
-All software is verified with GPG signatures and SHA256 checksums:
-
-- **Bitcoin Core** — 5 trusted builder keys from
-  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
-  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
-  key is a hard stop.
-- **LND** — Roasbeef's signing key verified against known fingerprint.
-- **LndHub.go** — built from source at pinned release tag (v1.0.2).
-  No prebuilt binary is used. The Go toolchain compiles directly from
-  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
-- **rlvpn binary** — signed with a key hosted on an independent
-  keyserver (not GitHub). The bootstrap downloads the key file directly
-  through Tor rather than using keyserver protocols, so compromising
-  one source does not compromise both the binary and the key.
-
-Verification failure is a hard stop.
-
-After installation, review the log:
-
-```bash
-cat /var/log/rlvpn.log
-```
-
-For manual binary verification before installation, see
-[Release Verification](docs/verifying.md).
-
 ### Wallet Creation
 
 On first TUI launch after bootstrap, you'll go straight to the wallet
@@ -173,6 +89,35 @@ A note on cancellation: pressing `ctrl+c` during the password prompt is
 a legitimate escape hatch (no seed has been generated yet, nothing is
 written to disk). Once you've seen your seed, `ctrl+c` is blocked by
 design — the only way forward is typing the confirmation phrase.
+
+### Dashboard
+
+Every SSH login as `ripsline` opens a terminal UI with a sidebar of
+five sections plus a dark/light theme toggle:
+
+- **Channels** — open, close, and manage Lightning channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
+- **Wallet** — send and receive Lightning payments; payment history
+- **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
+- **Add-On** — install and manage Syncthing (channel backup) and LndHub (Lightning accounts)
+- **System** — service status and logs; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
+
+Detail views open in tabs within each section. Press `ctrl+c` to quit
+and drop to a shell:
+
+```bash
+bitcoin-cli getblockchaininfo
+bitcoin-cli getpeerinfo
+
+lncli getinfo
+lncli walletbalance
+
+# Services
+systemctl status bitcoind
+systemctl status tor@default
+systemctl status lnd
+systemctl status lndhub
+systemctl status syncthing
+```
 
 ### Connecting Zeus Wallet
 
@@ -288,7 +233,7 @@ For the full setup guide, see
 - UFW firewall: SSH only (+ 9735, 8080 for hybrid P2P, 3000 for LndHub hybrid, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
 - Root SSH disabled after bootstrap
-- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled (password auth left on by default — toggle from the TUI once you've verified key auth works)
+- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth on by default (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
 - Services run as dedicated bitcoin system user
 - GPG signature verification for all software
 - Signing key hosted on independent keyserver with pinned fingerprint, downloaded as a file through Tor
@@ -336,6 +281,58 @@ Verify Tor routing after install:
 ```bash
 grep "Tor" /var/log/rlvpn.log
 ```
+
+### Software Verification
+
+All software is verified with GPG signatures and SHA256 checksums:
+
+- **Bitcoin Core** — 5 trusted builder keys from
+  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
+  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
+  key is a hard stop.
+- **LND** — Roasbeef's signing key verified against known fingerprint.
+- **LndHub.go** — built from source at pinned release tag (v1.0.2).
+  No prebuilt binary is used. The Go toolchain compiles directly from
+  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
+- **rlvpn binary** — signed with a key hosted on an independent
+  keyserver (not GitHub). The bootstrap downloads the key file directly
+  through Tor rather than using keyserver protocols, so compromising
+  one source does not compromise both the binary and the key.
+
+Verification failure is a hard stop.
+
+After installation, review the log:
+
+```bash
+cat /var/log/rlvpn.log
+```
+
+For manual binary verification before installation, see
+[Release Verification](docs/verifying.md).
+
+### Build from Source
+
+```bash
+sudo apt update && sudo apt install -y git wget sudo curl
+
+cd /tmp
+wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+
+cd ~
+git clone https://github.com/ripsline/virtual-private-node.git
+cd virtual-private-node
+go mod tidy
+go build -o rlvpn ./cmd/
+sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
+curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
+```
+
+The bootstrap script detects that `rlvpn` is already installed and
+skips the download.
 
 ### Architecture
 

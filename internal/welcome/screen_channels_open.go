@@ -17,7 +17,7 @@ type chanOpenStep int
 
 const (
 	coStepInput      chanOpenStep = iota // peer + amount + toggles + buttons
-	coStepCustomPeer                     // pubkey + host fields + Cancel/Continue
+	coStepCustomPeer                     // pubkey + host fields + Go Back/Continue
 	coStepConfirm                        // summary + Go Back / Confirm
 	coStepOpening                        // in-flight
 	coStepResult                         // success or error
@@ -59,7 +59,7 @@ type ChannelOpenScreen struct {
 
 	// Amount selection
 	amountPreset int
-	amountInput  textinput.Model
+	amountInput  AmountInput
 	amount       int64
 
 	// Toggles
@@ -93,9 +93,9 @@ func NewChannelOpenScreen(
 		ctx:          ctx,
 		step:         coStepInput,
 		peerList:     channelOpenPeers(),
-		amountInput:  newChanAmountInput(),
+		amountInput:  NewAmountInput(),
 		private:      true,
-		taproot:      true,
+		taproot:      false,
 		btnIdx:       1,
 		pubkeyInput:  newChanPubkeyInput(),
 		hostInput:    newChanHostInput(),
@@ -162,11 +162,12 @@ func (s *ChannelOpenScreen) HelpBindings() []key.Binding {
 	case coStepCustomPeer:
 		return s.customPeerBindings()
 	case coStepConfirm:
-		return s.confirmBindings()
+		return actionButtonBindings(
+			s.confirmBtnIdx, s.ctx.HasTabs)
 	case coStepOpening:
-		return s.openingBindings()
+		return waitingBindings()
 	case coStepResult:
-		return newResultBindings().ShortHelp()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -248,6 +249,8 @@ func (s *ChannelOpenScreen) handlePeerListKey(
 		s.focusZone = coZoneAmounts
 		s.amountPreset = 0
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -261,18 +264,14 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 		return s, tea.Quit
 	case "left":
 		if isCustom &&
-			s.amountInput.Value() != "" {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			!s.amountInput.Empty() {
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 	case "right":
 		if isCustom {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, nil
@@ -286,8 +285,11 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 			s.amountPreset--
 			s.amountConfirmed = false
 		} else {
-			// Top of amount list: cross to peers
-			s.focusZone = coZonePeers
+			// Top of amount list: cross to peers.
+			// Land on the last peer row — the user is
+			// coming from below and this is the closest
+			// row to where they were.
+			s.enterPeersBackward()
 			s.peerIdx = len(s.peerList)
 		}
 		return s, nil
@@ -296,18 +298,32 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 			s.amountPreset < len(amountPresets)-1 {
 			s.amountPreset++
 			s.amountConfirmed = false
-		} else {
-			// Bottom of amount list: cross to toggles
-			if isCustom {
-				s.amountInput.Blur()
+			if s.amountPreset == len(amountPresets)-1 {
+				s.amountInput.Focus()
 			}
-			s.focusZone = coZoneToggles
-			s.toggleIdx = 0
+			return s, nil
 		}
+		// Bottom of amount list: cross to toggles.
+		// Custom mode auto-confirms on the way out —
+		// typing a value and moving away should use
+		// that value. Invalid → error and stay.
+		if isCustom {
+			if !s.confirmCustomAmountAndAdvance(
+				coZoneToggles) {
+				return s, nil
+			}
+			return s, nil
+		}
+		s.focusZone = coZoneToggles
+		s.toggleIdx = 0
 		return s, nil
 	case "tab":
 		if isCustom {
-			s.amountInput.Blur()
+			if !s.confirmCustomAmountAndAdvance(
+				coZoneToggles) {
+				return s, nil
+			}
+			return s, nil
 		}
 		s.focusZone = coZoneToggles
 		s.toggleIdx = 0
@@ -316,39 +332,29 @@ func (s *ChannelOpenScreen) handleAmountListKey(
 		if isCustom {
 			s.amountInput.Blur()
 		}
-		s.focusZone = coZonePeers
+		s.enterPeersBackward()
 		return s, nil
 	case "backspace":
 		if isCustom {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if isCustom {
-			// Validate before confirming
-			_, err := parseCustomAmount(
-				s.amountInput.Value())
-			if err != nil {
-				s.error = err.Error()
+			if !s.confirmCustomAmountAndAdvance(
+				coZoneToggles) {
 				return s, nil
 			}
-			s.error = ""
+			return s, nil
 		}
 		s.amountConfirmed = true
-		if isCustom {
-			s.amountInput.Blur()
-		}
 		s.focusZone = coZoneToggles
 		s.toggleIdx = 0
 		return s, nil
 	}
 	if isCustom {
-		var cmd tea.Cmd
-		s.amountInput, cmd =
-			s.amountInput.Update(tea.Msg(msg))
+		cmd := s.amountInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
 	return s, nil
@@ -376,7 +382,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		if s.toggleIdx > 0 {
 			s.toggleIdx--
 		} else {
-			s.focusZone = coZoneAmounts
+			s.enterAmountsBackward()
 		}
 		return s, nil
 	case "down":
@@ -390,7 +396,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		s.focusZone = coZoneButtons
 		return s, nil
 	case "shift+tab":
-		s.focusZone = coZoneAmounts
+		s.enterAmountsBackward()
 		return s, nil
 	case "enter":
 		switch s.toggleIdx {
@@ -400,6 +406,8 @@ func (s *ChannelOpenScreen) handleToggleKey(
 			s.taproot = !s.taproot
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -423,12 +431,12 @@ func (s *ChannelOpenScreen) handleButtonKey(
 		}
 		return s, nil
 	case "up":
-		s.focusZone = coZoneToggles
+		s.enterTogglesBackward()
 		return s, nil
 	case "tab":
 		return s, nil
 	case "shift+tab":
-		s.focusZone = coZoneToggles
+		s.enterTogglesBackward()
 		return s, nil
 	case "enter":
 		switch s.btnIdx {
@@ -438,6 +446,8 @@ func (s *ChannelOpenScreen) handleButtonKey(
 			return s.submitOpenChannel()
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -501,13 +511,10 @@ func (s *ChannelOpenScreen) handleCustomPubkeyKey(
 		}
 		return s, nil
 	case "backspace":
-		if s.pubkeyInput.Value() != "" {
-			var cmd tea.Cmd
-			s.pubkeyInput, cmd =
-				s.pubkeyInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
+		var cmd tea.Cmd
+		s.pubkeyInput, cmd =
+			s.pubkeyInput.Update(tea.Msg(msg))
+		return s, cmd
 	case "enter":
 		s.pubkeyInput.Blur()
 		s.hostInput.Focus()
@@ -562,13 +569,10 @@ func (s *ChannelOpenScreen) handleCustomHostKey(
 		s.customZone = coCustomZonePubkey
 		return s, nil
 	case "backspace":
-		if s.hostInput.Value() != "" {
-			var cmd tea.Cmd
-			s.hostInput, cmd =
-				s.hostInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
+		var cmd tea.Cmd
+		s.hostInput, cmd =
+			s.hostInput.Update(tea.Msg(msg))
+		return s, cmd
 	case "enter":
 		s.hostInput.Blur()
 		s.customZone = coCustomZoneButtons
@@ -611,13 +615,17 @@ func (s *ChannelOpenScreen) handleCustomButtonKey(
 		return s, nil
 	case "enter":
 		switch s.customBtnIdx {
-		case 0: // Cancel
+		case 0: // Go Back
 			s.error = ""
 			s.step = coStepInput
 			return s, nil
 		case 1: // Continue
 			return s.submitCustomPeer()
 		}
+		return s, nil
+	case "backspace":
+		s.error = ""
+		s.step = coStepInput
 		return s, nil
 	}
 	return s, nil
@@ -703,10 +711,18 @@ func (s *ChannelOpenScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus)
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -730,9 +746,7 @@ func (s *ChannelOpenScreen) handlePaste(
 	if s.step == coStepInput &&
 		s.focusZone == coZoneAmounts &&
 		s.amountPreset == len(amountPresets)-1 {
-		var cmd tea.Cmd
-		s.amountInput, cmd =
-			s.amountInput.Update(msg)
+		cmd := s.amountInput.Update(msg)
 		return s, cmd
 	}
 	return s, nil
@@ -756,6 +770,101 @@ func (s *ChannelOpenScreen) handleOpenResult(
 
 // ── Form actions ───────────────────────────────────────
 
+// validateCustomAmount checks the custom amount field is
+// non-empty and within the 20,000 — 1,000,000,000 sats
+// channel-size bounds. The upper bound matches LND's wumbo
+// channel limit (10 BTC) enabled via protocol.wumbo-channels
+// in lnd.conf.
+func (s *ChannelOpenScreen) validateCustomAmount() (int64, string) {
+	if s.amountInput.Empty() {
+		return 0, "empty amount"
+	}
+	n := s.amountInput.Sats()
+	if n < 20000 {
+		return 0, "min 20,000 sats"
+	}
+	if n > 1000000000 {
+		return 0, "max 1,000,000,000 sats (10 BTC)"
+	}
+	return n, ""
+}
+
+// confirmCustomAmountAndAdvance validates the custom
+// amount, commits it to s.amount, and moves focus to the
+// given zone. On validation failure, sets the error and
+// returns false without changing focus. Called from the
+// three forward-navigation handlers (enter, down, tab)
+// when the user is on the custom amount row.
+func (s *ChannelOpenScreen) confirmCustomAmountAndAdvance(
+	toZone int,
+) bool {
+	n, errMsg := s.validateCustomAmount()
+	if errMsg != "" {
+		s.error = errMsg
+		return false
+	}
+	s.error = ""
+	s.amount = n
+	s.amountConfirmed = true
+	s.amountInput.Blur()
+	s.focusZone = toZone
+	if toZone == coZoneToggles {
+		s.toggleIdx = 0
+	}
+	return true
+}
+
+// ── Backward-entry helpers ─────────────────────────────
+//
+// When focus returns to a zone from forward (via
+// shift+tab or up), that zone's "confirmed" state is
+// dropped — the user is re-entering to potentially make
+// changes. The cursor lands on the same item they
+// previously committed (so they can see where they were),
+// but there's no checkmark. Committing requires explicit
+// forward navigation (enter/tab/down).
+//
+// Each helper owns one zone's reset logic. Handlers in
+// other zones call these when their keystrokes cause a
+// backward transition, rather than inlining the reset.
+// See design-decisions.md: "Backward-entry helpers for
+// multi-zone form screens."
+
+// enterPeersBackward: focus returned to peers from the
+// amounts zone. Decommits the peer while keeping the
+// cursor on the previously-selected row.
+func (s *ChannelOpenScreen) enterPeersBackward() {
+	s.focusZone = coZonePeers
+	s.peerConfirmed = false
+	s.error = ""
+}
+
+// enterAmountsBackward: focus returned to amounts from
+// the toggles zone. Decommits the amount. If on the
+// Custom row, refocuses the input so the cursor is
+// visible for immediate editing. The entered value
+// (if any) is preserved in s.amountInput.
+func (s *ChannelOpenScreen) enterAmountsBackward() {
+	s.focusZone = coZoneAmounts
+	s.amountConfirmed = false
+	s.error = ""
+	isCustom := s.amountPreset == len(amountPresets)-1
+	if isCustom {
+		s.amountInput.Focus()
+	}
+}
+
+// enterTogglesBackward: focus returned to toggles from
+// the buttons zone. Toggles have no "draft vs committed"
+// distinction — each toggle is its own commit — so the
+// only state to reset is the error message. Included for
+// symmetry so the navigation handlers in the buttons zone
+// don't inline the focus assignment.
+func (s *ChannelOpenScreen) enterTogglesBackward() {
+	s.focusZone = coZoneToggles
+	s.error = ""
+}
+
 func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 	s.peerIdx = 0
 	s.peerConfirmed = false
@@ -764,9 +873,9 @@ func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 	s.customAlias = ""
 	s.amountPreset = 0
 	s.amountConfirmed = false
-	s.amountInput = newChanAmountInput()
+	s.amountInput.Clear()
 	s.private = true
-	s.taproot = true
+	s.taproot = false
 	s.toggleIdx = 0
 	s.focusZone = coZonePeers
 	s.btnIdx = 1
@@ -798,13 +907,12 @@ func (s *ChannelOpenScreen) submitOpenChannel() (
 	isCustom :=
 		s.amountPreset == len(amountPresets)-1
 	if isCustom {
-		amt, err := parseCustomAmount(
-			s.amountInput.Value())
-		if err != nil {
-			s.error = err.Error()
+		n, errMsg := s.validateCustomAmount()
+		if errMsg != "" {
+			s.error = errMsg
 			return s, nil
 		}
-		s.amount = amt
+		s.amount = n
 	} else {
 		s.amount = amountPresets[s.amountPreset]
 	}
@@ -894,7 +1002,9 @@ func (s *ChannelOpenScreen) viewInput(
 
 	balText := "unknown"
 	if s.ctx.Status.lndBalance != "" {
-		balText = s.ctx.Status.lndBalance + " sats"
+		balText = formatSats(
+			parseBalance(s.ctx.Status.lndBalance)) +
+			" sats"
 	}
 	p.field("On-chain: ", balText)
 	p.blank()
@@ -985,9 +1095,8 @@ func (s *ChannelOpenScreen) viewInput(
 			if inputW > 20 {
 				inputW = 20
 			}
-			ai := s.amountInput
-			ai.SetWidth(inputW)
-			p.line("   " + ai.View())
+			s.amountInput.SetWidth(inputW)
+			p.line("   " + s.amountInput.View())
 			continue
 		}
 		p.line(fmt.Sprintf(" %s %s",
@@ -1025,41 +1134,50 @@ func (s *ChannelOpenScreen) addToggles(
 		focused && s.toggleIdx == 1))
 }
 
-// renderToggleSwitch renders a Sparrow-style toggle:
+// renderToggleSwitch renders a bracket-style toggle with
+// both options visible. The knob slides left/right inside
+// the housing to indicate the active selection.
 //
-//	Private    ●━━○   (off)
-//	Private    ○━━●   (on, highlighted with theme color)
+//	Public [ ━━● ] Private   (on=true, Private selected)
+//	Legacy [ ●━━ ] Taproot   (on=false, Legacy selected)
 func renderToggleSwitch(
 	label string, altLabel string,
 	on bool, focused bool,
 ) string {
-	displayLabel := altLabel
-	if on {
-		displayLabel = label
-	}
-	padded := fmt.Sprintf("%-12s", displayLabel)
+	leftW := 8 // right-align left labels for alignment
 
-	var toggle string
+	activeStyle := theme.Value
+	if focused {
+		activeStyle = theme.Action
+	}
+
+	var leftStyled, rightStyled, toggle string
+	bracket := theme.Dim
 	if on {
-		knob := theme.Action.Render("●")
-		track := theme.Action.Render("━━")
-		dot := theme.Dim.Render("○")
-		toggle = dot + track + knob
+		leftStyled = theme.Dim.Render(
+			fmt.Sprintf("%*s", leftW, altLabel))
+		rightStyled = activeStyle.Render(label)
+		toggle = bracket.Render("[ ") +
+			theme.Dim.Render("━━") +
+			activeStyle.Render("●") +
+			bracket.Render(" ]")
 	} else {
-		knob := theme.Value.Render("●")
-		track := theme.Dim.Render("━━")
-		dot := theme.Dim.Render("○")
-		toggle = knob + track + dot
+		leftStyled = activeStyle.Render(
+			fmt.Sprintf("%*s", leftW, altLabel))
+		rightStyled = theme.Dim.Render(label)
+		toggle = bracket.Render("[ ") +
+			activeStyle.Render("●") +
+			theme.Dim.Render("━━") +
+			bracket.Render(" ]")
 	}
 
 	prefix := "  "
-	labelStyle := theme.Value
 	if focused {
 		prefix = " " + theme.Action.Render("▸")
-		labelStyle = theme.Action
 	}
 
-	return prefix + " " + labelStyle.Render(padded) + toggle
+	return prefix + leftStyled + " " +
+		toggle + " " + rightStyled
 }
 
 func (s *ChannelOpenScreen) viewCustomPeer(
@@ -1071,12 +1189,12 @@ func (s *ChannelOpenScreen) viewCustomPeer(
 	isFocused := s.ctx.ContentFocused
 
 	p.input("Node Pubkey:",
-		s.pubkeyInput,
+		s.pubkeyInput.View(),
 		isFocused &&
 			s.customZone == coCustomZonePubkey)
 	p.blank()
 	p.input("Host (host:port):",
-		s.hostInput,
+		s.hostInput.View(),
 		isFocused &&
 			s.customZone == coCustomZoneHost)
 
@@ -1085,7 +1203,7 @@ func (s *ChannelOpenScreen) viewCustomPeer(
 	btnFocused := isFocused &&
 		s.customZone == coCustomZoneButtons
 	return p.renderWithBottomButtons(
-		[]string{"Cancel", "Continue"},
+		[]string{"Go Back", "Continue"},
 		s.customBtnIdx, btnFocused, h)
 }
 
@@ -1110,7 +1228,7 @@ func (s *ChannelOpenScreen) viewConfirm(
 	p.blank()
 
 	p.labelLine("Pubkey:")
-	p.monoWrap(s.selectedPubkey())
+	p.mono(s.selectedPubkey())
 	p.blank()
 	p.warn("Spend " +
 		formatSats(s.amount) + " sats?")
@@ -1181,172 +1299,49 @@ func (s *ChannelOpenScreen) inputBindings() []key.Binding {
 
 func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "select")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "confirm")),
+		kUpDownSelect, kTabNext, kEnterConfirm,
 		kSidebar,
 	}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
+		binds = append(binds, kShiftTabBack)
 	}
-	binds = append(binds, kQuit)
+	binds = append(binds, kBack, kQuit)
 	return binds
 }
 
 func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "select")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "confirm")),
-		kSidebar,
+	return []key.Binding{
+		kUpDownSelect, kTabNext, kShiftTabBack,
+		kEnterConfirm, kSidebar, kBack, kQuit,
 	}
-	binds = append(binds, kQuit)
-	return binds
 }
 
 func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "toggle")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "toggle")),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")),
+	return []key.Binding{
+		bind("←→", "toggle", "left", "right"),
+		kEnterToggle, kTabNext, kShiftTabBack, kBack, kQuit,
 	}
-	binds = append(binds, kQuit)
-	return binds
 }
 
 func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "back")))
-	binds = append(binds, kQuit)
+	binds := buttonNav(s.btnIdx)
+	binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
 	return binds
 }
 
 func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 	switch s.customZone {
 	case coCustomZonePubkey, coCustomZoneHost:
-		binds := []key.Binding{
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "cursor")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")),
-			kSidebar,
+		return []key.Binding{
+			kLeftRightCursor, kTabNext,
+			kShiftTabBack, kSidebar, kQuit,
 		}
-		binds = append(binds, kQuit)
-		return binds
 	case coCustomZoneButtons:
-		var binds []key.Binding
-		if s.customBtnIdx == 0 {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left"),
-					key.WithHelp("←", "sidebar")),
-				key.NewBinding(
-					key.WithKeys("right"),
-					key.WithHelp("→", "button")))
-		} else {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left", "right"),
-					key.WithHelp("←→", "buttons")))
-		}
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
-		binds = append(binds, kQuit)
+		binds := buttonNav(s.customBtnIdx)
+		binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
 		return binds
 	}
 	return nil
-}
-
-func (s *ChannelOpenScreen) confirmBindings() []key.Binding {
-	var binds []key.Binding
-	if s.confirmBtnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kBack)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *ChannelOpenScreen) openingBindings() []key.Binding {
-	return []key.Binding{kQuit}
 }
 
 // ── channelOpenPeers ───────────────────────────────────

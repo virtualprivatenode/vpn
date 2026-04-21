@@ -242,7 +242,6 @@ var (
 	FrameBorder lipgloss.Style
 
 	AddonBorderNormal lipgloss.Style
-	AddonBorderActive lipgloss.Style
 	AddonTitleNormal  lipgloss.Style
 	AddonTitleActive  lipgloss.Style
 )
@@ -358,7 +357,6 @@ func applyStyles() {
 
 	// Addon cards
 	AddonBorderNormal = lipgloss.NewStyle().Foreground(ColorGrayed)
-	AddonBorderActive = lipgloss.NewStyle().Foreground(ColorPrimary)
 	AddonTitleNormal = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
 	AddonTitleActive = lipgloss.NewStyle().
 		Foreground(ColorPrimary).

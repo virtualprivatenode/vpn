@@ -1,9 +1,6 @@
 package welcome
 
 import (
-	"encoding/hex"
-	"fmt"
-	"sort"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,33 +32,37 @@ const (
 type tabKind int
 
 const (
-	tabMain             tabKind = iota // Main view for current section
-	tabChannel                         // Channel detail
-	tabPayment                         // Payment detail
-	tabSend                            // ⚡ Send payment flow
-	tabReceive                         // ⚡ Receive payment flow
-	tabPairing                         // Pairing screen
-	tabOnChain                         // ⛓ On-chain send flow
-	tabOCReceive                       // ⛓ On-chain receive flow
-	tabSyncthing                       //
-	tabSyncthingDevice                 // Syncthing device detail
-	tabSyncthingWebUI                  // Syncthing Web UI
-	tabSyncthingPair                   // Syncthing pair device flow
-	tabLndHub                          //
-	tabLndHubAccount                   // LndHub account detail
-	tabLndHubCreate                    // LndHub create account flow
-	tabOpenChannel                     // Channel open flow
-	tabCloseChannel                    // Channel close flow
-	tabOnChainTx                       // on-chain transaction detail
-	tabUtxoDetail                      // UTXO detail with label edit
-	tabChannelHistory                  // channel history view
-	tabSyncthingInstall                // Syncthing install flow
-	tabLndHubInstall                   // LndHub install flow
-	tabP2PUpgrade                      // P2P mode upgrade flow
-	tabSelfUpdate                      // Self-update flow
-	tabAutoUnlock                      // Auto-unlock configuration flow
-	tabWalletCreate                    // Wallet creation flow
-	tabNodeInfo                        // Receive channel / node info screen
+	tabMain              tabKind = iota // Main view for current section
+	tabChannel                          // Channel detail
+	tabPayment                          // Payment detail
+	tabSend                             // ⚡ Send payment flow
+	tabReceive                          // ⚡ Receive payment flow
+	tabPairing                          // Pairing screen
+	tabOnChain                          // ⛓ On-chain send flow
+	tabOCReceive                        // ⛓ On-chain receive flow
+	tabSyncthing                        //
+	tabSyncthingDevice                  // Syncthing device detail
+	tabSyncthingWebUI                   // Syncthing Web UI
+	tabSyncthingPair                    // Syncthing pair device flow
+	tabLndHub                           //
+	tabLndHubAccount                    // LndHub account detail
+	tabLndHubCreate                     // LndHub create account flow
+	tabOpenChannel                      // Channel open flow
+	tabOnChainTx                        // on-chain transaction detail
+	tabUtxoDetail                       // UTXO detail with label edit
+	tabChannelHistory                   // channel history view
+	tabSyncthingInstall                 // Syncthing install flow
+	tabLndHubInstall                    // LndHub install flow
+	tabP2PUpgrade                       // P2P mode upgrade flow
+	tabSelfUpdate                       // Self-update flow
+	tabAutoUnlock                       // Auto-unlock configuration flow
+	tabWalletCreate                     // Wallet creation flow
+	tabNodeInfo                         // Receive channel / node info screen
+	tabSSHKeys                          // SSH key management
+	tabSSHKeyDetail                     // SSH key detail (per-key)
+	tabSSHKeyAdd                        // SSH key add flow
+	tabSSHPasswordAuth                  // SSH password auth toggle
+	tabSSHChangePassword                // change login password
 )
 
 type openTab struct {
@@ -78,7 +79,17 @@ type openTab struct {
 	// auto-unlock swap in update.go) explicitly
 	// preserves this field for that reason.
 	Section int
-	Screen  Screen // L16: owns all state for this tab's content (nil = legacy path)
+	// Parent declares which tab kind owns this tab.
+	// Zero means "section home is the parent" (top-
+	// level detail tabs opened from home screens).
+	// Non-zero means this tab is a child of another
+	// detail tab (e.g. tabSyncthingDevice's Parent is
+	// tabSyncthing). Used by closeTab for cascade-
+	// close and by focusParentMsg for backspace
+	// navigation. No grandchild tabs exist — depth
+	// is at most two levels.
+	Parent tabKind
+	Screen Screen // L16: owns all state for this tab's content (nil = legacy path)
 }
 
 type feeTier struct {
@@ -90,6 +101,14 @@ type feeTier struct {
 type svcActionDoneMsg struct{}
 type tickMsg time.Time
 type latestVersionMsg string
+
+// tabActivatedMsg is delivered to a screen's HandleMsg
+// when the user navigates to (or lands on) the screen's
+// tab. Screens opt in by handling it — those that don't
+// care silently ignore it via the default fall-through.
+// Used to refresh stale data without replacing the screen
+// or its in-progress state.
+type tabActivatedMsg struct{}
 
 type lndhubAccountCreatedMsg struct {
 	account *installer.LndHubAccount
@@ -181,17 +200,18 @@ type labelTxMsg struct {
 }
 
 type channelInfo struct {
-	ChanID        uint64
-	ChannelPoint  string
-	PeerAlias     string
-	RemotePubkey  string
-	Capacity      int64
-	LocalBalance  int64
-	RemoteBalance int64
-	Active        bool
-	Private       bool
-	Initiator     bool
-	Pending       bool
+	ChanID         uint64
+	ChannelPoint   string
+	PeerAlias      string
+	RemotePubkey   string
+	Capacity       int64
+	LocalBalance   int64
+	RemoteBalance  int64
+	Active         bool
+	Private        bool
+	Initiator      bool
+	Pending        bool
+	CommitmentType string
 }
 
 type channelHistoryEntry struct {
@@ -398,296 +418,6 @@ func Show(cfg *config.AppConfig, version string) {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchStatus(m.cfg, m.lndClient),
-		fetchLatestVersion(),
-		tickEvery(m.pollInterval()))
-}
-
-func tickEvery(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
-}
-
-func fetchLatestVersion() tea.Cmd {
-	return func() tea.Msg {
-		return latestVersionMsg(
-			installer.CheckLatestVersion())
-	}
-}
-
-func pairSyncthingDeviceCmd(
-	deviceID string,
-) tea.Cmd {
-	return func() tea.Msg {
-		err := installer.PairSyncthingDevice(deviceID)
-		return syncthingPairedMsg{
-			deviceID: deviceID, err: err}
-	}
-}
-
-func removeSyncthingDeviceCmd(
-	deviceID string,
-) tea.Cmd {
-	return func() tea.Msg {
-		err := installer.UnpairSyncthingDevice(deviceID)
-		return syncthingRemovedMsg{
-			deviceID: deviceID, err: err}
-	}
-}
-
-func openChannelCmd(
-	client *lndrpc.Client, pubkey, host string,
-	amount int64, private bool, taproot bool,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return channelOpenResultMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		if host != "" {
-			if err := client.ConnectPeer(
-				pubkey, host); err != nil {
-				logger.TUI(
-					"Peer connect warning: %v", err)
-			}
-		}
-		if err := client.WaitForPeer(
-			pubkey, 60*time.Second); err != nil {
-			return channelOpenResultMsg{
-				err: fmt.Errorf(
-					"could not connect: %v", err)}
-		}
-		result, err := client.OpenChannel(
-			pubkey, amount, private, taproot)
-		if err != nil {
-			return channelOpenResultMsg{err: err}
-		}
-		return channelOpenResultMsg{
-			txid: result.FundingTxID}
-	}
-}
-
-func closeChannelCmd(
-	client *lndrpc.Client,
-	chanPoint string,
-	force bool,
-	satPerVbyte uint64,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return closeChannelMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		result, err := client.CloseChannel(
-			chanPoint, force, satPerVbyte)
-		if err != nil {
-			return closeChannelMsg{err: err}
-		}
-		return closeChannelMsg{
-			txid: result.ClosingTxid}
-	}
-}
-
-func fetchClosedChannelsCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return closedChannelsMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		channels, err := client.ListClosedChannels()
-		return closedChannelsMsg{
-			channels: channels, err: err}
-	}
-}
-
-func getNewAddressCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return newAddressMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		addr, err := client.GetNewAddress()
-		if err != nil {
-			return newAddressMsg{err: err}
-		}
-		return newAddressMsg{address: addr.Address}
-	}
-}
-
-func createInvoiceCmd(
-	client *lndrpc.Client, amount int64, memo string,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return invoiceCreatedMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		inv, err := client.AddInvoice(amount, memo)
-		if err != nil {
-			return invoiceCreatedMsg{err: err}
-		}
-		return invoiceCreatedMsg{
-			payReq:      inv.PaymentRequest,
-			paymentHash: inv.PaymentHash,
-			amountSats:  inv.AmountSats,
-		}
-	}
-}
-
-func waitForInvoiceCmd(
-	client *lndrpc.Client, paymentHash string,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return invoiceSettledMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		hashBytes, err := hex.DecodeString(paymentHash)
-		if err != nil {
-			return invoiceSettledMsg{err: err}
-		}
-		inv, err := client.WaitForInvoiceSettlement(
-			hashBytes, 3600*time.Second)
-		if err != nil {
-			return invoiceSettledMsg{err: err}
-		}
-		return invoiceSettledMsg{
-			settled: inv.Settled,
-			expired: inv.IsExpired,
-		}
-	}
-}
-
-func decodePayReqCmd(
-	client *lndrpc.Client, payReq string,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return payReqDecodedMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		decoded, err := client.DecodePayReq(payReq)
-		if err != nil {
-			return payReqDecodedMsg{err: err}
-		}
-		return payReqDecodedMsg{decoded: decoded}
-	}
-}
-
-func sendPaymentCmd(
-	client *lndrpc.Client, payReq string,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return sendPaymentResultMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		result, err := client.SendPayment(payReq)
-		if err != nil {
-			return sendPaymentResultMsg{err: err}
-		}
-		return sendPaymentResultMsg{result: result}
-	}
-}
-
-func fetchPaymentHistoryCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return paymentHistoryMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		invoices, err := client.ListInvoices(50)
-		if err != nil {
-			logger.TUI("ListInvoices: %v", err)
-		}
-		payments, err := client.ListPayments(50)
-		if err != nil {
-			logger.TUI("ListPayments: %v", err)
-		}
-		var all []lndrpc.PaymentEntry
-		all = append(all, invoices...)
-		all = append(all, payments...)
-		sort.Slice(all, func(i, j int) bool {
-			return all[i].CreationDate >
-				all[j].CreationDate
-		})
-		return paymentHistoryMsg{entries: all}
-	}
-}
-
-func listUnspentCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return utxoListMsg{err: fmt.Errorf(
-				"LND not connected")}
-		}
-		utxos, err := client.ListUnspent(0, 999999)
-		return utxoListMsg{utxos: utxos, err: err}
-	}
-}
-
-func sendCoinsCmd(
-	client *lndrpc.Client, addr string,
-	amount int64, feeRate int64, sendAll bool,
-	outpoints []string,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return sendCoinsResultMsg{err: fmt.Errorf(
-				"LND not connected")}
-		}
-		result, err := client.SendCoins(
-			addr, amount, feeRate, sendAll, outpoints)
-		if err != nil {
-			return sendCoinsResultMsg{err: err}
-		}
-		return sendCoinsResultMsg{txid: result.Txid}
-	}
-}
-
-func fetchFeeTiersCmd(
-	cfg *config.AppConfig,
-) tea.Cmd {
-	return func() tea.Msg {
-		return fetchFeeTiers(cfg)
-	}
-}
-
-func estimateTxFeeCmd(
-	client *lndrpc.Client, addr string,
-	amount int64, targetConf int32,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return feeEstimateMsg{err: fmt.Errorf(
-				"LND not connected")}
-		}
-		est, err := client.EstimateFee(
-			addr, amount, targetConf)
-		if err != nil {
-			return feeEstimateMsg{err: err}
-		}
-		return feeEstimateMsg{feeSats: est.FeeSats}
-	}
-}
-
-func fetchOnChainTxCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return onChainTxMsg{err: fmt.Errorf(
-				"LND not connected")}
-		}
-		txs, err := client.GetTransactions()
-		return onChainTxMsg{txs: txs, err: err}
-	}
+		fetchLatestVersionCmd(),
+		tickEveryCmd(m.pollInterval()))
 }

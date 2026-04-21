@@ -3,7 +3,6 @@ package welcome
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
@@ -220,7 +219,7 @@ func (p *paneBuilder) success(
 }
 
 func (p *paneBuilder) input(
-	label string, ti textinput.Model, focused bool,
+	label string, view string, focused bool,
 ) *paneBuilder {
 	labelStyle := theme.Label
 	marker := " "
@@ -231,7 +230,7 @@ func (p *paneBuilder) input(
 	p.lines = append(p.lines,
 		" "+labelStyle.Render(label))
 	p.lines = append(p.lines,
-		marker+" "+ti.View())
+		marker+" "+view)
 	return p
 }
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/theme"
@@ -19,6 +18,13 @@ const (
 	closeStepConfirm                  // fee input + buttons
 	closeStepClosing                  // broadcasting
 	closeStepResult                   // success or error
+)
+
+// ── Type step focus zones ────────────────────────────────
+
+const (
+	closeTypeZoneOptions = 0
+	closeTypeZoneButtons = 1
 )
 
 // ── Confirm focus zones ────────────────────────────────
@@ -42,19 +48,25 @@ type ChannelCloseScreen struct {
 	remoteBal int64
 
 	// Type step
-	typeIdx int // 0=cooperative, 1=force
+	typeIdx    int // 0=cooperative, 1=force
+	typeBtnIdx int // 0=Go Back, 1=Confirm
 
 	// Confirm step
 	force         bool
-	feeInput      textinput.Model
+	feeInput      AmountInput
 	feeTiers      [4]feeTier
-	focusZone     int // 0=fee input, 1=buttons
+	focusZone     int // type step: 0=options, 1=buttons; confirm step: 0=fee, 1=buttons
 	confirmBtnIdx int // 0=Go Back, 1=Close/Force Close
 	inFlight      bool
 
 	// Result step
 	txid  string
 	error string
+
+	// Cancelled is set when the user presses Cancel
+	// on the type step. The embedding screen checks
+	// this after delegation to dismiss the close flow.
+	Cancelled bool
 }
 
 func NewChannelCloseScreen(
@@ -111,6 +123,14 @@ func (s *ChannelCloseScreen) HandleMsg(
 			s.feeTiers = msg.tiers
 		}
 		return s, nil
+	case tea.PasteMsg:
+		if s.step == closeStepConfirm &&
+			!s.force &&
+			s.focusZone == closeZoneFee {
+			cmd := s.feeInput.Update(msg)
+			return s, cmd
+		}
+		return s, nil
 	}
 	return s, nil
 }
@@ -138,9 +158,9 @@ func (s *ChannelCloseScreen) HelpBindings() []key.Binding {
 	case closeStepConfirm:
 		return s.confirmBindings()
 	case closeStepClosing:
-		return []key.Binding{kQuit}
+		return waitingBindings()
 	case closeStepResult:
-		return newResultBindings().ShortHelp()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -150,6 +170,11 @@ func (s *ChannelCloseScreen) HelpBindings() []key.Binding {
 func (s *ChannelCloseScreen) handleTypeKey(
 	keyStr string,
 ) (Screen, tea.Cmd) {
+	// Buttons zone
+	if s.focusZone == closeTypeZoneButtons {
+		return s.handleTypeBtnKey(keyStr)
+	}
+
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
@@ -170,7 +195,11 @@ func (s *ChannelCloseScreen) handleTypeKey(
 	case "down", "tab":
 		if s.typeIdx < 1 {
 			s.typeIdx++
+			return s, nil
 		}
+		// At bottom of options — move to buttons
+		s.focusZone = closeTypeZoneButtons
+		s.typeBtnIdx = 1 // default to Confirm
 		return s, nil
 
 	case "shift+tab":
@@ -184,20 +213,59 @@ func (s *ChannelCloseScreen) handleTypeKey(
 		return s, nil
 
 	case "backspace":
-		// Clean backspace: does nothing
+		s.Cancelled = true
 		return s, nil
 
 	case "enter":
+		// Select type and move to buttons with
+		// Confirm focused
+		s.focusZone = closeTypeZoneButtons
+		s.typeBtnIdx = 1
+		return s, nil
+	}
+	return s, nil
+}
+
+func (s *ChannelCloseScreen) handleTypeBtnKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.typeBtnIdx > 0 {
+			s.typeBtnIdx--
+			return s, nil
+		}
+		return s, emitFocusSidebar
+	case "right":
+		if s.typeBtnIdx < 1 {
+			s.typeBtnIdx++
+		}
+		return s, nil
+	case "up", "shift+tab":
+		s.focusZone = closeTypeZoneOptions
+		return s, nil
+	case "down", "tab":
+		return s, nil
+	case "backspace":
+		s.Cancelled = true
+		return s, nil
+	case "enter":
+		if s.typeBtnIdx == 0 { // Go Back
+			s.Cancelled = true
+			return s, nil
+		}
+		// Confirm — advance to confirm step
 		s.force = s.typeIdx == 1
 		s.confirmBtnIdx = 0
 		s.error = ""
 
 		if !s.force {
-			s.feeInput = newCloseFeeInput()
+			s.feeInput = NewFeeInput()
 			if s.feeTiers[0].SatPerVB > 0 {
-				s.feeInput.SetValue(
-					fmt.Sprintf("%.0f",
-						s.feeTiers[0].SatPerVB))
+				s.feeInput.SetSats(
+					int64(s.feeTiers[0].SatPerVB))
 			}
 			s.focusZone = closeZoneFee
 		} else {
@@ -236,29 +304,19 @@ func (s *ChannelCloseScreen) handleConfirmFeeKey(
 		return s, tea.Quit
 
 	case "left":
-		if s.feeInput.Value() != "" {
-			var cmd tea.Cmd
-			s.feeInput, cmd =
-				s.feeInput.Update(tea.Msg(msg))
+		if !s.feeInput.Empty() {
+			cmd := s.feeInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 
 	case "right":
-		var cmd tea.Cmd
-		s.feeInput, cmd =
-			s.feeInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 
 	case "backspace":
-		// Clean backspace: delete only
-		if s.feeInput.Value() != "" {
-			var cmd tea.Cmd
-			s.feeInput, cmd =
-				s.feeInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
+		cmd := s.feeInput.Update(tea.Msg(msg))
+		return s, cmd
 
 	case "down", "tab", "enter":
 		// Advance to buttons (pattern 19)
@@ -275,10 +333,7 @@ func (s *ChannelCloseScreen) handleConfirmFeeKey(
 		return s, nil
 
 	default:
-		// Pass to text input
-		var cmd tea.Cmd
-		s.feeInput, cmd =
-			s.feeInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
 }
@@ -320,13 +375,16 @@ func (s *ChannelCloseScreen) handleConfirmBtnKey(
 		return s, nil
 
 	case "backspace":
-		// Clean backspace: does nothing on buttons
+		s.step = closeStepType
+		s.focusZone = closeTypeZoneOptions
+		s.error = ""
 		return s, nil
 
 	case "enter":
 		switch s.confirmBtnIdx {
 		case 0: // Go Back
 			s.step = closeStepType
+			s.focusZone = closeTypeZoneOptions
 			s.error = ""
 			return s, nil
 		case 1: // Close / Force Close
@@ -339,8 +397,7 @@ func (s *ChannelCloseScreen) handleConfirmBtnKey(
 
 			var feeRate uint64
 			if !s.force {
-				r := parseFeeInputRate(
-					s.feeInput.Value())
+				r := s.feeInput.Sats()
 				if r > 0 {
 					feeRate = uint64(r)
 				}
@@ -375,10 +432,18 @@ func (s *ChannelCloseScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus)
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -415,6 +480,10 @@ func (s *ChannelCloseScreen) viewType(
 	p.blank()
 
 	isFocused := s.ctx.ContentFocused
+	onOptions := isFocused &&
+		s.focusZone == closeTypeZoneOptions
+	onButtons := isFocused &&
+		s.focusZone == closeTypeZoneButtons
 
 	p.line(" " +
 		theme.Header.Render("Close type:"))
@@ -422,8 +491,11 @@ func (s *ChannelCloseScreen) viewType(
 
 	coopPrefix := " "
 	coopStyle := theme.Value
-	if isFocused && s.typeIdx == 0 {
+	if onOptions && s.typeIdx == 0 {
 		coopPrefix = "▸"
+		coopStyle = theme.Action
+	} else if onButtons && s.typeIdx == 0 {
+		coopPrefix = "●"
 		coopStyle = theme.Action
 	}
 	p.line(fmt.Sprintf(" %s %s",
@@ -436,8 +508,11 @@ func (s *ChannelCloseScreen) viewType(
 
 	forcePrefix := " "
 	forceStyle := theme.Value
-	if isFocused && s.typeIdx == 1 {
+	if onOptions && s.typeIdx == 1 {
 		forcePrefix = "▸"
+		forceStyle = theme.Warning
+	} else if onButtons && s.typeIdx == 1 {
+		forcePrefix = "●"
 		forceStyle = theme.Warning
 	}
 	p.line(fmt.Sprintf(" %s %s",
@@ -446,7 +521,9 @@ func (s *ChannelCloseScreen) viewType(
 	p.line("   " + theme.Dim.Render(
 		"Unilateral. Funds locked ~2 weeks."))
 
-	return p.render()
+	return p.renderWithBottomButtons(
+		[]string{"Go Back", "Confirm"},
+		s.typeBtnIdx, onButtons, h)
 }
 
 func (s *ChannelCloseScreen) viewConfirm(
@@ -478,11 +555,10 @@ func (s *ChannelCloseScreen) viewConfirm(
 		isFeeZone := s.ctx.ContentFocused &&
 			s.focusZone == closeZoneFee
 		p.input("Fee rate (sat/vB):",
-			s.feeInput, isFeeZone)
+			s.feeInput.View(), isFeeZone)
 
 		// Estimated total fee
-		feeRate := parseFeeInputRate(
-			s.feeInput.Value())
+		feeRate := s.feeInput.Sats()
 		if feeRate > 0 {
 			estFee := int64(feeRate * 170)
 			p.line(" " + theme.Dim.Render(
@@ -588,72 +664,44 @@ func (s *ChannelCloseScreen) viewResult(
 
 func (s *ChannelCloseScreen) typeBindings() []key.Binding {
 	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "close type")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
+	if s.focusZone == closeTypeZoneButtons {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
+			kLeftRightButtons, kEnter,
+			bind("↑", "back", "up"),
+			kSidebar)
+	} else {
+		binds = append(binds,
+			bind("↑↓", "close type", "up", "down"),
+			kEnter, kSidebar)
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
 	}
-
-	binds = append(binds, kQuit)
+	binds = append(binds, kBack, kQuit)
 	return binds
 }
 
 func (s *ChannelCloseScreen) confirmBindings() []key.Binding {
 	var binds []key.Binding
-
 	if !s.force && s.focusZone == closeZoneFee {
-		// Fee input zone
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "next")),
-			kSidebar)
+			kTabNext, kEnterNext, kSidebar)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 	} else {
-		// Buttons zone (or force close buttons)
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")))
-
+			kLeftRightButtons, kEnter)
 		if !s.force {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "back")))
+			binds = append(binds, kShiftTabBack)
 		} else {
 			binds = append(binds, kSidebar)
 			if s.ctx.HasTabs {
-				binds = append(binds,
-					key.NewBinding(
-						key.WithKeys("up"),
-						key.WithHelp("↑", "tab bar")))
+				binds = append(binds, kUpTabBar)
 			}
 		}
+		binds = append(binds, kBack)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
 }

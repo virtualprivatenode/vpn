@@ -48,8 +48,9 @@ type Client struct {
 // and admin macaroon, establishes the connection, and verifies it
 // with a GetInfo call.
 //
-// Returns nil with a logged warning if LND is not available.
-// The TUI should handle a nil client gracefully (show "waiting for LND").
+// Returns a client even if LND is not available — RPC methods
+// check for a live connection internally and return
+// errNotConnected if the connection is nil.
 func New(network string) *Client {
 	c := &Client{network: network}
 	if err := c.connect(); err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -63,9 +62,6 @@ func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
 	var tiers [4]feeTier
 
 	cliName := "bitcoin-cli"
-	if cfg.Network == "testnet" {
-		cliName = "bitcoin-cli"
-	}
 
 	for i, target := range targets {
 		tiers[i] = feeTier{
@@ -149,42 +145,6 @@ func formatFeeHints(tiers [4]feeTier) string {
 		return ""
 	}
 	return strings.Join(parts, "  ·  ")
-}
-
-// parseFeeInputRate parses a fee rate string from a text
-// input. Returns the rate as int64, minimum 1.
-func parseFeeInputRate(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	var n int64
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int64(c-'0')
-	}
-	return n
-}
-
-// parseSendAmount parses a send amount string,
-// stripping commas and whitespace. Returns 0 for
-// empty or invalid input.
-func parseSendAmount(val string) int64 {
-	val = strings.ReplaceAll(val, ",", "")
-	val = strings.TrimSpace(val)
-	if val == "" {
-		return 0
-	}
-	var n int64
-	for _, c := range val {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int64(c-'0')
-	}
-	return n
 }
 
 // estimateSimpleFee estimates the transaction fee in
@@ -530,25 +490,6 @@ func formatSats(sats int64) string {
 	return string(result)
 }
 
-func parseCustomAmount(s string) (int64, error) {
-	s = strings.ReplaceAll(s, ",", "")
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, fmt.Errorf("empty amount")
-	}
-	amt, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid number")
-	}
-	if amt < 20000 {
-		return 0, fmt.Errorf("min 20,000 sats")
-	}
-	if amt > 16777215 {
-		return 0, fmt.Errorf("max 16,777,215 sats")
-	}
-	return amt, nil
-}
-
 // ── Route diagram ──────────────────────────────────────
 
 func renderRouteDiagram(
@@ -641,25 +582,6 @@ func confIndicator(confs int32) string {
 }
 
 // ── Parse helpers ──────────────────────────────────────
-
-func parseRecvAmount(s string) (int64, error) {
-	s = strings.ReplaceAll(s, ",", "")
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, fmt.Errorf("empty amount")
-	}
-	var n int64
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, fmt.Errorf("invalid number")
-		}
-		n = n*10 + int64(c-'0')
-	}
-	if n < 1 {
-		return 0, fmt.Errorf("minimum 1 sat")
-	}
-	return n, nil
-}
 
 func cleanPayReq(s string) string {
 	s = strings.ReplaceAll(s, "[", "")

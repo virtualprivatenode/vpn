@@ -59,8 +59,7 @@ func (s *ChannelHistoryScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -69,6 +68,15 @@ func (s *ChannelHistoryScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tabActivatedMsg:
+		// Re-fetch closed channels so the table
+		// reflects any changes since this tab was
+		// last viewed (e.g. a channel closed from
+		// the detail tab). The closedChannelsMsg
+		// handler below rebuilds entries from
+		// current status + fresh closed data.
+		return s, fetchClosedChannelsCmd(
+			s.ctx.LndClient)
 	case closedChannelsMsg:
 		if msg.err == nil {
 			// Rebuild entries with current channel
@@ -238,21 +246,10 @@ func (s *ChannelHistoryScreen) View(
 }
 
 func (s *ChannelHistoryScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "channels")),
-		kSidebar)
-
+	binds := []key.Binding{kUpDownChannels, kSidebar}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
+		binds = append(binds, kShiftTabBar)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
 }

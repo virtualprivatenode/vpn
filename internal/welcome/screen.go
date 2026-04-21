@@ -87,7 +87,9 @@ type openTabMsg struct {
 	Label       string
 	Index       int // for detail tabs (dedup key)
 	Screen      Screen
-	FocusTabBar bool // true = tab bar focused on open
+	FocusTabBar bool    // true = tab bar focused on open
+	Replace     bool    // true = replace existing screen on dedup
+	Parent      tabKind // parent tab kind (0 = section home)
 }
 
 // focusSidebarMsg tells Model to move focus to the
@@ -97,6 +99,15 @@ type focusSidebarMsg struct{}
 // focusTabBarMsg tells Model to move focus to the tab
 // bar.
 type focusTabBarMsg struct{}
+
+// focusParentMsg tells Model to focus the active tab's
+// parent tab. Model reads the Parent field from the
+// active tab, finds the matching open tab in the same
+// section, and sets activeTab to it — no close, no
+// cascade. If no parent tab is open (Parent == 0 or
+// parent was closed), falls back to focusing the
+// section home (activeTab = 0).
+type focusParentMsg struct{}
 
 // showQRMsg tells Model to show the fullscreen QR view.
 type showQRMsg struct {
@@ -133,6 +144,10 @@ func emitFocusSidebar() tea.Msg {
 
 func emitFocusTabBar() tea.Msg {
 	return focusTabBarMsg{}
+}
+
+func emitFocusParent() tea.Msg {
+	return focusParentMsg{}
 }
 
 func emitRefreshStatus() tea.Msg {

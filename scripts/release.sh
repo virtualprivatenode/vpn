@@ -10,7 +10,7 @@ set -eo pipefail
 #
 # Usage:
 #   ./scripts/release.sh           # reads version from bootstrap script
-#   ./scripts/release.sh 0.2.0     # override version
+#   ./scripts/release.sh 1.0.0     # override version
 # ═══════════════════════════════════════════════════════════
 
 BINARY="rlvpn"

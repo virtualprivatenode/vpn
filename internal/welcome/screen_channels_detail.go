@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -10,20 +11,33 @@ import (
 )
 
 // ── ChannelDetailScreen ────────────────────────────────
-// Channel detail view with a Close Channel button pinned
-// to the bottom. The button opens a new close tab.
+// Channel detail view. Displays channel info and a Close
+// Channel button. When the user presses Close, the screen
+// delegates to an embedded ChannelCloseScreen rather than
+// opening a separate tab — the close flow, result, and
+// tab close all happen within this detail tab. No stale
+// detail tab after channel closure.
 //
-// Content is read-only — when the screen has focus, the
-// button is always the active element. No zone navigation
-// needed since there's nothing interactive above the
-// button.
+// The close screen is a separate type composed via a
+// pointer field (option 2 in the design discussion). The
+// detail screen acts as a thin router: when closeScreen
+// is non-nil, all interface methods delegate to it. The
+// close screen stays independently testable.
 
 type ChannelDetailScreen struct {
 	ctx     *ScreenContext
 	channel channelInfo
 
+	// Button index for detail view (0=Cancel, 1=Close)
+	viewBtnIdx int
+
 	// Fee tiers snapshot for passing to close screen
 	feeTiers [4]feeTier
+
+	// Close flow delegation — nil means detail view,
+	// non-nil means the close flow is active and all
+	// input/rendering delegates to it.
+	closeScreen *ChannelCloseScreen
 }
 
 func NewChannelDetailScreen(
@@ -47,6 +61,17 @@ func (s *ChannelDetailScreen) Init() tea.Cmd {
 func (s *ChannelDetailScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
+	if s.closeScreen != nil {
+		newClose, cmd :=
+			s.closeScreen.HandleKey(keyStr, msg)
+		s.closeScreen = newClose.(*ChannelCloseScreen)
+		if s.closeScreen.Cancelled {
+			s.closeScreen = nil
+			return s, nil
+		}
+		return s, cmd
+	}
+
 	// Pending channels: view-only, no button
 	if s.channel.Pending {
 		switch keyStr {
@@ -56,24 +81,35 @@ func (s *ChannelDetailScreen) HandleKey(
 		return s, emitFocusTabBar
 	}
 
-	// Non-pending: button is always focused
+	// Non-pending: Cancel / Close Channel buttons
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.viewBtnIdx > 0 {
+			s.viewBtnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.viewBtnIdx < 1 {
+			s.viewBtnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
 		}
 		return s, nil
 	case "down", "tab":
-		// Already on button, nowhere to go
+		// Already on buttons, nowhere to go
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
+		if s.viewBtnIdx == 0 {
+			return s, emitCloseTab
+		}
 		return s.launchClose()
 	}
 	return s, nil
@@ -82,7 +118,27 @@ func (s *ChannelDetailScreen) HandleKey(
 func (s *ChannelDetailScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	if s.closeScreen != nil {
+		newClose, cmd := s.closeScreen.HandleMsg(msg)
+		s.closeScreen = newClose.(*ChannelCloseScreen)
+		return s, cmd
+	}
 	switch msg := msg.(type) {
+	case tabActivatedMsg:
+		// Re-find the channel in live status data
+		// so the detail view reflects any changes
+		// since this tab was last viewed (e.g.
+		// balance change after payment settlement).
+		if s.ctx.Status != nil {
+			for _, ch := range s.ctx.Status.channels {
+				if ch.ChannelPoint ==
+					s.channel.ChannelPoint {
+					s.channel = ch
+					break
+				}
+			}
+		}
+		return s, nil
 	case feeTiersMsg:
 		if msg.err == nil {
 			s.feeTiers = msg.tiers
@@ -95,6 +151,10 @@ func (s *ChannelDetailScreen) HandleMsg(
 func (s *ChannelDetailScreen) View(
 	w, h int,
 ) string {
+	if s.closeScreen != nil {
+		return s.closeScreen.View(w, h)
+	}
+
 	ch := s.channel
 	p := newPane(w)
 
@@ -138,13 +198,16 @@ func (s *ChannelDetailScreen) View(
 	} else {
 		p.field("Type:      ", "public")
 	}
+	if strings.Contains(ch.CommitmentType, "TAPROOT") {
+		p.field("Channel:   ", "taproot")
+	}
 	if ch.Initiator {
 		p.field("Initiator: ", "you")
 	}
 
 	p.blank()
 	p.labelLine("Pubkey:")
-	p.monoWrap(ch.RemotePubkey)
+	p.mono(ch.RemotePubkey)
 
 	if ch.ChanID > 0 {
 		p.blank()
@@ -152,23 +215,26 @@ func (s *ChannelDetailScreen) View(
 			fmt.Sprintf("%d", ch.ChanID))
 	}
 
-	// Close button pinned to bottom (not for pending)
+	// Cancel / Close Channel pinned to bottom (not for pending)
 	if !ch.Pending {
 		btnFocused := s.ctx.ContentFocused
 		return p.renderWithBottomButtons(
-			[]string{"Close Channel"},
-			0, btnFocused, h)
+			[]string{"Cancel", "Close Channel"},
+			s.viewBtnIdx, btnFocused, h)
 	}
 
 	return p.render()
 }
 
 func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
-	if s.channel.Pending {
-		return newDetailTabBindings(s.ctx.HasTabs).
-			ShortHelp()
+	if s.closeScreen != nil {
+		return s.closeScreen.HelpBindings()
 	}
-	return s.detailBindings()
+	if s.channel.Pending {
+		return viewDetailBindings(s.ctx.HasTabs)
+	}
+	return detailActionBindings(
+		"close channel", s.viewBtnIdx, s.ctx.HasTabs)
 }
 
 // ── Close channel launch ───────────────────────────────
@@ -176,46 +242,13 @@ func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
 func (s *ChannelDetailScreen) launchClose() (
 	Screen, tea.Cmd,
 ) {
-	ch := s.channel
-	screen := NewChannelCloseScreen(
+	s.closeScreen = NewChannelCloseScreen(
 		s.ctx,
-		ch.ChannelPoint,
-		ch.PeerAlias,
-		ch.Capacity,
-		ch.LocalBalance,
-		ch.RemoteBalance,
+		s.channel.ChannelPoint,
+		s.channel.PeerAlias,
+		s.channel.Capacity,
+		s.channel.LocalBalance,
+		s.channel.RemoteBalance,
 		s.feeTiers)
-
-	openCmd := func() tea.Msg {
-		return openTabMsg{
-			Kind:   tabCloseChannel,
-			Label:  "Close Channel",
-			Screen: screen,
-		}
-	}
-
-	return s, tea.Batch(openCmd,
-		fetchFeeTiersCmd(s.ctx.Cfg))
-}
-
-// ── Helpbar bindings ───────────────────────────────────
-
-func (s *ChannelDetailScreen) detailBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "close channel")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return s, fetchFeeTiersCmd(s.ctx.Cfg)
 }

@@ -67,8 +67,7 @@ func (s *OCReceiveScreen) HandleKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if s.step != ocRecvReady {
 			return s, nil
@@ -166,27 +165,13 @@ func (s *OCReceiveScreen) viewReady(
 }
 
 func (s *OCReceiveScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
 	if s.step == ocRecvReady {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
+		return tabButtonBindings(s.ctx.HasTabs)
 	}
-
-	binds = append(binds, kSidebar)
-
+	binds := []key.Binding{kSidebar}
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
+		binds = append(binds, kShiftTabBar)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
 }

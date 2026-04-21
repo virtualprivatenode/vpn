@@ -114,14 +114,36 @@ func (s *SyncthingPairScreen) HelpBindings() []key.Binding {
 	case syncPairStepInput:
 		return s.inputBindings()
 	case syncPairStepPairing:
-		return s.pairingBindings()
+		binds := []key.Binding{kSidebar}
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
+		binds = append(binds, kQuit)
+		return binds
 	case syncPairStepPostPair:
-		return s.postPairBindings()
+		return tabButtonBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
 
-// ── Input step ──────────────────────────────────────────
+func (s *SyncthingPairScreen) inputBindings() []key.Binding {
+	var binds []key.Binding
+	if s.focusZone == syncPairZoneInput {
+		binds = append(binds,
+			bind("enter", "pair", "enter"),
+			kTabButtons, kSidebar)
+	} else {
+		binds = append(binds, kEnter)
+		binds = append(binds, buttonNav(s.btnIdx)...)
+		binds = append(binds, kShiftTabInput,
+			kBack)
+	}
+	if s.ctx.HasTabs {
+		binds = append(binds, kShiftTabBar)
+	}
+	binds = append(binds, kQuit)
+	return binds
+}
 
 func (s *SyncthingPairScreen) handleInputKey(
 	keyStr string, msg tea.KeyPressMsg,
@@ -133,8 +155,9 @@ func (s *SyncthingPairScreen) handleInputKey(
 		if s.focusZone == syncPairZoneButtons {
 			if s.btnIdx > 0 {
 				s.btnIdx--
+				return s, nil
 			}
-			return s, nil
+			return s, emitFocusSidebar
 		}
 		if s.input.Value() != "" {
 			var cmd tea.Cmd
@@ -185,15 +208,13 @@ func (s *SyncthingPairScreen) handleInputKey(
 		}
 		return s, nil
 	case "backspace":
-		// Clean backspace: only deletes in input
-		if s.focusZone == syncPairZoneInput &&
-			s.input.Value() != "" {
+		if s.focusZone == syncPairZoneInput {
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(
 				tea.Msg(msg))
 			return s, cmd
 		}
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		if s.focusZone == syncPairZoneButtons {
 			switch s.btnIdx {
@@ -306,8 +327,7 @@ func (s *SyncthingPairScreen) handlePostPairKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		switch s.btnIdx {
 		case 0: // Show QR
@@ -567,75 +587,4 @@ func (s *SyncthingPairScreen) viewPostPair(
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// ── Help bindings ───────────────────────────────────────
-
-func (s *SyncthingPairScreen) inputBindings() []key.Binding {
-	var binds []key.Binding
-
-	if s.focusZone == syncPairZoneInput {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "pair")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "buttons")),
-			kSidebar)
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "input")))
-	}
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *SyncthingPairScreen) pairingBindings() []key.Binding {
-	var binds []key.Binding
-	binds = append(binds, kSidebar)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *SyncthingPairScreen) postPairBindings() []key.Binding {
-	var binds []key.Binding
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
-		kSidebar)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
 }

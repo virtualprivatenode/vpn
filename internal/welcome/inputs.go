@@ -8,15 +8,6 @@ import (
 
 // ── Validators ───────────────────────────────────────────
 
-func validateDigits(s string) error {
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return errInvalidChar{}
-		}
-	}
-	return nil
-}
-
 func isBolt11Char(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') ||
 		(ch >= '0' && ch <= '9') ||
@@ -108,18 +99,6 @@ func newSendPayReqInput() textinput.Model {
 	return ti
 }
 
-func newRecvAmountInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "amount in sats"
-	ti.CharLimit = 10
-	ti.SetWidth(20)
-	ti.Validate = validateDigits
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
-	return ti
-}
-
 func newRecvMemoInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "optional memo"
@@ -154,18 +133,6 @@ func newChanHostInput() textinput.Model {
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Blur()
-	return ti
-}
-
-func newChanAmountInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "amount in sats"
-	ti.CharLimit = 10
-	ti.SetWidth(20)
-	ti.Validate = validateDigits
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
 	return ti
 }
 
@@ -205,18 +172,6 @@ func newOnChainAddrInput() textinput.Model {
 	return ti
 }
 
-func newOnChainAmtInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "amount in sats"
-	ti.CharLimit = 16
-	ti.SetWidth(20)
-	ti.Validate = validateDigits
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
-	return ti
-}
-
 func newOCSendLabelInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "optional label"
@@ -229,27 +184,36 @@ func newOCSendLabelInput() textinput.Model {
 	return ti
 }
 
-func newCustomFeeInput() textinput.Model {
+func NewFeeInput() AmountInput {
 	ti := textinput.New()
 	ti.Placeholder = "sat/vB"
-	ti.CharLimit = 6
-	ti.SetWidth(10)
-	ti.Validate = validateDigits
+	ti.CharLimit = 10
+	ti.SetWidth(12)
+	ti.Prompt = "  "
+	applyInputStyles(&ti)
+	ti.Focus()
+	return AmountInput{ti: ti}
+}
+
+func newSSHKeyInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "ssh-ed25519 AAAA..."
+	ti.CharLimit = 2000
+	ti.SetWidth(60)
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()
 	return ti
 }
 
-func newCloseFeeInput() textinput.Model {
+func newUserPasswordInput() textinput.Model {
 	ti := textinput.New()
-	ti.Placeholder = "sat/vB"
-	ti.CharLimit = 6
-	ti.SetWidth(10)
-	ti.Validate = validateDigits
+	ti.Placeholder = "(paste from password manager)"
+	ti.CharLimit = 256
+	ti.SetWidth(60)
 	ti.Prompt = "  "
+	ti.EchoMode = textinput.EchoPassword
 	applyInputStyles(&ti)
-	ti.Focus()
 	return ti
 }
 

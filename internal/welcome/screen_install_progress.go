@@ -85,8 +85,16 @@ func (s *InstallProgressScreen) HandleKey(
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
+		case "left":
+			return s, emitFocusSidebar
+		case "up", "shift+tab":
+			if s.ctx.HasTabs {
+				return s, emitFocusTabBar
+			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 	}
 	// During active install, all keys are ignored.
@@ -207,12 +215,7 @@ func (s *InstallProgressScreen) View(
 
 func (s *InstallProgressScreen) HelpBindings() []key.Binding {
 	if s.done {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "close")),
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
-	return []key.Binding{}
+	return waitingBindings()
 }

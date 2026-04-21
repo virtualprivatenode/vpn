@@ -9,7 +9,7 @@ import (
 )
 
 // ── SyncthingDeviceScreen ──────────────────────────────
-// View-only device detail with Remove button, plus
+// Device detail with Cancel / Remove buttons, plus
 // confirm step. Snapshot data at construction time.
 
 type syncDeviceStep int
@@ -24,6 +24,7 @@ type SyncthingDeviceScreen struct {
 	step        syncDeviceStep
 	device      config.SyncthingDevice // snapshot
 	deviceIndex int                    // index in config
+	viewBtnIdx  int                    // 0=Cancel, 1=Remove
 	confirmIdx  int                    // 0=Go Back, 1=Remove
 	removeError string
 }
@@ -90,16 +91,17 @@ func (s *SyncthingDeviceScreen) View(
 func (s *SyncthingDeviceScreen) HelpBindings() []key.Binding {
 	switch s.step {
 	case syncDeviceStepDetail:
-		return s.detailBindings()
+		return detailActionBindings(
+			"remove", s.viewBtnIdx, s.ctx.HasTabs)
 	case syncDeviceStepConfirm:
-		return s.confirmBindings()
+		return tabButtonBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
 
 // ── Detail step ─────────────────────────────────────────
-// Read-only info with Remove button always active
-// (same pattern as ChannelDetailScreen).
+// Read-only info with Cancel / Remove buttons. Cancel
+// closes the tab; Remove advances to confirm step.
 
 func (s *SyncthingDeviceScreen) handleDetailKey(
 	keyStr string,
@@ -108,7 +110,16 @@ func (s *SyncthingDeviceScreen) handleDetailKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
+		if s.viewBtnIdx > 0 {
+			s.viewBtnIdx--
+			return s, nil
+		}
 		return s, emitFocusSidebar
+	case "right":
+		if s.viewBtnIdx < 1 {
+			s.viewBtnIdx++
+		}
+		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
@@ -117,9 +128,11 @@ func (s *SyncthingDeviceScreen) handleDetailKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
+		if s.viewBtnIdx == 0 {
+			return s, emitCloseTab
+		}
 		s.step = syncDeviceStepConfirm
 		s.confirmIdx = 0
 		s.removeError = ""
@@ -147,28 +160,8 @@ func (s *SyncthingDeviceScreen) viewDetail(
 	p.appendError(s.removeError)
 
 	return p.renderWithBottomButtons(
-		[]string{"Remove"}, 0,
+		[]string{"Cancel", "Remove"}, s.viewBtnIdx,
 		s.ctx.ContentFocused, h)
-}
-
-func (s *SyncthingDeviceScreen) detailBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "remove")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
 }
 
 // ── Confirm step ────────────────────────────────────────
@@ -198,7 +191,7 @@ func (s *SyncthingDeviceScreen) handleConfirmKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
+		s.step = syncDeviceStepDetail
 		return s, nil
 	case "enter":
 		switch s.confirmIdx {
@@ -232,27 +225,4 @@ func (s *SyncthingDeviceScreen) viewConfirm(
 		[]string{"Go Back", "Remove"},
 		s.confirmIdx,
 		s.ctx.ContentFocused, h)
-}
-
-func (s *SyncthingDeviceScreen) confirmBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
 }

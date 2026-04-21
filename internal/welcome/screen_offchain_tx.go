@@ -10,7 +10,7 @@ import (
 
 // ── PaymentDetailScreen ────────────────────────────────
 // View-only tab showing a single payment's details.
-// Done button pinned to bottom.
+// No buttons — navigate away via backspace (parent).
 
 type PaymentDetailScreen struct {
 	ctx   *ScreenContext
@@ -49,10 +49,7 @@ func (s *PaymentDetailScreen) HandleKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
-	case "enter":
-		return s, emitCloseTab
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -123,27 +120,9 @@ func (s *PaymentDetailScreen) View(
 		p.line(renderRouteDiagram(entry.Hops, w))
 	}
 
-	return p.renderWithBottomButtons(
-		[]string{"Done"}, 0,
-		s.ctx.ContentFocused, h)
+	return p.render()
 }
 
 func (s *PaymentDetailScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "done")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return viewDetailBindings(s.ctx.HasTabs)
 }

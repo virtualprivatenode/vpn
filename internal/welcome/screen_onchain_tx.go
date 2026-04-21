@@ -12,7 +12,7 @@ import (
 
 // ── OnChainTxScreen ────────────────────────────────────
 // View-only tab showing a single on-chain transaction.
-// Done button pinned to bottom.
+// No buttons — navigate away via backspace (parent).
 
 type OnChainTxScreen struct {
 	ctx             *ScreenContext
@@ -65,10 +65,7 @@ func (s *OnChainTxScreen) HandleKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
-	case "enter":
-		return s, emitCloseTab
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -269,27 +266,9 @@ func (s *OnChainTxScreen) View(
 			formatSats(tx.Fee)+" sats")
 	}
 
-	return p.renderWithBottomButtons(
-		[]string{"Done"}, 0,
-		s.ctx.ContentFocused, h)
+	return p.render()
 }
 
 func (s *OnChainTxScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "done")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return viewDetailBindings(s.ctx.HasTabs)
 }

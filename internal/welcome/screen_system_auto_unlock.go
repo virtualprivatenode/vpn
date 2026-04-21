@@ -1,6 +1,8 @@
 package welcome
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -143,20 +145,22 @@ func (s *AutoUnlockScreen) HandleKey(
 		return s, nil
 	}
 
-	// Done states: Done button only
+	// Done states
 	if s.state == auState_doneOK ||
 		s.state == auState_doneErr {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
-		case "up":
+		case "up", "shift+tab":
 			if s.ctx.HasTabs {
 				return s, emitFocusTabBar
 			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 		return s, nil
 	}
@@ -193,8 +197,6 @@ func (s *AutoUnlockScreen) handleDisableKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
-	case "backspace":
-		return s, emitCloseTab
 	case "enter":
 		if s.btnIdx == 0 {
 			return s, emitCloseTab
@@ -202,6 +204,8 @@ func (s *AutoUnlockScreen) handleDisableKey(
 		// Disable
 		s.state = auState_running
 		return s, disableAutoUnlockCmd()
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -293,8 +297,8 @@ func (s *AutoUnlockScreen) handleEnableKey(
 			s.focusZone == auZoneInput2 {
 			return s, s.passthroughInput(msg)
 		}
-		// On buttons: close tab
-		return s, emitCloseTab
+		// On buttons: navigate to parent
+		return s, emitFocusParent
 
 	case "enter":
 		if s.focusZone == auZoneInput1 {
@@ -402,6 +406,20 @@ func (s *AutoUnlockScreen) HandleMsg(
 			config.Save(s.ctx.Cfg)
 			return refreshStatusMsg{}
 		}
+	case tea.PasteMsg:
+		if s.mode != autoUnlockEnable ||
+			s.state != auState_form {
+			return s, nil
+		}
+		val := strings.TrimSuffix(
+			string(m.Content), "\n")
+		switch s.focusZone {
+		case auZoneInput1:
+			s.pw1.SetValue(val)
+		case auZoneInput2:
+			s.pw2.SetValue(val)
+		}
+		return s, nil
 	}
 	return s, nil
 }
@@ -480,11 +498,11 @@ func (s *AutoUnlockScreen) viewEnable(
 	p.blank()
 
 	p.input("Wallet password:",
-		s.pw1,
+		s.pw1.View(),
 		isFocused && s.focusZone == auZoneInput1)
 	p.blank()
 	p.input("Confirm password:",
-		s.pw2,
+		s.pw2.View(),
 		isFocused && s.focusZone == auZoneInput2)
 
 	p.appendError(s.errMsg)
@@ -614,13 +632,7 @@ func (s *AutoUnlockScreen) HelpBindings() []key.Binding {
 	}
 	if s.state == auState_doneOK ||
 		s.state == auState_doneErr {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "close")),
-			kSidebar,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 
 	if s.mode == autoUnlockDisable {
@@ -632,83 +644,26 @@ func (s *AutoUnlockScreen) HelpBindings() []key.Binding {
 func (s *AutoUnlockScreen) enableBindings() []key.Binding {
 	if s.focusZone == auZoneInput1 ||
 		s.focusZone == auZoneInput2 {
-		binds := []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "next")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next field")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "prev field")),
-			kBack,
+		return []key.Binding{
+			kEnterNext,
+			kTabNextField,
+			bind("⇧tab", "prev field", "shift+tab"),
 			kQuit,
 		}
-		return binds
 	}
 
 	// Button zone
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
+	binds := buttonNav(s.btnIdx)
 	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "fields")),
-		kBack)
+		kEnter,
+		bind("⇧tab", "fields", "shift+tab"))
 	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
+		binds = append(binds, kUpTabBar)
 	}
-	binds = append(binds, kQuit)
+	binds = append(binds, kBack, kQuit)
 	return binds
 }
 
 func (s *AutoUnlockScreen) disableButtonBindings() []key.Binding {
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		kBack)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
+	return actionButtonBindings(s.btnIdx, s.ctx.HasTabs)
 }

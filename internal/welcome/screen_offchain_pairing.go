@@ -63,8 +63,7 @@ func (s *PairingScreen) HandleKey(
 	case "down", "tab":
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		return s.handleEnter()
 	}
@@ -197,24 +196,5 @@ func (s *PairingScreen) View(
 }
 
 func (s *PairingScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("left", "right"),
-			key.WithHelp("←→", "buttons")),
-		kSidebar)
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return tabButtonBindings(s.ctx.HasTabs)
 }

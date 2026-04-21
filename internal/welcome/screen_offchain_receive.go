@@ -37,7 +37,7 @@ type ReceiveScreen struct {
 	step recvStep
 
 	// Input state
-	amountInput textinput.Model
+	amountInput AmountInput
 	memoInput   textinput.Model
 	focusZone   int // 0=amount, 1=memo, 2=buttons
 	btnIdx      int // 0=Clear, 1=Create Invoice
@@ -60,10 +60,11 @@ type ReceiveScreen struct {
 func NewReceiveScreen(
 	ctx *ScreenContext,
 ) *ReceiveScreen {
+	amt := NewAmountInput()
 	return &ReceiveScreen{
 		ctx:         ctx,
 		step:        recvStepInput,
-		amountInput: newRecvAmountInput(),
+		amountInput: amt,
 		memoInput:   newRecvMemoInput(),
 		focusZone:   recvZoneAmount,
 		btnIdx:      1, // default to Create Invoice
@@ -129,95 +130,32 @@ func (s *ReceiveScreen) HelpBindings() []key.Binding {
 	case recvStepInput:
 		return s.inputBindings()
 	case recvStepWaiting:
-		return s.waitingBindings()
+		return actionButtonBindings(
+			s.buttonIdx, s.ctx.HasTabs)
 	case recvStepPaid, recvStepExpired, recvStepError:
-		return newResultBindings().ShortHelp()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
 
-// inputBindings returns dynamic help bindings for the
-// input step based on current focus zone.
 func (s *ReceiveScreen) inputBindings() []key.Binding {
 	var binds []key.Binding
-
 	switch s.focusZone {
 	case recvZoneAmount, recvZoneMemo:
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up", "down"),
-				key.WithHelp("↑↓", "fields")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "create")),
+			kUpDownFields, kTabNext, kEnterCreate,
 			kSidebar)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 	case recvZoneButtons:
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
+			kLeftRightButtons, kEnter, kShiftTabBack,
+			kBack)
+		if s.ctx.HasTabs {
+			binds = append(binds, kUpTabBar)
+		}
 	}
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
-}
-
-// waitingBindings returns dynamic help bindings for the
-// waiting step. When cursor is on the leftmost button,
-// left arrow goes to sidebar. Otherwise left/right
-// navigate between buttons.
-func (s *ReceiveScreen) waitingBindings() []key.Binding {
-	var binds []key.Binding
-
-	if s.buttonIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")))
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-
 	binds = append(binds, kQuit)
 	return binds
 }
@@ -253,11 +191,9 @@ func (s *ReceiveScreen) handleInputKey(
 		}
 		// Text inputs: pass through for cursor
 		if s.focusZone == recvZoneAmount {
-			if s.amountInput.Value() != "" {
-				var cmd tea.Cmd
-				s.amountInput, cmd =
-					s.amountInput.Update(
-						tea.Msg(msg))
+			if !s.amountInput.Empty() {
+				cmd := s.amountInput.Update(
+					tea.Msg(msg))
 				return s, cmd
 			}
 		}
@@ -281,9 +217,7 @@ func (s *ReceiveScreen) handleInputKey(
 		}
 		// Text inputs: pass through for cursor
 		if s.focusZone == recvZoneAmount {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		if s.focusZone == recvZoneMemo {
@@ -295,23 +229,17 @@ func (s *ReceiveScreen) handleInputKey(
 		return s, nil
 
 	case "backspace":
-		// Clean backspace: only deletes characters,
-		// never navigates.
-		if s.focusZone == recvZoneAmount &&
-			s.amountInput.Value() != "" {
-			var cmd tea.Cmd
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+		if s.focusZone == recvZoneAmount {
+			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		if s.focusZone == recvZoneMemo &&
-			s.memoInput.Value() != "" {
+		if s.focusZone == recvZoneMemo {
 			var cmd tea.Cmd
 			s.memoInput, cmd =
 				s.memoInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		return s, nil
+		return s, emitFocusParent
 
 	case "tab":
 		// Express forward jump between zones
@@ -368,7 +296,7 @@ func (s *ReceiveScreen) handleInputKey(
 		if s.focusZone == recvZoneButtons {
 			switch s.btnIdx {
 			case 0: // Clear
-				s.amountInput = newRecvAmountInput()
+				s.amountInput.Clear()
 				s.memoInput = newRecvMemoInput()
 				s.inputError = ""
 				s.focusZone = recvZoneAmount
@@ -389,8 +317,7 @@ func (s *ReceiveScreen) handleInputKey(
 	default:
 		var cmd tea.Cmd
 		if s.focusZone == recvZoneAmount {
-			s.amountInput, cmd =
-				s.amountInput.Update(tea.Msg(msg))
+			cmd = s.amountInput.Update(tea.Msg(msg))
 		} else if s.focusZone == recvZoneMemo {
 			s.memoInput, cmd =
 				s.memoInput.Update(tea.Msg(msg))
@@ -403,14 +330,13 @@ func (s *ReceiveScreen) handleInputKey(
 func (s *ReceiveScreen) submitInvoice() (
 	Screen, tea.Cmd,
 ) {
-	val := s.amountInput.Value()
-	if val == "" {
+	if s.amountInput.Empty() {
 		s.inputError = "Enter an amount"
 		return s, nil
 	}
-	amt, err := parseRecvAmount(val)
-	if err != nil {
-		s.inputError = err.Error()
+	amt := s.amountInput.Sats()
+	if amt < 1 {
+		s.inputError = "Minimum 1 sat"
 		return s, nil
 	}
 	s.amountSats = amt
@@ -442,6 +368,8 @@ func (s *ReceiveScreen) handleWaitingKey(
 		return s, nil
 	case "down", "tab":
 		return s, nil
+	case "backspace":
+		return s, emitFocusParent
 	case "right":
 		if s.buttonIdx < 1 {
 			s.buttonIdx++
@@ -473,12 +401,20 @@ func (s *ReceiveScreen) handlePaidKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus,
 			fetchPaymentHistoryCmd(
 				s.ctx.LndClient))
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -491,8 +427,16 @@ func (s *ReceiveScreen) handleExpiredKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, emitCloseTab
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -505,8 +449,16 @@ func (s *ReceiveScreen) handleErrorKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, emitCloseTab
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -521,8 +473,7 @@ func (s *ReceiveScreen) handlePaste(
 	}
 	var cmd tea.Cmd
 	if s.focusZone == recvZoneAmount {
-		s.amountInput, cmd =
-			s.amountInput.Update(msg)
+		cmd = s.amountInput.Update(msg)
 	} else if s.focusZone == recvZoneMemo {
 		s.memoInput, cmd =
 			s.memoInput.Update(msg)
@@ -589,10 +540,10 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 		s.focusZone == recvZoneMemo
 
 	p.input("Amount (sats):",
-		s.amountInput, amtFocused)
+		s.amountInput.View(), amtFocused)
 	p.blank()
 	p.input("Memo (optional):",
-		s.memoInput, memoFocused)
+		s.memoInput.View(), memoFocused)
 
 	p.appendError(s.inputError)
 

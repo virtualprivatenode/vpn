@@ -4,7 +4,7 @@ set -eo pipefail
 # ═══════════════════════════════════════════════════════════
 # Virtual Private Node — Bootstrap Script
 #
-# This script runs as root on a fresh Debian 13+.
+# This script runs as root on a fresh Debian 13+ Box.
 # It creates the ripsline user, downloads the rlvpn binary,
 # configures auto-launch, and disables root SSH.
 #
@@ -12,11 +12,11 @@ set -eo pipefail
 # Phase 2: All remaining downloads route through Tor
 #
 # Usage:
-#   curl -sL ripsline.com/virtual-private-node.sh | bash
-#   curl -sL ripsline.com/virtual-private-node.sh | bash -s -- --testnet4
+#   curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
+#   curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash -s -- --testnet4
 # ═══════════════════════════════════════════════════════════
 
-VERSION="0.4.0"
+VERSION="0.4.1"
 BINARY_NAME="rlvpn"
 ADMIN_USER="ripsline"
 
@@ -427,7 +427,7 @@ echo "  ✓ Configured auto-launch"
 # where the operator can verify key auth works first.
 
 mkdir -p /etc/ssh/sshd_config.d
-cat > /etc/ssh/sshd_config.d/99-rlvpn-hardening.conf << 'SSHEOF'
+cat > /etc/ssh/sshd_config.d/00-rlvpn-hardening.conf << 'SSHEOF'
 # Virtual Private Node — SSH hardening
 # Password auth is intentionally left untouched here and is
 # managed from the TUI (System tab) after key verification.
@@ -437,14 +437,10 @@ ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 X11Forwarding no
 SSHEOF
-chmod 644 /etc/ssh/sshd_config.d/99-rlvpn-hardening.conf
-echo "  ✓ Created sshd hardening drop-in"
-
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-if ! grep -q "^PermitRootLogin no" /etc/ssh/sshd_config; then
-    echo "PermitRootLogin no" >> /etc/ssh/sshd_config
-fi
-systemctl restart sshd 2>/dev/null || systemctl restart ssh
+chmod 644 /etc/ssh/sshd_config.d/00-rlvpn-hardening.conf                                                                                                                                     
+echo "  ✓ Created sshd hardening drop-in"                                                                                                                                                    
+                                                                                                                                                                                            
+systemctl restart sshd 2>/dev/null || systemctl restart ssh                                                                                                                                  
 echo "  ✓ Applied SSH hardening (root login disabled)"
 
 # ── Log bootstrap completion ────────────────────────────────

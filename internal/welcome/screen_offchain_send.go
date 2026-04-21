@@ -122,11 +122,12 @@ func (s *SendScreen) HelpBindings() []key.Binding {
 	case sendStepInput:
 		return s.inputBindings()
 	case sendStepConfirm:
-		return s.confirmBindings()
+		return actionButtonBindings(
+			s.confirmBtnIdx, s.ctx.HasTabs)
 	case sendStepInFlight:
-		return s.inFlightBindings()
+		return waitingBindings()
 	case sendStepResult:
-		return newResultBindings().ShortHelp()
+		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
 }
@@ -176,16 +177,13 @@ func (s *SendScreen) handleInputKey(
 		return s, nil
 
 	case "backspace":
-		// Clean backspace: only deletes characters,
-		// never navigates.
-		if s.focusZone == sendZoneInput &&
-			s.sendInput.Value() != "" {
+		if s.focusZone == sendZoneInput {
 			var cmd tea.Cmd
 			s.sendInput, cmd =
 				s.sendInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
-		return s, nil
+		return s, emitFocusParent
 
 	case "tab":
 		// Express forward jump between zones
@@ -310,6 +308,9 @@ func (s *SendScreen) handleConfirmKey(
 		return s, nil
 	case "down", "tab", "shift+tab":
 		return s, nil
+	case "backspace":
+		s.backToInput()
+		return s, nil
 	case "enter":
 		switch s.confirmBtnIdx {
 		case 0: // Go Back
@@ -358,12 +359,20 @@ func (s *SendScreen) handleResultKey(
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-	case "enter", "backspace":
+	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
 			emitRefreshStatus,
 			fetchPaymentHistoryCmd(
 				s.ctx.LndClient))
+	case "left":
+		return s, emitFocusSidebar
+	case "up", "shift+tab":
+		if s.ctx.HasTabs {
+			return s, emitFocusTabBar
+		}
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -452,7 +461,7 @@ func (s *SendScreen) viewInput(w, h int) string {
 	inputFocused := isFocused &&
 		s.focusZone == sendZoneInput
 	p.input("Payment Request:",
-		s.sendInput, inputFocused)
+		s.sendInput.View(), inputFocused)
 	p.blank()
 	p.dim("Paste a bolt11 invoice")
 
@@ -540,77 +549,21 @@ func (s *SendScreen) viewResult(
 
 func (s *SendScreen) inputBindings() []key.Binding {
 	var binds []key.Binding
-
 	switch s.focusZone {
 	case sendZoneInput:
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "cursor")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "send")),
+			kLeftRightCursor,
+			kTabNext,
+			bind("enter", "send", "enter"),
 			kSidebar)
 		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+			binds = append(binds, kShiftTabBar)
 		}
 	case sendZoneButtons:
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "back")))
+			kLeftRightButtons, kEnter, kShiftTabBack,
+			kBack)
 	}
-
 	binds = append(binds, kQuit)
 	return binds
-}
-
-func (s *SendScreen) confirmBindings() []key.Binding {
-	var binds []key.Binding
-
-	if s.confirmBtnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")))
-
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *SendScreen) inFlightBindings() []key.Binding {
-	return []key.Binding{kQuit}
 }

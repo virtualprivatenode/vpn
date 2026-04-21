@@ -108,19 +108,21 @@ func (s *WalletCreateScreen) Init() tea.Cmd {
 func (s *WalletCreateScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// Error state — Done button only
+	// Error state
 	if s.step == walletErr {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
-		case "up":
+		case "up", "shift+tab":
 			if s.ctx.HasTabs {
 				return s, emitFocusTabBar
 			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 		return s, nil
 	}
@@ -158,13 +160,13 @@ func (s *WalletCreateScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
-	case "backspace":
-		return s, emitCloseTab
 	case "enter":
 		if s.btnIdx == 0 {
 			return s, emitCloseTab
 		}
 		return s.startWaitingForLND()
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -438,41 +440,25 @@ func (s *WalletCreateScreen) HelpBindings() []key.Binding {
 	}
 
 	if s.step == walletErr {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "close")),
-			kSidebar,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 
 	// Confirm step
 	var binds []key.Binding
 	if s.btnIdx == 0 {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
+			kSidebar,
+			kRightButton)
 	} else {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
+			kLeftRightButtons)
 	}
 	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
+		kEnter,
 		kBack)
 	if s.ctx.HasTabs {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
+			kUpTabBar)
 	}
 	binds = append(binds, kQuit)
 	return binds

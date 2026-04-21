@@ -39,6 +39,10 @@ type OnChainHomeScreen struct {
 	txCursor      int
 	pencilFocused bool
 
+	// Coin control dirty flag — set on any spacebar
+	// toggle, cleared when openSend reads it.
+	utxoChanged bool
+
 	// Label popup state
 	labelEditing bool
 	labelInput   textinput.Model
@@ -87,14 +91,15 @@ func (s *OnChainHomeScreen) HandleKey(
 		return s.handleTab()
 	case "shift+tab":
 		return s.handleShiftTab()
-	case "backspace":
-		return s, emitFocusSidebar
 	case "space":
 		if s.focusZone == ocHomeZoneUtxos &&
 			s.utxoCursor < len(s.ocCtx.Utxos) {
 			s.toggleSelection(s.utxoCursor)
+			s.utxoChanged = true
 		}
 		return s, nil
+	case "backspace":
+		return s, emitFocusSidebar
 	case "enter":
 		// No wallet → trigger wallet creation flow
 		if !s.ctx.Cfg.WalletExists() {
@@ -304,23 +309,25 @@ func (s *OnChainHomeScreen) openSend() (
 ) {
 	screen := NewOnChainSendScreen(
 		s.ctx, s.ocCtx)
-	// Pre-fill amount from UTXO selection
-	if len(s.ocCtx.UtxoSelected) > 0 {
-		screen.amtInput.SetValue(
-			fmt.Sprintf("%d",
-				s.ocCtx.UtxoSelectedTotal))
-	}
-	// Pre-fill fee from cached tiers
+	// Pre-fill fee before Max so the computation
+	// uses the real fee rate, not the default of 1.
 	if s.ocCtx.SendFeeTiers[0].SatPerVB > 0 {
-		screen.feeInput.SetValue(
-			fmt.Sprintf("%.0f",
-				s.ocCtx.SendFeeTiers[0].SatPerVB))
+		screen.feeInput.SetSats(
+			int64(s.ocCtx.SendFeeTiers[0].SatPerVB))
 	}
+	// Engage Max for UTXO selection (send_all +
+	// amount = selectedTotal - estFee).
+	if len(s.ocCtx.UtxoSelected) > 0 {
+		screen.EngageMaxForSelection()
+	}
+	replace := s.utxoChanged
+	s.utxoChanged = false
 	return s, func() tea.Msg {
 		return openTabMsg{
-			Kind:   tabOnChain,
-			Label:  "⛓ Send",
-			Screen: screen,
+			Kind:    tabOnChain,
+			Label:   "⛓ Send",
+			Screen:  screen,
+			Replace: replace,
 		}
 	}
 }
@@ -968,10 +975,9 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
 	if !s.ctx.Cfg.WalletExists() {
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "create wallet")),
+			kEnterCreateWallet,
 			kSidebar,
+			kBack,
 			kQuit,
 		}
 	}
@@ -982,117 +988,45 @@ func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
 	case ocHomeZoneUtxos:
 		return s.utxoBindings()
 	case ocHomeZoneTxs:
-		return s.txBindings()
+		return homeListBindings(
+			"transactions", "details", "UTXOs")
 	}
-	return s.buttonBindings()
-}
-
-func (s *OnChainHomeScreen) buttonBindings() []key.Binding {
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
-	}
-	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("down"),
-			key.WithHelp("↓", "UTXOs")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")))
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
-	}
-	binds = append(binds, kQuit)
-	return binds
+	return homeButtonBindings(
+		"UTXOs", s.btnIdx, s.ctx.HasTabs)
 }
 
 func (s *OnChainHomeScreen) utxoBindings() []key.Binding {
 	var binds []key.Binding
 	if s.pencilFocused {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "UTXO")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "edit label")))
+			bind("←", "UTXO", "left"),
+			bind("enter", "edit label", "enter"))
 	} else {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up", "down"),
-				key.WithHelp("↑↓", "UTXOs")),
-			key.NewBinding(
-				key.WithKeys("space"),
-				key.WithHelp("space", "select")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "details")))
+			bind("↑↓", "UTXOs", "up", "down"),
+			bind("space", "select", "space"),
+			kEnterDetails)
 	}
 	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "transactions")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "buttons")),
-		kSidebar)
-	binds = append(binds, kQuit)
-	return binds
-}
-
-func (s *OnChainHomeScreen) txBindings() []key.Binding {
-	binds := []key.Binding{
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "transactions")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "tx details")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "UTXOs")),
+		bind("tab", "transactions", "tab"),
+		kShiftTabButtons,
 		kSidebar,
-	}
-	binds = append(binds, kQuit)
+		kBack, kQuit)
 	return binds
 }
 
 func (s *OnChainHomeScreen) labelPopupBindings() []key.Binding {
 	if s.labelOnBtn {
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")),
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "label")),
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
+			kLeftRightButtons,
+			bind("↑", "label", "up"),
+			kEnter,
 			kQuit,
 		}
 	}
 	return []key.Binding{
-		key.NewBinding(
-			key.WithKeys("down"),
-			key.WithHelp("↓", "buttons")),
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "buttons")),
+		bind("↓", "buttons", "down"),
+		bind("enter", "buttons", "enter"),
 		kQuit,
 	}
 }

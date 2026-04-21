@@ -102,8 +102,7 @@ func (s *SyncthingDetailScreen) HandleKey(
 		}
 		return s, nil
 	case "backspace":
-		// Clean backspace: does nothing
-		return s, nil
+		return s, emitFocusParent
 	case "enter":
 		return s.handleEnter()
 	}
@@ -122,6 +121,7 @@ func (s *SyncthingDetailScreen) handleEnter() (
 					Kind:   tabSyncthingPair,
 					Label:  "Pair Device",
 					Screen: screen,
+					Parent: tabSyncthing,
 				}
 			}
 		case 1: // Web UI
@@ -131,6 +131,7 @@ func (s *SyncthingDetailScreen) handleEnter() (
 					Kind:   tabSyncthingWebUI,
 					Label:  "Web UI",
 					Screen: screen,
+					Parent: tabSyncthing,
 				}
 			}
 		}
@@ -150,11 +151,11 @@ func (s *SyncthingDetailScreen) handleEnter() (
 		idx := s.cursor
 		return s, func() tea.Msg {
 			return openTabMsg{
-				Kind:        tabSyncthingDevice,
-				Label:       label,
-				Index:       idx,
-				Screen:      screen,
-				FocusTabBar: true,
+				Kind:   tabSyncthingDevice,
+				Label:  label,
+				Index:  idx,
+				Screen: screen,
+				Parent: tabSyncthing,
 			}
 		}
 	}
@@ -293,53 +294,12 @@ func (s *SyncthingDetailScreen) View(
 }
 
 func (s *SyncthingDetailScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
 	if s.focusZone == syncDetailZoneButtons {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")))
-		if s.btnIdx == 0 {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left"),
-					key.WithHelp("←", "sidebar")),
-				key.NewBinding(
-					key.WithKeys("right"),
-					key.WithHelp("→", "button")))
-		} else {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("left", "right"),
-					key.WithHelp("←→", "buttons")))
-		}
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("down"),
-				key.WithHelp("↓", "devices")))
-		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
-		}
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "open")),
-			key.NewBinding(
-				key.WithKeys("up", "down"),
-				key.WithHelp("↑↓", "navigate")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "buttons")),
-			kSidebar)
+		return manageButtonBindings(
+			"devices", s.btnIdx, s.ctx.HasTabs)
 	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return homeListBindings(
+		"navigate", "open", "buttons")
 }
 
 // clampCursor ensures the cursor is within bounds after

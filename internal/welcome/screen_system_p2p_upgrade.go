@@ -1,6 +1,8 @@
 package welcome
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -12,13 +14,14 @@ import (
 )
 
 // ── P2PUpgradeScreen ──────────────────────────────────
-// Flow: noIP error | confirm → install progress → done.
+// Flow: noIP error | confirm → confirm2 → install progress → done.
 // Opens as a tab from SystemHomeScreen when the user
 // presses 'p' on the LND service row in Tor-only mode.
 //
-// Three states:
-//   p2pNoIP    — PublicIPv4 returned ""; show error, Done
-//   p2pConfirm — privacy warning + typed PUBLISH MY IP
+// Four states:
+//   p2pNoIP     — PublicIPv4 returned ""; show error, Done
+//   p2pConfirm  — privacy warning + typed PUBLISH MY IP
+//   p2pConfirm2 — final warning with actual IP, Go Back / Confirm
 //   p2pProgress — delegated to InstallProgressScreen
 
 type p2pStep int
@@ -26,6 +29,7 @@ type p2pStep int
 const (
 	p2pNoIP p2pStep = iota
 	p2pConfirm
+	p2pConfirm2
 	p2pProgress
 )
 
@@ -42,6 +46,10 @@ type P2PUpgradeScreen struct {
 	input     textinput.Model
 	focusZone int
 	btnIdx    int // 0=Cancel, 1=Proceed
+	error     string
+
+	// Confirm2 step (final warning)
+	confirm2Idx int // 0=Go Back, 1=Confirm
 
 	// Progress step — embedded screen
 	progress *InstallProgressScreen
@@ -93,19 +101,21 @@ func (s *P2PUpgradeScreen) Init() tea.Cmd {
 func (s *P2PUpgradeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// No-IP state: Done button only
+	// No-IP state
 	if s.step == p2pNoIP {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
-		case "enter", "backspace":
+		case "enter":
 			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
-		case "up":
+		case "up", "shift+tab":
 			if s.ctx.HasTabs {
 				return s, emitFocusTabBar
 			}
+		case "backspace":
+			return s, emitFocusParent
 		}
 		return s, nil
 	}
@@ -131,6 +141,46 @@ func (s *P2PUpgradeScreen) HandleKey(
 		return s, cmd
 	}
 
+	// Confirm2 state: final warning with Go Back / Confirm
+	if s.step == p2pConfirm2 {
+		switch keyStr {
+		case "ctrl+c":
+			return s, tea.Quit
+		case "left":
+			if s.confirm2Idx > 0 {
+				s.confirm2Idx--
+				return s, nil
+			}
+			return s, emitFocusSidebar
+		case "right":
+			if s.confirm2Idx < 1 {
+				s.confirm2Idx++
+			}
+			return s, nil
+		case "up", "shift+tab":
+			if s.ctx.HasTabs {
+				return s, emitFocusTabBar
+			}
+			return s, nil
+		case "down", "tab":
+			return s, nil
+		case "backspace":
+			s.step = p2pConfirm
+			s.focusZone = p2pZoneButtons
+			s.input.Blur()
+			return s, nil
+		case "enter":
+			if s.confirm2Idx == 0 {
+				s.step = p2pConfirm
+				s.focusZone = p2pZoneButtons
+				s.input.Blur()
+				return s, nil
+			}
+			return s.startInstall()
+		}
+		return s, nil
+	}
+
 	// Confirm state
 	switch keyStr {
 	case "ctrl+c":
@@ -141,7 +191,7 @@ func (s *P2PUpgradeScreen) HandleKey(
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		}
-		return s, emitCloseTab
+		return s, emitFocusParent
 
 	case "left":
 		if s.focusZone == p2pZoneButtons {
@@ -209,12 +259,17 @@ func (s *P2PUpgradeScreen) HandleKey(
 		}
 		// Proceed — only if input matches exactly
 		if s.input.Value() != "PUBLISH MY IP" {
+			s.error = "Type PUBLISH MY IP to confirm"
 			return s, nil
 		}
-		return s.startInstall()
+		s.error = ""
+		s.step = p2pConfirm2
+		s.confirm2Idx = 0
+		return s, nil
 
 	default:
 		if s.focusZone == p2pZoneInput {
+			s.error = ""
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
@@ -275,6 +330,16 @@ func (s *P2PUpgradeScreen) HandleMsg(
 			newScreen.(*InstallProgressScreen)
 		return s, cmd
 	}
+	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		if s.step == p2pConfirm &&
+			s.focusZone == p2pZoneInput {
+			val := strings.TrimSuffix(
+				string(msg.Content), "\n")
+			s.input.SetValue(val)
+		}
+		return s, nil
+	}
 	return s, nil
 }
 
@@ -288,6 +353,9 @@ func (s *P2PUpgradeScreen) View(
 	}
 	if s.step == p2pProgress && s.progress != nil {
 		return s.progress.View(w, h)
+	}
+	if s.step == p2pConfirm2 {
+		return s.viewConfirm2(w, h)
 	}
 	return s.viewConfirm(w, h)
 }
@@ -367,9 +435,11 @@ func (s *P2PUpgradeScreen) viewConfirm(
 
 	p.blank()
 	p.input("Type PUBLISH MY IP to proceed:",
-		s.input,
+		s.input.View(),
 		isFocused &&
 			s.focusZone == p2pZoneInput)
+
+	p.appendError(s.error)
 
 	return p.renderWithBottomButtons(
 		[]string{"Cancel", "Proceed"},
@@ -378,32 +448,54 @@ func (s *P2PUpgradeScreen) viewConfirm(
 			s.focusZone == p2pZoneButtons, h)
 }
 
+func (s *P2PUpgradeScreen) viewConfirm2(
+	w, h int,
+) string {
+	isFocused := s.ctx.ContentFocused
+	p := newPane(w)
+
+	p.title(theme.Warning, "Final Confirmation")
+	p.blank()
+	p.line(" " + theme.Value.Render(
+		"Your IP address:"))
+	p.blank()
+	p.mono(s.publicIP)
+	p.blank()
+	p.line(" " + theme.Value.Render(
+		"will be permanently published to the"))
+	p.line(" " + theme.Value.Render(
+		"Lightning Network."))
+	p.blank()
+	p.line(" " + theme.Warn.Render(
+		"This cannot be undone."))
+
+	return p.renderWithBottomButtons(
+		[]string{"Go Back", "Confirm"},
+		s.confirm2Idx,
+		isFocused, h)
+}
+
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	if s.step == p2pNoIP {
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "close")),
-			kSidebar,
-			kQuit,
-		}
+		return resultBindings(s.ctx.HasTabs)
 	}
 
 	if s.step == p2pProgress && s.progress != nil {
 		return s.progress.HelpBindings()
 	}
 
+	if s.step == p2pConfirm2 {
+		return actionButtonBindings(
+			s.confirm2Idx, s.ctx.HasTabs)
+	}
+
 	// Confirm step
 	if s.focusZone == p2pZoneInput {
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "buttons")),
-			key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "buttons")),
+			bind("enter", "buttons", "enter"),
+			kTabButtons,
 			kBack,
 			kQuit,
 		}
@@ -413,31 +505,19 @@ func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	var binds []key.Binding
 	if s.btnIdx == 0 {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left"),
-				key.WithHelp("←", "sidebar")),
-			key.NewBinding(
-				key.WithKeys("right"),
-				key.WithHelp("→", "button")))
+			kSidebar,
+			kRightButton)
 	} else {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("left", "right"),
-				key.WithHelp("←→", "buttons")))
+			kLeftRightButtons)
 	}
 	binds = append(binds,
-		key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "select")),
-		key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("⇧tab", "input")),
+		kEnter,
+		kShiftTabInput,
 		kBack)
 	if s.ctx.HasTabs {
 		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("up"),
-				key.WithHelp("↑", "tab bar")))
+			kUpTabBar)
 	}
 	binds = append(binds, kQuit)
 	return binds

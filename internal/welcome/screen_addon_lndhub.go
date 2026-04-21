@@ -100,10 +100,10 @@ func (s *LndHubManageScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 		return s, nil
-	case "backspace":
-		return s, emitCloseTab
 	case "enter":
 		return s.handleEnter()
+	case "backspace":
+		return s, emitFocusParent
 	}
 	return s, nil
 }
@@ -119,6 +119,7 @@ func (s *LndHubManageScreen) handleEnter() (
 				Kind:   tabLndHubCreate,
 				Label:  "Create Account",
 				Screen: screen,
+				Parent: tabLndHub,
 			}
 		}
 	}
@@ -140,7 +141,8 @@ func (s *LndHubManageScreen) handleEnter() (
 				Label:       label,
 				Index:       idx,
 				Screen:      screen,
-				FocusTabBar: true,
+				FocusTabBar: !acct.Active,
+				Parent:      tabLndHub,
 			}
 		}
 	}
@@ -289,40 +291,20 @@ func (s *LndHubManageScreen) View(
 }
 
 func (s *LndHubManageScreen) HelpBindings() []key.Binding {
-	var binds []key.Binding
-
 	if s.focusZone == hubManageZoneButtons {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "select")),
-			kSidebar)
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("down"),
-				key.WithHelp("↓", "accounts")))
-		if s.ctx.HasTabs {
-			binds = append(binds,
-				key.NewBinding(
-					key.WithKeys("shift+tab"),
-					key.WithHelp("⇧tab", "tab bar")))
+		binds := []key.Binding{
+			kEnter,
+			bind("↓", "accounts", "down"),
+			kSidebar,
 		}
-	} else {
-		binds = append(binds,
-			key.NewBinding(
-				key.WithKeys("enter"),
-				key.WithHelp("enter", "open")),
-			key.NewBinding(
-				key.WithKeys("up", "down"),
-				key.WithHelp("↑↓", "navigate")),
-			key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("⇧tab", "buttons")),
-			kSidebar)
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
+		binds = append(binds, kQuit)
+		return binds
 	}
-
-	binds = append(binds, kQuit)
-	return binds
+	return homeListBindings(
+		"navigate", "open", "buttons")
 }
 
 // clampCursor ensures the cursor is within bounds after
