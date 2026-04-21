@@ -215,11 +215,10 @@ func (s *SSHKeysScreen) openAddTab() (Screen, tea.Cmd) {
 	screen := NewSSHKeyAddScreen(s.ctx)
 	return s, func() tea.Msg {
 		return openTabMsg{
-			Kind:        tabSSHKeyAdd,
-			Label:       "Add Key",
-			Screen:      screen,
-			FocusTabBar: true,
-			Parent:      tabSSHKeys,
+			Kind:   tabSSHKeyAdd,
+			Label:  "Add Key",
+			Screen: screen,
+			Parent: tabSSHKeys,
 		}
 	}
 }
@@ -230,11 +229,10 @@ func (s *SSHKeysScreen) openPasswordAuthTab() (
 	screen := NewSSHPasswordAuthScreen(s.ctx)
 	return s, func() tea.Msg {
 		return openTabMsg{
-			Kind:        tabSSHPasswordAuth,
-			Label:       "Password Auth",
-			Screen:      screen,
-			FocusTabBar: true,
-			Parent:      tabSSHKeys,
+			Kind:   tabSSHPasswordAuth,
+			Label:  "Password Auth",
+			Screen: screen,
+			Parent: tabSSHKeys,
 		}
 	}
 }
@@ -245,11 +243,10 @@ func (s *SSHKeysScreen) openChangePasswordTab() (
 	screen := NewChangePasswordScreen(s.ctx)
 	return s, func() tea.Msg {
 		return openTabMsg{
-			Kind:        tabSSHChangePassword,
-			Label:       "Change Password",
-			Screen:      screen,
-			FocusTabBar: true,
-			Parent:      tabSSHKeys,
+			Kind:   tabSSHChangePassword,
+			Label:  "Change Password",
+			Screen: screen,
+			Parent: tabSSHKeys,
 		}
 	}
 }
@@ -271,12 +268,11 @@ func (s *SSHKeysScreen) openDetailTab() (Screen, tea.Cmd) {
 	idx := s.keyCursor + 1
 	return s, func() tea.Msg {
 		return openTabMsg{
-			Kind:        tabSSHKeyDetail,
-			Label:       label,
-			Index:       idx,
-			Screen:      screen,
-			FocusTabBar: true,
-			Parent:      tabSSHKeys,
+			Kind:   tabSSHKeyDetail,
+			Label:  label,
+			Index:  idx,
+			Screen: screen,
+			Parent: tabSSHKeys,
 		}
 	}
 }

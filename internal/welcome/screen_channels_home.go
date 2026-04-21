@@ -166,11 +166,10 @@ func (s *ChannelsHomeScreen) handleEnter() (
 		idx := s.cursor
 		return s, func() tea.Msg {
 			return openTabMsg{
-				Kind:        tabChannel,
-				Label:       label,
-				Index:       idx,
-				Screen:      screen,
-				FocusTabBar: true,
+				Kind:   tabChannel,
+				Label:  label,
+				Index:  idx,
+				Screen: screen,
 			}
 		}
 	}

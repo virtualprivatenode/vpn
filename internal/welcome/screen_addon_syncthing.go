@@ -151,12 +151,11 @@ func (s *SyncthingDetailScreen) handleEnter() (
 		idx := s.cursor
 		return s, func() tea.Msg {
 			return openTabMsg{
-				Kind:        tabSyncthingDevice,
-				Label:       label,
-				Index:       idx,
-				Screen:      screen,
-				FocusTabBar: true,
-				Parent:      tabSyncthing,
+				Kind:   tabSyncthingDevice,
+				Label:  label,
+				Index:  idx,
+				Screen: screen,
+				Parent: tabSyncthing,
 			}
 		}
 	}

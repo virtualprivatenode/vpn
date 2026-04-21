@@ -141,7 +141,7 @@ func (s *LndHubManageScreen) handleEnter() (
 				Label:       label,
 				Index:       idx,
 				Screen:      screen,
-				FocusTabBar: true,
+				FocusTabBar: !acct.Active,
 				Parent:      tabLndHub,
 			}
 		}
