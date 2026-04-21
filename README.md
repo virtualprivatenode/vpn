@@ -9,16 +9,14 @@ No wrappers, no abstractions. Your keys, your node.
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td><img src="docs/images/create_wallet_dark.png" alt="Create Wallet Screen (Dark)" /></td>
-    <td><img src="docs/images/channels_home_dark.png" alt="Channels Dashboard (Dark)" /></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/channels_home_light.png" alt="Channels Dashboard (Light)" /></td>
-    <td><img src="docs/images/system_home_light.png" alt="System Home (Light)" /></td>
-  </tr>
-</table>
+<p>
+  <img src="docs/images/create_wallet_dark.png" width="49%" />
+  <img src="docs/images/channels_home_dark.png" width="49%" />
+</p>
+<p>
+  <img src="docs/images/channels_home_light.png" width="49%" />
+  <img src="docs/images/system_home_light.png" width="49%" />
+</p>
 
 ## What gets installed
 
@@ -72,6 +70,26 @@ This works for `curl | sudo bash`, `sudo su -` followed by curl, and
 bare-metal root installs. If no key is found, a random password is
 printed at the end and you can add a key later from the TUI.
 
+### Wallet Creation
+
+On first TUI launch after bootstrap, you'll go straight to the wallet
+creation flow:
+
+1. Read the privacy and seed warnings, press Proceed
+2. Wait for LND to become ready
+3. Type a wallet password
+4. Write down your 24-word seed on paper
+5. Type `I SAVED MY SEED` to confirm
+
+The confirmation phrase is required — there is no skip. Once confirmed,
+the flow transitions into auto-unlock configuration so you don't have
+to manually unlock on every reboot.
+
+A note on cancellation: pressing `ctrl+c` during the password prompt is
+a legitimate escape hatch (no seed has been generated yet, nothing is
+written to disk). Once you've seen your seed, `ctrl+c` is blocked by
+design — the only way forward is typing the confirmation phrase.
+
 ### Dashboard
 
 Every SSH login as `ripsline` opens a terminal UI with a sidebar of
@@ -100,78 +118,6 @@ systemctl status lnd
 systemctl status lndhub
 systemctl status syncthing
 ```
-
-### Build from Source
-
-```bash
-apt update && apt install -y git wget sudo curl
-
-cd /tmp
-wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
-source ~/.profile
-
-cd ~
-git clone https://github.com/ripsline/virtual-private-node.git
-cd virtual-private-node
-go mod tidy
-go build -o rlvpn ./cmd/
-sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
-```
-
-The bootstrap script detects that `rlvpn` is already installed and
-skips the download.
-
-### Software Verification
-
-All software is verified with GPG signatures and SHA256 checksums:
-
-- **Bitcoin Core** — 5 trusted builder keys from
-  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
-  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
-  key is a hard stop.
-- **LND** — Roasbeef's signing key verified against known fingerprint.
-- **LndHub.go** — built from source at pinned release tag (v1.0.2).
-  No prebuilt binary is used. The Go toolchain compiles directly from
-  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
-- **rlvpn binary** — signed with a key hosted on an independent
-  keyserver (not GitHub). The bootstrap downloads the key file directly
-  through Tor rather than using keyserver protocols, so compromising
-  one source does not compromise both the binary and the key.
-
-Verification failure is a hard stop.
-
-After installation, review the log:
-
-```bash
-cat /var/log/rlvpn.log
-```
-
-For manual binary verification before installation, see
-[Release Verification](docs/verifying.md).
-
-### Wallet Creation
-
-On first TUI launch after bootstrap, you'll go straight to the wallet
-creation flow:
-
-1. Read the privacy and seed warnings, press Proceed
-2. Wait for LND to become ready
-3. Type a wallet password
-4. Write down your 24-word seed on paper
-5. Type `I SAVED MY SEED` to confirm
-
-The confirmation phrase is required — there is no skip. Once confirmed,
-the flow transitions into auto-unlock configuration so you don't have
-to manually unlock on every reboot.
-
-A note on cancellation: pressing `ctrl+c` during the password prompt is
-a legitimate escape hatch (no seed has been generated yet, nothing is
-written to disk). Once you've seen your seed, `ctrl+c` is blocked by
-design — the only way forward is typing the confirmation phrase.
 
 ### Connecting Zeus Wallet
 
@@ -335,6 +281,58 @@ Verify Tor routing after install:
 ```bash
 grep "Tor" /var/log/rlvpn.log
 ```
+
+### Software Verification
+
+All software is verified with GPG signatures and SHA256 checksums:
+
+- **Bitcoin Core** — 5 trusted builder keys from
+  [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs).
+  Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
+  key is a hard stop.
+- **LND** — Roasbeef's signing key verified against known fingerprint.
+- **LndHub.go** — built from source at pinned release tag (v1.0.2).
+  No prebuilt binary is used. The Go toolchain compiles directly from
+  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
+- **rlvpn binary** — signed with a key hosted on an independent
+  keyserver (not GitHub). The bootstrap downloads the key file directly
+  through Tor rather than using keyserver protocols, so compromising
+  one source does not compromise both the binary and the key.
+
+Verification failure is a hard stop.
+
+After installation, review the log:
+
+```bash
+cat /var/log/rlvpn.log
+```
+
+For manual binary verification before installation, see
+[Release Verification](docs/verifying.md).
+
+### Build from Source
+
+```bash
+sudo apt update && sudo apt install -y git wget sudo curl
+
+cd /tmp
+wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+
+cd ~
+git clone https://github.com/ripsline/virtual-private-node.git
+cd virtual-private-node
+go mod tidy
+go build -o rlvpn ./cmd/
+sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
+curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
+```
+
+The bootstrap script detects that `rlvpn` is already installed and
+skips the download.
 
 ### Architecture
 
