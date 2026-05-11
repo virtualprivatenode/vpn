@@ -111,7 +111,7 @@ func TestSendPaymentResultFailed(t *testing.T) {
 
 func TestNilClientInvoiceMethods(t *testing.T) {
 	c := &Client{}
-	if _, err := c.AddInvoice(1000, "test"); err == nil {
+	if _, err := c.AddInvoice(1000, "test", false); err == nil {
 		t.Error("should error")
 	}
 	if _, err := c.DecodePayReq("lnbc..."); err == nil {

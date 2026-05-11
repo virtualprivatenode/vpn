@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -27,7 +28,8 @@ const (
 const (
 	recvZoneAmount  = 0
 	recvZoneMemo    = 1
-	recvZoneButtons = 2
+	recvZoneBlind   = 2
+	recvZoneButtons = 3
 )
 
 // ── ReceiveScreen ───────────────────────────────────────
@@ -39,8 +41,9 @@ type ReceiveScreen struct {
 	// Input state
 	amountInput AmountInput
 	memoInput   textinput.Model
-	focusZone   int // 0=amount, 1=memo, 2=buttons
-	btnIdx      int // 0=Clear, 1=Create Invoice
+	blindPaths  bool // blinded paths on invoice (privacy)
+	focusZone   int  // 0=amount, 1=memo, 2=blind, 3=buttons
+	btnIdx      int  // 0=Clear, 1=Create Invoice
 	inputError  string
 
 	// Invoice state (set after creation)
@@ -66,6 +69,7 @@ func NewReceiveScreen(
 		step:        recvStepInput,
 		amountInput: amt,
 		memoInput:   newRecvMemoInput(),
+		blindPaths:  true,
 		focusZone:   recvZoneAmount,
 		btnIdx:      1, // default to Create Invoice
 	}
@@ -148,6 +152,13 @@ func (s *ReceiveScreen) inputBindings() []key.Binding {
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)
 		}
+	case recvZoneBlind:
+		binds = append(binds,
+			kEnterToggle, kUpDownFields, kTabNext,
+			kSidebar)
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
 	case recvZoneButtons:
 		binds = append(binds,
 			kLeftRightButtons, kEnter, kShiftTabBack,
@@ -170,6 +181,8 @@ func (s *ReceiveScreen) focusInputZone() {
 		s.amountInput.Focus()
 	case recvZoneMemo:
 		s.memoInput.Focus()
+	case recvZoneBlind:
+		// no text input to focus
 	}
 }
 
@@ -298,6 +311,7 @@ func (s *ReceiveScreen) handleInputKey(
 			case 0: // Clear
 				s.amountInput.Clear()
 				s.memoInput = newRecvMemoInput()
+				s.blindPaths = true
 				s.inputError = ""
 				s.focusZone = recvZoneAmount
 				s.focusInputZone()
@@ -307,7 +321,12 @@ func (s *ReceiveScreen) handleInputKey(
 			}
 			return s, nil
 		}
-		// Enter in input field → advance to buttons
+		// Blind toggle
+		if s.focusZone == recvZoneBlind {
+			s.blindPaths = !s.blindPaths
+			return s, nil
+		}
+		// Enter in text field → advance to buttons
 		s.focusZone = recvZoneButtons
 		s.amountInput.Blur()
 		s.memoInput.Blur()
@@ -343,7 +362,8 @@ func (s *ReceiveScreen) submitInvoice() (
 	s.inputError = ""
 	return s, createInvoiceCmd(
 		s.ctx.LndClient, amt,
-		s.memoInput.Value())
+		s.memoInput.Value(),
+		s.blindPaths)
 }
 
 // ── Waiting step ────────────────────────────────────────
@@ -487,7 +507,15 @@ func (s *ReceiveScreen) handleInvoiceCreated(
 	msg invoiceCreatedMsg,
 ) (Screen, tea.Cmd) {
 	if msg.err != nil {
-		s.inputError = msg.err.Error()
+		errStr := msg.err.Error()
+		if s.blindPaths && (strings.Contains(errStr,
+			"blinded") || strings.Contains(errStr,
+			"routes to self")) {
+			s.inputError = errStr +
+				" — try turning off blinded paths"
+		} else {
+			s.inputError = errStr
+		}
 		return s, nil
 	}
 	s.payReq = msg.payReq
@@ -545,6 +573,24 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 	p.input("Memo (optional):",
 		s.memoInput.View(), memoFocused)
 	p.dim("Visible to the sender.")
+	p.blank()
+
+	// ── Blinded paths toggle ──
+	blindFocused := isFocused &&
+		s.focusZone == recvZoneBlind
+	blindLabel := theme.Label
+	blindMarker := " "
+	if blindFocused {
+		blindLabel = theme.NavActive
+		blindMarker = theme.NavActive.Render("▸")
+	}
+	blindValue := theme.Good.Render("● on")
+	if !s.blindPaths {
+		blindValue = theme.Dim.Render("○ off")
+	}
+	p.line(" " + blindLabel.Render("Blinded paths:"))
+	p.line(blindMarker + " " + blindValue)
+	p.dim("Hides your node identity on invoices.")
 
 	p.appendError(s.inputError)
 
@@ -568,7 +614,12 @@ func (s *ReceiveScreen) viewWaiting(
 
 	if s.payReq != "" {
 		p.labelLine("Invoice:")
-		p.monoWrap(s.payReq)
+		display := s.payReq
+		maxChars := (w - 2) * 4 // ~4 wrapped lines
+		if len(display) > maxChars {
+			display = display[:maxChars] + "..."
+		}
+		p.monoWrap(display)
 		p.blank()
 
 		p.dim("Waiting for payment...")

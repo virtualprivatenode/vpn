@@ -1,6 +1,7 @@
 package welcome
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -492,18 +493,24 @@ func (s *AutoUnlockScreen) viewEnable(
 	p.line(" " + theme.Value.Render(
 		"Enter the SAME password you used when"))
 	p.line(" " + theme.Value.Render(
-		"creating your wallet (NOT your seed,"))
+		"creating your wallet (NOT YOUR 24 WORD"))
 	p.line(" " + theme.Value.Render(
-		"NOT a cipher seed passphrase)."))
+		"SEED, not the optional seed passphrase)."))
 	p.blank()
 
 	p.input("Wallet password:",
 		s.pw1.View(),
 		isFocused && s.focusZone == auZoneInput1)
+	if len(s.pw1.Value()) > 0 {
+		p.dim(fmt.Sprintf("(%d chars)", len(s.pw1.Value())))
+	}
 	p.blank()
 	p.input("Confirm password:",
 		s.pw2.View(),
 		isFocused && s.focusZone == auZoneInput2)
+	if len(s.pw2.Value()) > 0 {
+		p.dim(fmt.Sprintf("(%d chars)", len(s.pw2.Value())))
+	}
 
 	p.appendError(s.errMsg)
 

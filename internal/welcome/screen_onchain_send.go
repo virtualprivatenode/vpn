@@ -146,7 +146,7 @@ func (s *OnChainSendScreen) HelpBindings() []key.Binding {
 		return actionButtonBindings(
 			s.confirmBtnIdx, s.ctx.HasTabs)
 	case ocStepBroadcast:
-		return waitingBindings()
+		return inFlightBindings()
 	case ocStepResult:
 		return resultBindings(s.ctx.HasTabs)
 	}
@@ -478,9 +478,6 @@ func (s *OnChainSendScreen) handleConfirmKey(
 func (s *OnChainSendScreen) handleBroadcastKey(
 	keyStr string,
 ) (Screen, tea.Cmd) {
-	if keyStr == "ctrl+c" {
-		return s, tea.Quit
-	}
 	return s, nil
 }
 

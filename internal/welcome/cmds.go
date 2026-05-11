@@ -151,13 +151,14 @@ func fetchClosedChannelsCmd(
 
 func createInvoiceCmd(
 	client *lndrpc.Client, amount int64, memo string,
+	blind bool,
 ) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
 			return invoiceCreatedMsg{
 				err: fmt.Errorf("LND not connected")}
 		}
-		inv, err := client.AddInvoice(amount, memo)
+		inv, err := client.AddInvoice(amount, memo, blind)
 		if err != nil {
 			return invoiceCreatedMsg{err: err}
 		}
