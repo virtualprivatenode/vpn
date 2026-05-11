@@ -5,6 +5,7 @@ package lndrpc
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -405,7 +406,7 @@ func (c *Client) ConnectPeer(pubkey, host string) error {
 	})
 	if err != nil {
 		errStr := err.Error()
-		if contains(errStr, "already connected") {
+		if strings.Contains(errStr, "already connected") {
 			return nil
 		}
 		return err
@@ -502,29 +503,16 @@ func (c *Client) getPeerAlias(pubkey string) string {
 
 func (c *Client) handleError(err error) {
 	errStr := err.Error()
-	if contains(errStr, "DeadlineExceeded") || contains(errStr, "context deadline") {
+	if strings.Contains(errStr, "DeadlineExceeded") || strings.Contains(errStr, "context deadline") {
 		return
 	}
-	if contains(errStr, "starting up") || contains(errStr, "not yet ready") {
+	if strings.Contains(errStr, "starting up") || strings.Contains(errStr, "not yet ready") {
 		return
 	}
-	if contains(errStr, "Unavailable") || contains(errStr, "connection refused") {
+	if strings.Contains(errStr, "Unavailable") || strings.Contains(errStr, "connection refused") {
 		logger.Status("LND connection lost, will reconnect: %v", err)
 		go c.Reconnect()
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func satStr(sats int64) string {

@@ -544,6 +544,7 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 	p.blank()
 	p.input("Memo (optional):",
 		s.memoInput.View(), memoFocused)
+	p.dim("Visible to the sender.")
 
 	p.appendError(s.inputError)
 
