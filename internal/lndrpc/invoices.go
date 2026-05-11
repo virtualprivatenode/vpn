@@ -54,8 +54,11 @@ type RouteHop struct {
 
 // ── Invoice creation ─────────────────────────────────────
 
-// AddInvoice creates a new Lightning invoice.
-func (c *Client) AddInvoice(amountSats int64, memo string) (*Invoice, error) {
+// AddInvoice creates a new Lightning invoice. When blind
+// is true, LND generates blinded paths that hide the node's
+// pubkey from the sender. Requires at least one active
+// channel with sufficient inbound capacity.
+func (c *Client) AddInvoice(amountSats int64, memo string, blind bool) (*Invoice, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
@@ -64,9 +67,10 @@ func (c *Client) AddInvoice(amountSats int64, memo string) (*Invoice, error) {
 	defer cancel()
 
 	resp, err := rpc.AddInvoice(ctx, &lnrpc.Invoice{
-		Value:   amountSats,
-		Memo:    memo,
-		Private: true,
+		Value:     amountSats,
+		Memo:      memo,
+		Private:   !blind,
+		IsBlinded: blind,
 	})
 	if err != nil {
 		c.handleError(err)

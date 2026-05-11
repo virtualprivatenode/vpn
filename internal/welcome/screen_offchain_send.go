@@ -125,7 +125,7 @@ func (s *SendScreen) HelpBindings() []key.Binding {
 		return actionButtonBindings(
 			s.confirmBtnIdx, s.ctx.HasTabs)
 	case sendStepInFlight:
-		return waitingBindings()
+		return inFlightBindings()
 	case sendStepResult:
 		return resultBindings(s.ctx.HasTabs)
 	}
@@ -345,9 +345,6 @@ func (s *SendScreen) backToInput() {
 func (s *SendScreen) handleInFlightKey(
 	keyStr string,
 ) (Screen, tea.Cmd) {
-	if keyStr == "ctrl+c" {
-		return s, tea.Quit
-	}
 	return s, nil
 }
 

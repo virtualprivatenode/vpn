@@ -158,7 +158,7 @@ func (s *ChannelCloseScreen) HelpBindings() []key.Binding {
 	case closeStepConfirm:
 		return s.confirmBindings()
 	case closeStepClosing:
-		return waitingBindings()
+		return inFlightBindings()
 	case closeStepResult:
 		return resultBindings(s.ctx.HasTabs)
 	}
@@ -418,9 +418,6 @@ func (s *ChannelCloseScreen) handleConfirmBtnKey(
 func (s *ChannelCloseScreen) handleClosingKey(
 	keyStr string,
 ) (Screen, tea.Cmd) {
-	if keyStr == "ctrl+c" {
-		return s, tea.Quit
-	}
 	return s, nil
 }
 

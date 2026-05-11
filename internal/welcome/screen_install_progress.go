@@ -2,7 +2,6 @@ package welcome
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -140,8 +139,7 @@ func (s *InstallProgressScreen) HandleMsg(
 func (s *InstallProgressScreen) View(
 	w, h int,
 ) string {
-	var lines []string
-	lines = append(lines, "")
+	p := newPane(w)
 
 	for i, step := range s.steps {
 		var ind string
@@ -160,55 +158,35 @@ func (s *InstallProgressScreen) View(
 			ind = "[wait]"
 		}
 
-		lines = append(lines,
-			"  "+sty.Render(fmt.Sprintf(
-				"%s [%d/%d] %s",
-				ind, i+1, len(s.steps), step.Name)))
+		p.line(" " + sty.Render(fmt.Sprintf(
+			"%s [%d/%d] %s",
+			ind, i+1, len(s.steps), step.Name)))
 
 		if step.Status == installer.StepFailed &&
 			step.Err != nil {
-			lines = append(lines,
-				"  "+theme.Warn.Render(
-					fmt.Sprintf("    Error: %v",
-						step.Err)))
+			p.line(" " + theme.Warn.Render(
+				fmt.Sprintf("    Error: %v",
+					step.Err)))
 		}
 	}
 
-	lines = append(lines, "")
+	p.blank()
 
 	if s.done && !s.failed {
-		lines = append(lines,
-			"  "+theme.Good.Render(
-				"Complete."))
-		lines = append(lines, "")
-		lines = append(lines,
-			"  "+theme.Dim.Render(
-				"Press Enter to close."))
+		p.line(" " + theme.Good.Render("Complete."))
+		return p.renderWithBottomButtons(
+			[]string{"Done"}, 0,
+			s.ctx.ContentFocused, h)
 	} else if s.failed {
-		lines = append(lines,
-			"  "+theme.Warn.Render(
-				"Installation failed."))
-		lines = append(lines, "")
-		lines = append(lines,
-			"  "+theme.Dim.Render(
-				"Press Enter to close."))
-	} else {
-		lines = append(lines,
-			"  "+theme.Dim.Render(
-				"Installing... please wait"))
+		p.line(" " + theme.Warn.Render(
+			"Installation failed."))
+		return p.renderWithBottomButtons(
+			[]string{"Done"}, 0,
+			s.ctx.ContentFocused, h)
 	}
 
-	content := strings.Join(lines, "\n")
-
-	// Center vertically in available space
-	contentLines := strings.Split(content, "\n")
-	if len(contentLines) < h {
-		pad := (h - len(contentLines)) / 3
-		prefix := strings.Repeat("\n", pad)
-		content = prefix + content
-	}
-
-	return content
+	p.dim("Installing... please wait")
+	return p.render()
 }
 
 // ── HelpBindings ────────────────────────────────────────

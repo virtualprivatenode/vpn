@@ -185,6 +185,14 @@ func waitingBindings() []key.Binding {
 	return []key.Binding{kQuit}
 }
 
+// inFlightBindings is for fund-moving operations where
+// ctrl+c is blocked. Shows a status hint instead of keys.
+func inFlightBindings() []key.Binding {
+	return []key.Binding{
+		bind("···", "in progress"),
+	}
+}
+
 // ── Archetype: result screen ────────────────────────────
 // Completed action — enter closes tab, backspace goes to
 // parent, standard navigation (left→sidebar, up→tab bar).
