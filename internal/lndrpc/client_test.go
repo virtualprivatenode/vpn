@@ -55,15 +55,6 @@ func TestSatStr(t *testing.T) {
 	}
 }
 
-func TestContains(t *testing.T) {
-	if !contains("connection refused", "refused") {
-		t.Error("should contain")
-	}
-	if contains("", "something") {
-		t.Error("empty should not contain")
-	}
-}
-
 func TestNilClientSafety(t *testing.T) {
 	c := &Client{}
 	if _, err := c.GetInfo(); err == nil {

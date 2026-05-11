@@ -32,7 +32,7 @@ type OnChainHomeScreen struct {
 	ctx   *ScreenContext
 	ocCtx *OnChainContext
 
-	btnIdx    int // 0=Receive, 1=Send
+	btnIdx    int // 0=Send, 1=Receive
 	focusZone int // 0=buttons, 1=utxo table, 2=tx table
 
 	utxoCursor    int
@@ -270,10 +270,10 @@ func (s *OnChainHomeScreen) handleEnter() (
 	switch s.focusZone {
 	case ocHomeZoneButtons:
 		switch s.btnIdx {
-		case 0: // Receive
-			return s.openReceive()
-		case 1: // Send
+		case 0: // Send
 			return s.openSend()
+		case 1: // Receive
+			return s.openReceive()
 		}
 	case ocHomeZoneUtxos:
 		if s.utxoCursor < len(s.ocCtx.Utxos) {
@@ -564,7 +564,7 @@ func (s *OnChainHomeScreen) View(
 	}
 	headerLines = append(headerLines,
 		renderButtons(
-			[]string{"Receive", sendLabel},
+			[]string{sendLabel, "Receive"},
 			s.btnIdx,
 			isFocused &&
 				s.focusZone == ocHomeZoneButtons,

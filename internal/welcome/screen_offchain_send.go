@@ -487,7 +487,7 @@ func (s *SendScreen) viewConfirm(
 		p.field("Description: ", s.decodedDesc)
 	}
 	p.labelLine("Destination:")
-	p.monoWrap(s.decodedDest)
+	p.mono(s.decodedDest)
 	p.blank()
 	p.warn("Send " +
 		formatSats(s.decodedAmt) + " sats?")
@@ -530,7 +530,7 @@ func (s *SendScreen) viewResult(
 		if s.preimage != "" {
 			p.blank()
 			p.labelLine("Preimage:")
-			p.monoWrap(s.preimage)
+			p.mono(s.preimage)
 		}
 		if len(s.routeHops) > 0 {
 			p.blank()
