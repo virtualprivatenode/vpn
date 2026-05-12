@@ -72,7 +72,7 @@ func (c *Client) SendPayment(payReq string) (*SendPaymentResult, error) {
 						result.Hops = append(result.Hops, RouteHop{
 							PubKey:   hop.GetPubKey(),
 							ChanID:   hop.GetChanId(),
-							FeeSats:  hop.GetFee(),
+							FeeSats:  hop.GetFeeMsat() / 1000,
 							AmtToFwd: hop.GetAmtToForwardMsat() / 1000,
 						})
 					}
