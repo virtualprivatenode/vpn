@@ -483,6 +483,8 @@ func LndHubInstallSteps(
 			Fn: func() error {
 				return createLndHubDatabase(dbPassword)
 			}},
+		{Name: "Installing git",
+			Fn: installGit},
 		{Name: "Cloning lndhub.go v" + lndhubVersion,
 			Fn: cloneLndHub},
 		{Name: "Building lndhub (from source)",

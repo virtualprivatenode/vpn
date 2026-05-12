@@ -767,6 +767,9 @@ func (m Model) previewSection(
 	sec int,
 ) (tea.Model, tea.Cmd) {
 	switch sec {
+	case secChannels:
+		return m,
+			fetchStatus(m.cfg, m.lndClient)
 	case secWallet:
 		return m,
 			fetchPaymentHistoryCmd(m.lndClient)

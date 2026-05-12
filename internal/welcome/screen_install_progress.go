@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/installer"
+	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -113,6 +114,9 @@ func (s *InstallProgressScreen) HandleMsg(
 			s.steps[msg.index].Err = msg.err
 			s.failed = true
 			s.done = true
+			logger.Install("step %d/%d failed: %s: %v",
+				msg.index+1, len(s.steps),
+				s.steps[msg.index].Name, msg.err)
 			if s.onFail != nil {
 				return s, s.onFail()
 			}
@@ -164,9 +168,8 @@ func (s *InstallProgressScreen) View(
 
 		if step.Status == installer.StepFailed &&
 			step.Err != nil {
-			p.line(" " + theme.Warn.Render(
-				fmt.Sprintf("    Error: %v",
-					step.Err)))
+			p.warnWrap(fmt.Sprintf(
+				"    Error: %v", step.Err))
 		}
 	}
 
@@ -185,8 +188,9 @@ func (s *InstallProgressScreen) View(
 			s.ctx.ContentFocused, h)
 	}
 
-	p.dim("Installing... please wait")
-	return p.render()
+	p.dim("Do not close the terminal.")
+	return p.renderWithBottomButtons(
+		[]string{"Installing..."}, 0, false, h)
 }
 
 // ── HelpBindings ────────────────────────────────────────
@@ -195,5 +199,5 @@ func (s *InstallProgressScreen) HelpBindings() []key.Binding {
 	if s.done {
 		return resultBindings(s.ctx.HasTabs)
 	}
-	return waitingBindings()
+	return inFlightBindings()
 }

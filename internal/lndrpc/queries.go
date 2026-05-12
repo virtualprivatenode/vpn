@@ -453,8 +453,8 @@ func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, tap
 		NodePubkey:         pubkeyBytes,
 		LocalFundingAmount: localAmount,
 		Private:            private,
-		MinConfs:           1,
-		SpendUnconfirmed:   false,
+		MinConfs:           0,
+		SpendUnconfirmed:   true,
 		ScidAlias:          private,
 	}
 	if taproot {

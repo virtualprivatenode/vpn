@@ -113,6 +113,12 @@ func createLndHubDatabase(dbPassword string) error {
 	return nil
 }
 
+// ── Git ─────────────────────────────────────────────────
+
+func installGit() error {
+	return system.SudoRun("apt-get", "install", "-y", "-qq", "git")
+}
+
 // ── Build from source ────────────────────────────────────
 
 // lndhubBuildDir holds the temp directory used across clone/build/install.
