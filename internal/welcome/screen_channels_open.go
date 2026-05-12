@@ -148,7 +148,7 @@ func (s *ChannelOpenScreen) View(w, h int) string {
 	case coStepConfirm:
 		return s.viewConfirm(w, h)
 	case coStepOpening:
-		return s.viewOpening(w)
+		return s.viewOpening(w, h)
 	case coStepResult:
 		return s.viewResult(w)
 	}
@@ -165,7 +165,7 @@ func (s *ChannelOpenScreen) HelpBindings() []key.Binding {
 		return actionButtonBindings(
 			s.confirmBtnIdx, s.ctx.HasTabs)
 	case coStepOpening:
-		return waitingBindings()
+		return inFlightBindings()
 	case coStepResult:
 		return resultBindings(s.ctx.HasTabs)
 	}
@@ -697,9 +697,7 @@ func (s *ChannelOpenScreen) backToInput() {
 func (s *ChannelOpenScreen) handleOpeningKey(
 	keyStr string,
 ) (Screen, tea.Cmd) {
-	if keyStr == "ctrl+c" {
-		return s, tea.Quit
-	}
+	// Fund-moving operation in progress — block all keys.
 	return s, nil
 }
 
@@ -765,6 +763,9 @@ func (s *ChannelOpenScreen) handleOpenResult(
 		s.error = ""
 	}
 	s.step = coStepResult
+	if msg.err == nil {
+		return s, emitRefreshStatus
+	}
 	return s, nil
 }
 
@@ -1241,7 +1242,7 @@ func (s *ChannelOpenScreen) viewConfirm(
 }
 
 func (s *ChannelOpenScreen) viewOpening(
-	w int,
+	w, h int,
 ) string {
 	p := newPane(w)
 	p.title(theme.Header, "Opening Channel...")
@@ -1250,7 +1251,8 @@ func (s *ChannelOpenScreen) viewOpening(
 	p.blank()
 	p.dim("May take up to 2 minutes over Tor.")
 	p.dim("Do not close the terminal.")
-	return p.render()
+	return p.renderWithBottomButtons(
+		[]string{"Opening..."}, 0, false, h)
 }
 
 func (s *ChannelOpenScreen) viewResult(

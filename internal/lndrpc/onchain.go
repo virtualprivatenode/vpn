@@ -141,10 +141,12 @@ func (c *Client) SendCoins(
 	defer cancel()
 
 	req := &lnrpc.SendCoinsRequest{
-		Addr:        address,
-		Amount:      amountSats,
-		SatPerVbyte: uint64(satPerVbyte),
-		SendAll:     sendAll,
+		Addr:             address,
+		Amount:           amountSats,
+		SatPerVbyte:      uint64(satPerVbyte),
+		SendAll:          sendAll,
+		MinConfs:         0,
+		SpendUnconfirmed: true,
 	}
 
 	// Coin control: restrict inputs to selected UTXOs

@@ -253,7 +253,7 @@ func (c *Client) ListPayments(limit uint64) ([]PaymentEntry, error) {
 			AmountSats:     pay.GetValueSat(),
 			FeeSats:        pay.GetFeeSat(),
 			Status:         pay.GetStatus().String(),
-			CreationDate:   pay.GetCreationDate(),
+			CreationDate:   pay.GetCreationTimeNs() / 1_000_000_000,
 			Preimage:       pay.GetPaymentPreimage(),
 			PaymentRequest: pay.GetPaymentRequest(),
 			IsIncoming:     false,
