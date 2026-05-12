@@ -39,7 +39,6 @@ type OnChainTx struct {
 	BlockHeight    int32
 	Timestamp      int64
 	Label          string
-	DestAddresses  []string
 	RawTxHex       string
 	TxType         string // "send", "receive", "channel_open", "channel_close"
 	ChannelPeer    string // peer alias for channel open/close
@@ -230,10 +229,6 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 		return nil, err
 	}
 
-	// Build set of our wallet addresses from UTXOs
-	// for identifying change outputs
-	walletAddrs := c.getWalletAddresses()
-
 	// Get channel funding txids for labeling
 	chanTxids := c.getChannelFundingTxids()
 
@@ -283,18 +278,6 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 				Amount:  od.GetAmount(),
 				IsLocal: od.GetIsOurAddress(),
 			})
-		}
-
-		// Fallback: if no output details, use
-		// dest addresses (older LND versions)
-		if len(outputs) == 0 {
-			for _, addr := range t.GetDestAddresses() {
-				isLocal := walletAddrs[addr]
-				outputs = append(outputs, TxOutput{
-					Address: addr,
-					IsLocal: isLocal,
-				})
-			}
 		}
 
 		// Determine transaction type
@@ -367,7 +350,6 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 			BlockHeight:   t.GetBlockHeight(),
 			Timestamp:     t.GetTimeStamp(),
 			Label:         label,
-			DestAddresses: t.GetDestAddresses(),
 			RawTxHex:      t.GetRawTxHex(),
 			TxType:        txType,
 			ChannelPeer:   channelPeer,
@@ -450,61 +432,6 @@ func (c *Client) LabelTransaction(
 }
 
 // ── Helpers for transaction labeling ─────────────────────
-
-// getWalletAddresses returns a set of known wallet
-// addresses from current UTXOs.
-func (c *Client) getWalletAddresses() map[string]bool {
-	addrs := make(map[string]bool)
-
-	c.mu.RLock()
-	conn := c.conn
-	c.mu.RUnlock()
-	if conn == nil {
-		return addrs
-	}
-
-	walletClient := walletrpc.NewWalletKitClient(conn)
-	ctx, cancel := c.callCtx(10 * time.Second)
-	defer cancel()
-
-	resp, err := walletClient.ListUnspent(ctx,
-		&walletrpc.ListUnspentRequest{
-			MinConfs: 0,
-			MaxConfs: 999999,
-		})
-	if err != nil {
-		return addrs
-	}
-
-	for _, u := range resp.GetUtxos() {
-		if u.GetAddress() != "" {
-			addrs[u.GetAddress()] = true
-		}
-	}
-
-	// Also get a few recent addresses from the
-	// address manager. We look at dest addresses of
-	// recent receive transactions since UTXOs may
-	// have been spent already.
-	rpc := c.rpc()
-	if rpc != nil {
-		ctx2, cancel2 := c.callCtx(10 * time.Second)
-		defer cancel2()
-		txResp, err := rpc.GetTransactions(ctx2,
-			&lnrpc.GetTransactionsRequest{})
-		if err == nil {
-			for _, t := range txResp.GetTransactions() {
-				if t.GetAmount() > 0 {
-					for _, addr := range t.GetDestAddresses() {
-						addrs[addr] = true
-					}
-				}
-			}
-		}
-	}
-
-	return addrs
-}
 
 // getChannelFundingTxids returns a map of funding txid →
 // peer alias for all open and pending channels.

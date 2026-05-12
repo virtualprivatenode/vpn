@@ -349,7 +349,7 @@ func (c *Client) GetNewAddress() (*OnChainAddress, error) {
 	defer cancel()
 
 	resp, err := rpc.NewAddress(ctx, &lnrpc.NewAddressRequest{
-		Type: lnrpc.AddressType_TAPROOT_PUBKEY,
+		Type: lnrpc.AddressType_WITNESS_PUBKEY_HASH,
 	})
 	if err != nil {
 		c.handleError(err)
