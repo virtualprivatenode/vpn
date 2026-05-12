@@ -274,6 +274,10 @@ func (c *Client) ListPayments(limit uint64) ([]PaymentEntry, error) {
 				break // use first successful route
 			}
 		}
+		for i := range entry.Hops {
+			entry.Hops[i].Alias = c.getPeerAlias(
+				entry.Hops[i].PubKey)
+		}
 
 		// Decode payment request for memo
 		if entry.PaymentRequest != "" && c.rpc() != nil {

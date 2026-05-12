@@ -132,13 +132,3 @@ func (c *Client) WaitForInvoiceSettlement(
 	}
 	return inv, nil
 }
-
-// ResolveRouteAliases fills in the Alias field for each hop.
-func (c *Client) ResolveRouteAliases(hops []RouteHop) []RouteHop {
-	for i := range hops {
-		if hops[i].Alias == "" {
-			hops[i].Alias = c.getPeerAlias(hops[i].PubKey)
-		}
-	}
-	return hops
-}

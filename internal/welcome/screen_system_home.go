@@ -53,7 +53,8 @@ type SystemHomeScreen struct {
 	sysConfirm string // "Update packages", "Reboot"
 
 	// Background service action in progress
-	svcPending string // "restarting...", "stopping...", "starting..."
+	svcPending  string // "restarting...", "stopping...", "starting..."
+	pkgUpdating bool   // true while apt-get runs in background
 }
 
 func NewSystemHomeScreen(
@@ -216,7 +217,9 @@ func (s *SystemHomeScreen) HandleKey(
 			s.btnIdx < len(actions) {
 			switch actions[s.btnIdx] {
 			case sysBtnUpdatePkg:
-				s.sysConfirm = "Update packages"
+				if !s.pkgUpdating {
+					s.sysConfirm = "Update packages"
+				}
 			case sysBtnSSHKeys:
 				screen := NewSSHKeysScreen(s.ctx)
 				return s, func() tea.Msg {
@@ -278,6 +281,7 @@ func (s *SystemHomeScreen) handleSysConfirm(
 		if action == "Reboot" {
 			return s, runRebootCmd()
 		}
+		s.pkgUpdating = true
 		return s, runUpdatePackagesCmd()
 	}
 	return s, nil
@@ -289,6 +293,8 @@ func (s *SystemHomeScreen) HandleMsg(
 	switch msg.(type) {
 	case svcActionDoneMsg:
 		s.svcPending = ""
+	case pkgUpdateDoneMsg:
+		s.pkgUpdating = false
 	}
 	return s, nil
 }
@@ -720,6 +726,9 @@ func (s *SystemHomeScreen) buttonLabels() []string {
 	labels := make([]string, len(actions))
 	for i, a := range actions {
 		labels[i] = sysBtnLabel[a]
+		if a == sysBtnUpdatePkg && s.pkgUpdating {
+			labels[i] = "Updating..."
+		}
 	}
 	return labels
 }
