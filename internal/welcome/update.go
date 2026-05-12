@@ -260,6 +260,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case svcActionDoneMsg:
 		m.routeToSectionScreen(secSystem, msg)
 		return m, fetchStatus(m.cfg, m.lndClient)
+	case pkgUpdateDoneMsg:
+		m.routeToSectionScreen(secSystem, msg)
+		return m, fetchStatus(m.cfg, m.lndClient)
 	case statusMsg:
 		m.fetchInFlight = false
 		m.status = &msg

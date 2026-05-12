@@ -535,18 +535,24 @@ func runUpdatePackagesCmd() tea.Cmd {
 	//     skipping the pink dpkg prompt
 	// This matches the bootstrap script's Phase 1
 	// upgrade command exactly.
-	c := exec.Command("bash", "-c",
-		"sudo DEBIAN_FRONTEND=noninteractive "+
-			"NEEDRESTART_MODE=a "+
-			"apt-get update -qq && "+
-			"sudo DEBIAN_FRONTEND=noninteractive "+
-			"NEEDRESTART_MODE=a "+
-			"apt-get upgrade -y -qq "+
-			"-o Dpkg::Options::=--force-confdef "+
-			"-o Dpkg::Options::=--force-confold")
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return svcActionDoneMsg{}
-	})
+	return func() tea.Msg {
+		logger.Install("Update packages started")
+		err := system.SudoRun("bash", "-c",
+			"DEBIAN_FRONTEND=noninteractive "+
+				"NEEDRESTART_MODE=a "+
+				"apt-get update -qq && "+
+				"DEBIAN_FRONTEND=noninteractive "+
+				"NEEDRESTART_MODE=a "+
+				"apt-get upgrade -y -qq "+
+				"-o Dpkg::Options::=--force-confdef "+
+				"-o Dpkg::Options::=--force-confold")
+		if err != nil {
+			logger.Install("Update packages failed: %v", err)
+		} else {
+			logger.Install("Update packages completed")
+		}
+		return pkgUpdateDoneMsg{}
+	}
 }
 
 func runRebootCmd() tea.Cmd {

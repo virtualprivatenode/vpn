@@ -99,6 +99,7 @@ type feeTier struct {
 }
 
 type svcActionDoneMsg struct{}
+type pkgUpdateDoneMsg struct{}
 type tickMsg time.Time
 type latestVersionMsg string
 
