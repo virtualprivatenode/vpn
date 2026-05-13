@@ -140,7 +140,9 @@ func (s *OnChainHomeScreen) handleRight() (
 ) {
 	switch s.focusZone {
 	case ocHomeZoneButtons:
-		if s.btnIdx < 1 {
+		if s.ctx.Cfg.HasLND() &&
+			s.ctx.Cfg.WalletExists() &&
+			s.btnIdx < 1 {
 			s.btnIdx++
 		}
 	case ocHomeZoneUtxos:

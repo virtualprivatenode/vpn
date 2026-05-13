@@ -73,6 +73,8 @@ func (s *ChannelsHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "right":
 		if s.focusZone == chanHomeZoneButtons &&
+			s.ctx.Cfg.HasLND() &&
+			s.ctx.Cfg.WalletExists() &&
 			s.btnIdx < 2 {
 			s.btnIdx++
 		}
