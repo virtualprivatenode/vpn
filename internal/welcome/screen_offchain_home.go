@@ -64,6 +64,8 @@ func (s *WalletHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "right":
 		if s.focusZone == walletHomeZoneButtons &&
+			s.ctx.Cfg.HasLND() &&
+			s.ctx.Cfg.WalletExists() &&
 			s.btnIdx < 2 {
 			s.btnIdx++
 		}
