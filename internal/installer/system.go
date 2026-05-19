@@ -120,15 +120,6 @@ func configureFirewall(cfg *config.AppConfig) error {
 			[]string{"ufw", "allow", "8080/tcp"})
 	}
 
-	// LndHub clearnet access goes through the TLS proxy on
-	// the external port. The internal LndHub port (3004) is
-	// never exposed.
-	if cfg.LndHubInstalled && cfg.P2PMode == "hybrid" {
-		commands = append(commands,
-			[]string{"ufw", "allow",
-				paths.LndHubExternalPort + "/tcp"})
-	}
-
 	// Syncthing sync protocol — clearnet direct connection.
 	// Mutual TLS with explicit device approval ensures only
 	// paired devices can connect.

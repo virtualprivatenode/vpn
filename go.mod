@@ -9,7 +9,6 @@ require (
 	github.com/lightningnetwork/lnd v0.20.0-beta
 	github.com/mdp/qrterminal/v3 v3.2.1
 	golang.org/x/crypto v0.46.0
-	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.73.0-dev
 )
 
@@ -185,6 +184,7 @@ require (
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.39.0 // indirect
 	google.golang.org/genproto v0.0.0-20231016165738-49dd2c1f3d0b // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250218202821-56aae31c358a // indirect

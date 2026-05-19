@@ -19,8 +19,7 @@ const (
 
 // AppConfig holds the application state persisted to disk.
 //
-// Security note: passwords and tokens (SyncthingPassword,
-// LndHubAdminToken, LndHubDBPassword) are stored in plaintext. This is a
+// Security note: passwords (SyncthingPassword) are stored in plaintext. This is a
 // deliberate tradeoff for a single-user dedicated node. The config file
 // has 0600 permissions, and the machine runs a single non-root user.
 // Alternatives (OS keyring, encrypted vault) add complexity without
@@ -39,10 +38,6 @@ type AppConfig struct {
 	SyncthingInstalled bool              `json:"syncthing_installed"`
 	SyncthingPassword  string            `json:"syncthing_password,omitempty"`
 	SyncthingDevices   []SyncthingDevice `json:"syncthing_devices,omitempty"`
-	LndHubInstalled    bool              `json:"lndhub_installed"`
-	LndHubAdminToken   string            `json:"lndhub_admin_token,omitempty"`
-	LndHubDBPassword   string            `json:"lndhub_db_password,omitempty"`
-	LndHubAccounts     []LndHubAccount   `json:"lndhub_accounts,omitempty"`
 	Theme              string            `json:"theme,omitempty"`
 
 	// SSHPasswordAuthDisabled mirrors the value
@@ -53,15 +48,6 @@ type AppConfig struct {
 	// directive). True = password auth disabled by the
 	// TUI's SSH Password Auth screen.
 	SSHPasswordAuthDisabled bool `json:"ssh_password_auth_disabled,omitempty"`
-}
-
-type LndHubAccount struct {
-	Label               string `json:"label"`
-	Login               string `json:"login"`
-	CreatedAt           string `json:"created_at"`
-	Active              bool   `json:"active"`
-	DeactivatedAt       string `json:"deactivated_at,omitempty"`
-	BalanceOnDeactivate string `json:"balance_on_deactivate,omitempty"`
 }
 
 type SyncthingDevice struct {
@@ -181,44 +167,6 @@ func (c *AppConfig) NetworkConfig() *NetworkConfig {
 //
 // See go-style-review.md Q4 and design-decisions.md for
 // the rationale behind this pattern.
-
-// AddLndHubAccount appends a new active LndHub account
-// record with today's date. Extracts only the primitives
-// it needs (label, login) from callers rather than taking
-// the installer.LndHubAccount type — keeps the config
-// package free of installer-side dependencies.
-func (c *AppConfig) AddLndHubAccount(label, login string) {
-	c.LndHubAccounts = append(c.LndHubAccounts,
-		LndHubAccount{
-			Label:     label,
-			Login:     login,
-			CreatedAt: time.Now().Format("2006-01-02"),
-			Active:    true,
-		})
-}
-
-// DeactivateLndHubAccount marks the account with the given
-// login inactive and records today's date and the balance
-// at deactivation. Returns true if a matching account was
-// found and updated, false if no account had that login.
-//
-// The caller uses the bool to decide whether to Save —
-// a false return means nothing changed, so no disk write
-// is needed.
-func (c *AppConfig) DeactivateLndHubAccount(
-	login, balance string,
-) bool {
-	for i := range c.LndHubAccounts {
-		if c.LndHubAccounts[i].Login == login {
-			c.LndHubAccounts[i].Active = false
-			c.LndHubAccounts[i].DeactivatedAt =
-				time.Now().Format("2006-01-02")
-			c.LndHubAccounts[i].BalanceOnDeactivate = balance
-			return true
-		}
-	}
-	return false
-}
 
 // AddSyncthingDevice appends a new device record with an
 // auto-generated Name ("Device N" where N is the new

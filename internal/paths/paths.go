@@ -69,12 +69,11 @@ const (
 // ── Systemd ──────────────────────────────────────────────
 
 const (
-	BitcoindService    = "/etc/systemd/system/bitcoind.service"
-	LNDService         = "/etc/systemd/system/lnd.service"
-	SyncthingService   = "/etc/systemd/system/syncthing.service"
-	BackupWatchPath    = "/etc/systemd/system/lnd-backup-watch.path"
-	BackupCopyService  = "/etc/systemd/system/lnd-backup-copy.service"
-	LndHubProxyService = "/etc/systemd/system/lndhub-proxy.service"
+	BitcoindService   = "/etc/systemd/system/bitcoind.service"
+	LNDService        = "/etc/systemd/system/lnd.service"
+	SyncthingService  = "/etc/systemd/system/syncthing.service"
+	BackupWatchPath   = "/etc/systemd/system/lnd-backup-watch.path"
+	BackupCopyService = "/etc/systemd/system/lnd-backup-copy.service"
 )
 
 // ── Logs ─────────────────────────────────────────────────
@@ -101,27 +100,6 @@ const (
 	DisableIPv6Conf     = "/etc/sysctl.d/99-disable-ipv6.conf"
 	SyncthingKeyring    = "/etc/apt/keyrings/syncthing-archive-keyring.gpg"
 	SyncthingSourceList = "/etc/apt/sources.list.d/syncthing.list"
-)
-
-// ── LndHub ───────────────────────────────────────────────
-
-const (
-	LndHubDir          = "/etc/lndhub"
-	LndHubEnv          = "/etc/lndhub/lndhub.env"
-	LndHubDataDir      = "/var/lib/lndhub"
-	LndHubService      = "/etc/systemd/system/lndhub.service"
-	LndHubMacaroon     = "/var/lib/lnd/lndhub.macaroon"
-	TorLndHub          = "/var/lib/tor/lndhub"
-	TorLndHubHostname  = "/var/lib/tor/lndhub/hostname"
-	LndHubInternalPort = "3004"
-	LndHubExternalPort = "3000"
-)
-
-// ── LndHub Proxy ─────────────────────────────────────────
-
-const (
-	LndHubProxyCert = "/etc/lndhub/proxy-tls.cert"
-	LndHubProxyKey  = "/etc/lndhub/proxy-tls.key"
 )
 
 // ── User ─────────────────────────────────────────────────

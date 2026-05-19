@@ -369,22 +369,6 @@ func P2PUpgradeSteps(
 			}},
 	}
 
-	if cfg.LndHubInstalled {
-		steps = append(steps,
-			InstallStep{
-				Name: "Generating TLS certificate for LndHub proxy",
-				Fn: func() error {
-					return generateProxyCert(publicIPv4)
-				}},
-			InstallStep{
-				Name: "Creating LndHub proxy service",
-				Fn:   writeLndHubProxyService},
-			InstallStep{
-				Name: "Starting LndHub TLS proxy",
-				Fn:   startLndHubProxy},
-		)
-	}
-
 	return steps
 }
 
@@ -436,103 +420,6 @@ func SyncthingInstallSteps(
 			}},
 	}
 	return steps, syncPassword, nil
-}
-
-// ── LndHub installation ──────────────────────────────────
-
-// LndHubInstallSteps returns the install step list, the
-// generated admin token, and the DB password. The caller
-// is responsible for setting cfg.LndHubInstalled = true
-// before running steps, and for saving cfg.LndHubAdminToken
-// and cfg.LndHubDBPassword after steps complete.
-func LndHubInstallSteps(
-	cfg *config.AppConfig,
-) ([]InstallStep, string, string, error) {
-	dbPassBytes := make([]byte, 16)
-	if _, err := randRead(dbPassBytes); err != nil {
-		return nil, "", "", fmt.Errorf(
-			"generate db password: %w", err)
-	}
-	dbPassword := hexEncode(dbPassBytes)
-
-	jwtBytes := make([]byte, 32)
-	if _, err := randRead(jwtBytes); err != nil {
-		return nil, "", "", fmt.Errorf(
-			"generate jwt secret: %w", err)
-	}
-	jwtSecret := hexEncode(jwtBytes)
-
-	adminBytes := make([]byte, 24)
-	if _, err := randRead(adminBytes); err != nil {
-		return nil, "", "", fmt.Errorf(
-			"generate admin token: %w", err)
-	}
-	adminToken := hexEncode(adminBytes)
-
-	publicIPv4 := ""
-	if cfg.P2PMode == "hybrid" {
-		publicIPv4 = system.PublicIPv4()
-	}
-
-	steps := []InstallStep{
-		{Name: "Installing Go toolchain",
-			Fn: installGoToolchain},
-		{Name: "Installing PostgreSQL",
-			Fn: installPostgreSQL},
-		{Name: "Creating database",
-			Fn: func() error {
-				return createLndHubDatabase(dbPassword)
-			}},
-		{Name: "Installing git",
-			Fn: installGit},
-		{Name: "Cloning lndhub.go v" + lndhubVersion,
-			Fn: cloneLndHub},
-		{Name: "Building lndhub (from source)",
-			Fn: buildLndHub},
-		{Name: "Installing binary",
-			Fn: installLndHubBinary},
-		{Name: "Baking LND macaroon",
-			Fn: func() error {
-				return bakeLndHubMacaroon(cfg)
-			}},
-		{Name: "Creating directories",
-			Fn: createLndHubDirs},
-		{Name: "Writing configuration",
-			Fn: func() error {
-				return writeLndHubConfig(
-					cfg, dbPassword, jwtSecret, adminToken)
-			}},
-		{Name: "Creating service",
-			Fn: writeLndHubService},
-		{Name: "Configuring firewall",
-			Fn: func() error {
-				return configureFirewall(cfg)
-			}},
-		{Name: "Rebuilding Tor config",
-			Fn: func() error {
-				return RebuildTorConfig(cfg)
-			}},
-		{Name: "Restarting Tor", Fn: restartTor},
-		{Name: "Starting LndHub", Fn: startLndHub},
-	}
-
-	if cfg.P2PMode == "hybrid" && publicIPv4 != "" {
-		steps = append(steps,
-			InstallStep{
-				Name: "Generating TLS certificate for LndHub proxy",
-				Fn: func() error {
-					return generateProxyCert(publicIPv4)
-				}},
-			InstallStep{
-				Name: "Creating LndHub proxy service",
-				Fn:   writeLndHubProxyService},
-			InstallStep{
-				Name: "Starting LndHub TLS proxy",
-				Fn:   startLndHubProxy},
-		)
-	}
-
-	return steps, adminToken, dbPassword, nil
 }
 
 // ── Self-update ──────────────────────────────────────────
