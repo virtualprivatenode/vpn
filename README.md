@@ -22,7 +22,7 @@ Private by default, simple by design. Your keys, your node.
 
 ### Base (automatic)
 
-- **Bitcoin Core** — pruned node, Tor-only P2P, GPG-verified with 5 independent signatures
+- **Bitcoin Core** — pruned node, all P2P through Tor, GPG-verified with 5 independent signatures
 - **LND** — Lightning Network daemon with Tor hidden services, installed Tor-only by default
 - **Tor** — all traffic routed through Tor by default
 - **UFW firewall** — deny all incoming except SSH
