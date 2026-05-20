@@ -6,7 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/installer"
 	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/theme"
@@ -44,15 +43,11 @@ const (
 	tabSyncthingDevice                  // Syncthing device detail
 	tabSyncthingWebUI                   // Syncthing Web UI
 	tabSyncthingPair                    // Syncthing pair device flow
-	tabLndHub                           //
-	tabLndHubAccount                    // LndHub account detail
-	tabLndHubCreate                     // LndHub create account flow
 	tabOpenChannel                      // Channel open flow
 	tabOnChainTx                        // on-chain transaction detail
 	tabUtxoDetail                       // UTXO detail with label edit
 	tabChannelHistory                   // channel history view
 	tabSyncthingInstall                 // Syncthing install flow
-	tabLndHubInstall                    // LndHub install flow
 	tabP2PUpgrade                       // P2P mode upgrade flow
 	tabSelfUpdate                       // Self-update flow
 	tabAutoUnlock                       // Auto-unlock configuration flow
@@ -111,16 +106,6 @@ type latestVersionMsg string
 // or its in-progress state.
 type tabActivatedMsg struct{}
 
-type lndhubAccountCreatedMsg struct {
-	account *installer.LndHubAccount
-	label   string
-	err     error
-}
-type lndhubDeactivatedMsg struct {
-	login   string
-	balance string
-	err     error
-}
 type syncthingPairedMsg struct {
 	deviceID string
 	err      error
@@ -377,12 +362,6 @@ func serviceNames(cfg *config.AppConfig) []string {
 	}
 	if cfg.SyncthingInstalled {
 		names = append(names, "syncthing")
-	}
-	if cfg.LndHubInstalled {
-		names = append(names, "lndhub")
-	}
-	if cfg.LndHubInstalled && cfg.P2PMode == "hybrid" {
-		names = append(names, "lndhub-proxy")
 	}
 	return names
 }

@@ -11,18 +11,17 @@ import (
 )
 
 // ── AddonsHomeScreen ──────────────────────────────────
-// Section home for Add-ons. Single focus zone: a
-// two-item vertical list (Syncthing, LndHub). Enter
-// opens a detail tab if the addon is installed, or
-// triggers an install flow (opens install tab) if
-// LND is ready.
+// Section home for Add-ons. Single item (Syncthing).
+// Enter opens a detail tab if installed, or triggers an
+// install flow if LND is ready. Bottom half reserved for
+// a future add-on.
 //
 // No async data — reads ctx.Cfg pointer directly for
 // installed/enabled state.
 
 type AddonsHomeScreen struct {
 	ctx    *ScreenContext
-	cursor int // 0=Syncthing, 1=LndHub
+	cursor int // 0=Syncthing (only item for now)
 }
 
 func NewAddonsHomeScreen(
@@ -45,28 +44,7 @@ func (s *AddonsHomeScreen) HandleKey(
 		return s, tea.Quit
 	case "left":
 		return s, emitFocusSidebar
-	case "up":
-		if s.cursor > 0 {
-			s.cursor--
-			return s, nil
-		}
-		if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
-		return s, nil
-	case "down", "tab":
-		if s.cursor < 1 {
-			s.cursor++
-		}
-		return s, nil
-	case "shift+tab":
-		// Step backward through cards first, then up
-		// to the tab bar — matches the two-press
-		// pattern used by every other home screen.
-		if s.cursor > 0 {
-			s.cursor--
-			return s, nil
-		}
+	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
 		}
@@ -84,54 +62,23 @@ func (s *AddonsHomeScreen) handleEnter() (
 ) {
 	cfg := s.ctx.Cfg
 
-	switch s.cursor {
-	case 0: // Syncthing
-		if cfg.SyncthingInstalled {
-			screen := NewSyncthingDetailScreen(s.ctx)
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabSyncthing,
-					Label:  "Syncthing",
-					Screen: screen,
-				}
+	if cfg.SyncthingInstalled {
+		screen := NewSyncthingDetailScreen(s.ctx)
+		return s, func() tea.Msg {
+			return openTabMsg{
+				Kind:   tabSyncthing,
+				Label:  "Syncthing",
+				Screen: screen,
 			}
 		}
-		if cfg.HasLND() && cfg.WalletExists() {
-			screen := NewSyncthingInstallScreen(s.ctx)
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabSyncthingInstall,
-					Label:  "Installing",
-					Screen: screen,
-				}
-			}
-		}
-	case 1: // LndHub
-		if cfg.LndHubInstalled {
-			screen := NewLndHubManageScreen(s.ctx)
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabLndHub,
-					Label:  "LndHub",
-					Screen: screen,
-				}
-			}
-		}
-		if cfg.HasLND() && cfg.WalletExists() {
-			// Block install during IBD — LndHub needs
-			// a synced LND to bake its macaroon.
-			if s.ctx.Status == nil ||
-				!s.ctx.Status.btcSynced ||
-				!s.ctx.Status.lndSyncedChain {
-				return s, nil
-			}
-			screen := NewLndHubInstallScreen(s.ctx)
-			return s, func() tea.Msg {
-				return openTabMsg{
-					Kind:   tabLndHubInstall,
-					Label:  "Installing",
-					Screen: screen,
-				}
+	}
+	if cfg.HasLND() && cfg.WalletExists() {
+		screen := NewSyncthingInstallScreen(s.ctx)
+		return s, func() tea.Msg {
+			return openTabMsg{
+				Kind:   tabSyncthingInstall,
+				Label:  "Installing",
+				Screen: screen,
 			}
 		}
 	}
@@ -216,43 +163,6 @@ func (s *AddonsHomeScreen) View(
 		syncSelected,
 	)
 
-	// ── LndHub ─────────────────────────────────
-	hubSelected := isFocused && s.cursor == 1
-
-	var hubStat1, hubStat2 string
-	if cfg.LndHubInstalled {
-		activeCount := 0
-		for _, a := range cfg.LndHubAccounts {
-			if a.Active {
-				activeCount++
-			}
-		}
-		hubStat1 = theme.GreenDot.Render("●") +
-			" " + theme.Good.Render("Installed")
-		hubStat2 = theme.Dim.Render(
-			fmt.Sprintf("%d active", activeCount))
-	} else {
-		hubStat1 = theme.RedDot.Render("●") +
-			" " + theme.Dim.Render("Not installed")
-		hubStat2 = ""
-		if !cfg.WalletExists() {
-			hubStat2 = theme.Warn.Render(
-				"Requires LND wallet")
-		} else if s.ctx.Status == nil ||
-			!s.ctx.Status.btcSynced ||
-			!s.ctx.Status.lndSyncedChain {
-			hubStat2 = theme.Warn.Render(
-				"Requires synced node")
-		}
-	}
-
-	hubLines := renderSection(
-		"⚡", "LndHub",
-		"Lightning accounts for family & friends",
-		hubStat1, hubStat2,
-		hubSelected,
-	)
-
 	// ── Layout: two halves + divider ───────────
 	bodyH := h
 	if bodyH < 4 {
@@ -292,9 +202,10 @@ func (s *AddonsHomeScreen) View(
 		sepStyle.Render(
 			strings.Repeat("─", w)))
 
-	// Bottom half: LndHub
-	lines = append(lines,
-		centerInHalf(hubLines, botH)...)
+	// Bottom half: reserved for future add-on
+	for i := 0; i < botH; i++ {
+		lines = append(lines, "")
+	}
 
 	return strings.Join(lines, "\n")
 }
@@ -303,7 +214,6 @@ func (s *AddonsHomeScreen) View(
 
 func (s *AddonsHomeScreen) HelpBindings() []key.Binding {
 	binds := []key.Binding{
-		kUpDownSelect,
 		kEnterOpen,
 		bind("←/⌫", "sidebar", "left", "backspace"),
 	}

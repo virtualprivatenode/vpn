@@ -15,7 +15,7 @@ import (
 // Reusable Screen that runs a list of install steps
 // sequentially and renders progress in the content pane.
 // Replaces the standalone RunInstallTUI program for all
-// post-install flows (Syncthing, LndHub, P2P upgrade,
+// post-install flows (Syncthing, P2P upgrade,
 // self-update).
 //
 // Usage:

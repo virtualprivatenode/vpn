@@ -33,9 +33,6 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.SyncthingInstalled {
 		t.Error("SyncthingInstalled: expected false")
 	}
-	if cfg.LndHubInstalled {
-		t.Error("LndHubInstalled: expected false")
-	}
 	if cfg.InstallComplete {
 		t.Error("InstallComplete: expected false")
 	}
@@ -104,9 +101,6 @@ func TestJSONRoundTrip(t *testing.T) {
 		WalletCreated:      true,
 		SyncthingInstalled: true,
 		SyncthingPassword:  "def456",
-		LndHubInstalled:    true,
-		LndHubAdminToken:   "tok123",
-		LndHubDBPassword:   "dbpass456",
 	}
 
 	data, err := json.Marshal(original)
@@ -131,17 +125,6 @@ func TestJSONRoundTrip(t *testing.T) {
 		t.Errorf("SyncthingPassword: got %q, want %q",
 			loaded.SyncthingPassword, original.SyncthingPassword)
 	}
-	if loaded.LndHubAdminToken != original.LndHubAdminToken {
-		t.Errorf("LndHubAdminToken: got %q, want %q",
-			loaded.LndHubAdminToken, original.LndHubAdminToken)
-	}
-	if loaded.LndHubDBPassword != original.LndHubDBPassword {
-		t.Errorf("LndHubDBPassword: got %q, want %q",
-			loaded.LndHubDBPassword, original.LndHubDBPassword)
-	}
-	if !loaded.LndHubInstalled {
-		t.Error("LndHubInstalled: expected true")
-	}
 	if !loaded.AutoUnlock {
 		t.Error("AutoUnlock: expected true")
 	}
@@ -159,12 +142,6 @@ func TestOmitEmptyPasswords(t *testing.T) {
 
 	if _, exists := raw["syncthing_password"]; exists {
 		t.Error("empty SyncthingPassword should be omitted from JSON")
-	}
-	if _, exists := raw["lndhub_admin_token"]; exists {
-		t.Error("empty LndHubAdminToken should be omitted from JSON")
-	}
-	if _, exists := raw["lndhub_db_password"]; exists {
-		t.Error("empty LndHubDBPassword should be omitted from JSON")
 	}
 }
 

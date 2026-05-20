@@ -62,14 +62,6 @@ HiddenServicePort 8384 127.0.0.1:8384
 		// with explicit device approval for authentication.
 	}
 
-	if cfg.LndHubInstalled {
-		b.WriteString(fmt.Sprintf(`
-# LndHub.go API (Lightning accounts over Tor)
-HiddenServiceDir /var/lib/tor/lndhub/
-HiddenServicePort %s 127.0.0.1:%s
-`, paths.LndHubExternalPort, paths.LndHubInternalPort))
-	}
-
 	return b.String()
 }
 

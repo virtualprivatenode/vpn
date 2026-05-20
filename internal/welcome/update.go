@@ -284,23 +284,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestVersion = string(msg)
 		m.screenCtx.LatestVersion = string(msg)
 		return m, nil
-	case lndhubAccountCreatedMsg:
-		if msg.err == nil && msg.account != nil {
-			m.cfg.AddLndHubAccount(
-				msg.label, msg.account.Login)
-			m.saveCfg()
-		}
-		// Route to screen for step/error state
-		return m.dispatchToTab(tabLndHubCreate, msg)
-	case lndhubDeactivatedMsg:
-		if msg.err == nil {
-			if m.cfg.DeactivateLndHubAccount(
-				msg.login, msg.balance) {
-				m.saveCfg()
-			}
-		}
-		// Route to screen for state transition
-		return m.dispatchToTab(tabLndHubAccount, msg)
 	case syncthingPairedMsg:
 		if msg.err == nil {
 			m.cfg.AddSyncthingDevice(msg.deviceID)
@@ -439,7 +422,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only one install runs at a time, so first
 		// match wins.
 		return m.dispatchToFirstTab([]tabKind{
-			tabSyncthingInstall, tabLndHubInstall,
+			tabSyncthingInstall,
 			tabP2PUpgrade, tabSelfUpdate,
 		}, msg)
 	case autoUnlockSetupDoneMsg:
@@ -890,7 +873,7 @@ func (m Model) closeTab(
 	// find no matching tab, and be dropped silently.
 	// This is safe for the existing flows because
 	// state-changing async messages
-	// (lndhubAccountCreatedMsg, syncthingPairedMsg)
+	// (syncthingPairedMsg, syncthingRemovedMsg)
 	// update m.cfg directly in their handlers, not
 	// only in the screen handler — so the side
 	// effect persists even if the tab is gone.
@@ -1125,7 +1108,7 @@ func (m Model) dispatchToTab(
 // Used when a single async message class can arrive for
 // any of several mutually-exclusive tabs (e.g.
 // installStepDoneMsg can come from a Syncthing install,
-// an LndHub install, a P2P upgrade, or a self-update —
+// a P2P upgrade, or a self-update —
 // but only one flow runs at a time). Order in kinds is
 // the match priority if more than one were somehow open.
 func (m Model) dispatchToFirstTab(

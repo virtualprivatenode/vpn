@@ -118,8 +118,7 @@ func homeListBindings(
 // ── Archetype: view-only detail tab ─────────────────────
 // Read-only tab with no buttons. Navigate away via
 // backspace (parent) or sidebar. Used by PaymentDetail,
-// OnChainTx, UtxoDetail, deactivated LndHubAccount,
-// pending ChannelDetail.
+// OnChainTx, UtxoDetail, pending ChannelDetail.
 
 func viewDetailBindings(hasTabs bool) []key.Binding {
 	binds := []key.Binding{kSidebar}
@@ -218,7 +217,7 @@ func confirmDialogBindings() []key.Binding {
 
 // ── Archetype: manage screen — button zone ──────────────
 // Buttons above a list on a tab content screen
-// (LndHub accounts, Syncthing devices, SSH keys).
+// (Syncthing devices, SSH keys).
 // Uses shift+tab to reach tab bar (tab content context).
 
 func manageButtonBindings(

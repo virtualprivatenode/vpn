@@ -386,7 +386,6 @@ func (s *P2PUpgradeScreen) viewConfirm(
 	w, h int,
 ) string {
 	isFocused := s.ctx.ContentFocused
-	cfg := s.ctx.Cfg
 	p := newPane(w)
 
 	p.title(theme.Header,
@@ -424,14 +423,6 @@ func (s *P2PUpgradeScreen) viewConfirm(
 		"  • Allow Zeus to connect over clearnet"))
 	p.line(" " + theme.Value.Render(
 		"  • Restart LND with the new config"))
-	if cfg.LndHubInstalled {
-		p.line(" " + theme.Value.Render(
-			"  • Install TLS proxy for"+
-				" LndHub clearnet"))
-		p.line(" " + theme.Value.Render(
-			"  • Open port 3000 for encrypted"+
-				" LndHub access"))
-	}
 
 	p.blank()
 	p.input("Type PUBLISH MY IP to proceed:",
