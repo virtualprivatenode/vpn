@@ -1,11 +1,11 @@
 # Virtual Private Node
 
-A one-command installer for a private Lightning node on Debian —
+A one-command installer for a Bitcoin + Lightning node on Debian.
 Bitcoin Core, LND, and Tor, configured and running in minutes.
 
-After installation, manage your node with the beautiful terminal UI
+After installation, manage your node with the beautiful TUI
 or `bitcoin-cli`, `lncli`, and `systemctl`.
-No wrappers, no abstractions. Your keys, your node.
+Private by default, simple by design. Your keys, your node.
 
 ## Screenshots
 
@@ -33,7 +33,6 @@ No wrappers, no abstractions. Your keys, your node.
 ### Optional (from the TUI)
 
 - **Syncthing** — automatic LND channel backup to your local device
-- **LndHub.go** — Lightning accounts
 
 ### Requirements
 
@@ -98,7 +97,7 @@ five sections plus a dark/light theme toggle:
 - **Channels** — open, close, and manage Lightning channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
 - **Wallet** — send and receive Lightning payments; payment history
 - **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
-- **Add-On** — install and manage Syncthing (channel backup) and LndHub (Lightning accounts)
+- **Add-On** — install and manage Syncthing (channel backup)
 - **System** — service status and logs; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
 
 Detail views open in tabs within each section. Press `ctrl+c` to quit
@@ -115,7 +114,6 @@ lncli walletbalance
 systemctl status bitcoind
 systemctl status tor@default
 systemctl status lnd
-systemctl status lndhub
 systemctl status syncthing
 ```
 
@@ -165,39 +163,6 @@ later from **System → P2P Upgrade**:
 The upgrade is one-way — once your IP is published to the network
 gossip, it cannot be retracted.
 
-### LndHub — Lightning Accounts
-
-LndHub.go provides separate Lightning wallet accounts backed by your
-LND node. Create accounts for family, friends, or AI agents from the
-Add-On section. Each account gets isolated credentials and connects
-via Zeus or any LndHub-compatible wallet.
-
-**How it works:**
-
-1. Install LndHub from the Add-On section
-2. Create accounts from the LndHub management screen
-3. Share the login, password, and server address with the user
-4. They connect Zeus: Advanced Set-Up → LndHub → enter credentials
-5. Fund their account by paying an invoice they generate
-
-**Privacy model:**
-
-- Passwords are shown once at creation and never stored
-- The admin cannot see user balances through the TUI
-- Account deactivation records the balance for refund purposes
-- LndHub uses a dedicated macaroon with minimal LND permissions
-  (info:read, invoices:read/write, offchain:read/write)
-
-**Built from source:**
-
-LndHub.go is cloned from GitHub at a pinned release tag and compiled
-on your server using the Go toolchain. No prebuilt binaries are
-downloaded. PostgreSQL is installed as the database backend.
-
-**Clearnet note:** Clearnet connections (hybrid P2P mode) are encrypted
-via a TLS reverse proxy. Tor connections use HTTP through the encrypted
-Tor tunnel. Both are secure in transit.
-
 ### Syncthing Channel Backups
 
 Syncthing automatically syncs your LND `channel.backup` file to
@@ -230,13 +195,12 @@ For the full setup guide, see
 - All connections through Tor (SOCKS5 port 9050)
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
-- UFW firewall: SSH only (+ 9735, 8080 for hybrid P2P, 3000 for LndHub hybrid, 22000 for Syncthing)
+- UFW firewall: SSH only (+ 9735, 8080 for hybrid P2P, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
 - Root SSH disabled after bootstrap
 - SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth on by default (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
 - Services run as dedicated bitcoin system user
 - GPG signature verification for all software
-- Signing key hosted on independent keyserver with pinned fingerprint, downloaded as a file through Tor
 - Bad signature detection — any BADSIG is a hard stop
 - Unattended security upgrades with auto-reboot
 - Base packages upgraded during bootstrap to close CVE windows on stale server images
@@ -248,8 +212,6 @@ For the full setup guide, see
 - apt package manager configured to use Tor SOCKS proxy
 - Atomic config writes with fsync + rename (prevents corruption on power loss)
 - Secure temp file creation with O_EXCL (prevents symlink attacks)
-- Database queries protected by strict input validation
-- LndHub TLS proxy: rate limited (10 req/s), X-Forwarded-For stripped
 - Public IP detection uses kernel routing table (no external network calls)
 - Mandatory seed confirmation ("I SAVED MY SEED") during wallet creation
 - Auto-unlock (optional) uses a local password file with 0400 perms, never transmitted
@@ -268,7 +230,6 @@ The bootstrap script makes two types of network calls:
 - rlvpn binary download from GitHub
 - GPG signing key file download from independent keyserver
 - Bitcoin Core and LND downloads
-- Go toolchain download (when LndHub is installed)
 - Syncthing repository key (when Syncthing is installed)
 - All subsequent apt operations
 
@@ -291,9 +252,6 @@ All software is verified with GPG signatures and SHA256 checksums:
   Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
   key is a hard stop.
 - **LND** — Roasbeef's signing key verified against known fingerprint.
-- **LndHub.go** — built from source at pinned release tag (v1.0.2).
-  No prebuilt binary is used. The Go toolchain compiles directly from
-  the [getAlby/lndhub.go](https://github.com/getAlby/lndhub.go) repository.
 - **rlvpn binary** — signed with a key hosted on an independent
   keyserver (not GitHub). The bootstrap downloads the key file directly
   through Tor rather than using keyserver protocols, so compromising
@@ -346,8 +304,6 @@ Services (systemd, run as bitcoin user):
   tor.service        → SOCKS proxy, hidden services
   bitcoind.service   → pruned node, Tor-routed, wallet disabled
   lnd.service        → Lightning daemon, Tor-only by default
-  lndhub.service     → Lightning accounts (add-on, built from source)
-  lndhub-proxy       → TLS reverse proxy for LndHub (hybrid mode only)
   syncthing.service  → channel backup sync (add-on)
 ```
 
@@ -358,11 +314,9 @@ Services (systemd, run as bitcoin user):
 | /etc/bitcoin/bitcoin.conf | Bitcoin Core configuration |
 | /etc/lnd/lnd.conf | LND configuration |
 | /etc/syncthing/ | Syncthing configuration |
-| /etc/lndhub/lndhub.env | LndHub configuration and secrets |
 | /etc/rlvpn/config.json | Install state and credentials |
 | /var/lib/bitcoin/ | Blockchain data |
 | /var/lib/lnd/ | LND data and wallet |
-| /var/lib/lndhub/ | LndHub data |
 | /var/lib/syncthing/lnd-backup/ | Auto-synced channel.backup |
 | /var/log/rlvpn.log | Application log (install, verification, status) |
 
