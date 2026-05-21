@@ -286,7 +286,7 @@ cd virtual-private-node
 go mod tidy
 go build -o rlvpn ./cmd/
 sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
+sudo bash virtual-private-node.sh
 ```
 
 The bootstrap script detects that `rlvpn` is already installed and
