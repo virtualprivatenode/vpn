@@ -191,7 +191,7 @@ For the full setup guide, see
 
 ### Security
 
-- TUI runs as unprivileged user, sudo per-action (not root)
+- TUI runs as unprivileged user with passwordless sudo for system operations
 - All connections through Tor (SOCKS5 port 9050)
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
@@ -295,9 +295,9 @@ skips the download.
 ### Architecture
 
 ```
-User SSH → ripsline@<server-ip-address> → rlvpn TUI (non-root)
+User SSH → ripsline@<server-ip-address> → rlvpn TUI
                              ↓
-              sudo per-action → systemctl, bitcoin-cli, lncli
+              sudo → systemctl, bitcoin-cli, lncli
               ctrl+c → shell with bitcoin-cli, lncli wrappers
 
 Services (systemd, run as bitcoin user):
