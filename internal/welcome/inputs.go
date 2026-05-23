@@ -162,7 +162,7 @@ func newSyncthingIDInput() textinput.Model {
 
 func newOnChainAddrInput() textinput.Model {
 	ti := textinput.New()
-	ti.Placeholder = "bc1q..."
+	ti.Placeholder = "bc1p..."
 	ti.CharLimit = 90
 	ti.SetWidth(62)
 	ti.Validate = validateOnChainAddr
