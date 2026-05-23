@@ -16,7 +16,7 @@ set -eo pipefail
 #   curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash -s -- --testnet4
 # ═══════════════════════════════════════════════════════════
 
-VERSION="0.5.0"
+VERSION="0.5.1"
 BINARY_NAME="rlvpn"
 ADMIN_USER="ripsline"
 
