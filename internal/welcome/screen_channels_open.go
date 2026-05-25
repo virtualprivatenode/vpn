@@ -2,12 +2,12 @@ package welcome
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/ripsline/virtual-private-node/internal/lndrpc"
 	"github.com/ripsline/virtual-private-node/internal/theme"
 )
 
@@ -16,11 +16,12 @@ import (
 type chanOpenStep int
 
 const (
-	coStepInput      chanOpenStep = iota // peer + amount + toggles + buttons
-	coStepCustomPeer                     // pubkey + host fields + Go Back/Continue
-	coStepConfirm                        // summary + Go Back / Confirm
-	coStepOpening                        // in-flight
-	coStepResult                         // success or error
+	coStepInput       chanOpenStep = iota // peer + amount + fee + toggles + buttons
+	coStepCustomPeer                      // pubkey + host fields + Go Back/Continue
+	coStepCoinControl                     // UTXO table + Go Back / Confirm
+	coStepConfirm                         // summary + Go Back / Confirm
+	coStepOpening                         // in-flight
+	coStepResult                          // success or error
 )
 
 // ── Focus zones for coStepInput ────────────────────────
@@ -28,8 +29,9 @@ const (
 const (
 	coZonePeers   = 0
 	coZoneAmounts = 1
-	coZoneToggles = 2
-	coZoneButtons = 3
+	coZoneFee     = 2
+	coZoneToggles = 3
+	coZoneButtons = 4
 )
 
 // ── Focus zones for coStepCustomPeer ───────────────────
@@ -38,6 +40,13 @@ const (
 	coCustomZonePubkey  = 0
 	coCustomZoneHost    = 1
 	coCustomZoneButtons = 2
+)
+
+// ── Focus zones for coStepCoinControl ─────────────────
+
+const (
+	coCCZoneList    = 0
+	coCCZoneButtons = 1
 )
 
 // ── ChannelOpenScreen ──────────────────────────────────
@@ -58,14 +67,30 @@ type ChannelOpenScreen struct {
 	customBtnIdx int
 
 	// Amount selection
-	amountPreset int
-	amountInput  AmountInput
-	amount       int64
+	amountIdx   int // 0=coin control btn, 1=amount
+	amountInput AmountInput
+	amount      int64
+	fundMax     bool
+
+	// Fee rate
+	feeInput AmountInput
+	feeTiers [4]feeTier
 
 	// Toggles
 	private   bool
 	taproot   bool
 	toggleIdx int
+
+	// UTXO selection (coin control)
+	utxos             []lndrpc.UTXO
+	txs               []lndrpc.OnChainTx
+	utxoSelected      map[int]bool
+	utxoSelectedTotal int64
+	utxoOutpoints     []string
+	utxoCursor        int
+	utxoFetched       bool // lazy fetch guard
+	ccZone            int  // sub-step focus zone
+	ccBtnIdx          int  // sub-step button index
 
 	// Selection state (✓ indicators)
 	peerConfirmed   bool
@@ -94,19 +119,24 @@ func NewChannelOpenScreen(
 		step:         coStepInput,
 		peerList:     channelOpenPeers(),
 		amountInput:  NewAmountInput(),
+		feeInput:     NewFeeInput(),
 		private:      true,
 		taproot:      false,
 		btnIdx:       1,
 		pubkeyInput:  newChanPubkeyInput(),
 		hostInput:    newChanHostInput(),
 		customBtnIdx: 1,
+		utxoSelected: make(map[int]bool),
 	}
 }
 
 // ── Screen interface ────────────────────────────────────
 
 func (s *ChannelOpenScreen) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		fetchChannelUtxosCmd(s.ctx.LndClient),
+		fetchChannelTxsCmd(s.ctx.LndClient),
+		fetchFeeTiersCmd(s.ctx.Cfg))
 }
 
 func (s *ChannelOpenScreen) HandleKey(
@@ -117,6 +147,8 @@ func (s *ChannelOpenScreen) HandleKey(
 		return s.handleInputKey(keyStr, msg)
 	case coStepCustomPeer:
 		return s.handleCustomPeerKey(keyStr, msg)
+	case coStepCoinControl:
+		return s.handleCoinControlKey(keyStr)
 	case coStepConfirm:
 		return s.handleConfirmKey(keyStr)
 	case coStepOpening:
@@ -131,10 +163,24 @@ func (s *ChannelOpenScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tabActivatedMsg:
+		// Always refetch on tab re-focus so data
+		// reflects any changes since last viewed,
+		// matching channel history's pattern.
+		return s, tea.Batch(
+			fetchChannelUtxosCmd(s.ctx.LndClient),
+			fetchChannelTxsCmd(s.ctx.LndClient),
+			fetchFeeTiersCmd(s.ctx.Cfg))
 	case tea.PasteMsg:
 		return s.handlePaste(msg)
 	case channelOpenResultMsg:
 		return s.handleOpenResult(msg)
+	case coUtxoListMsg:
+		return s.handleUtxoList(msg)
+	case coTxListMsg:
+		return s.handleTxList(msg)
+	case feeTiersMsg:
+		return s.handleFeeTiers(msg)
 	}
 	return s, nil
 }
@@ -145,6 +191,8 @@ func (s *ChannelOpenScreen) View(w, h int) string {
 		return s.viewInput(w, h)
 	case coStepCustomPeer:
 		return s.viewCustomPeer(w, h)
+	case coStepCoinControl:
+		return s.viewCoinControl(w, h)
 	case coStepConfirm:
 		return s.viewConfirm(w, h)
 	case coStepOpening:
@@ -161,6 +209,8 @@ func (s *ChannelOpenScreen) HelpBindings() []key.Binding {
 		return s.inputBindings()
 	case coStepCustomPeer:
 		return s.customPeerBindings()
+	case coStepCoinControl:
+		return s.coinControlBindings()
 	case coStepConfirm:
 		return actionButtonBindings(
 			s.confirmBtnIdx, s.ctx.HasTabs)
@@ -182,6 +232,8 @@ func (s *ChannelOpenScreen) handleInputKey(
 		return s.handlePeerListKey(keyStr)
 	case coZoneAmounts:
 		return s.handleAmountListKey(keyStr, msg)
+	case coZoneFee:
+		return s.handleFeeZoneKey(keyStr, msg)
 	case coZoneToggles:
 		return s.handleToggleKey(keyStr)
 	case coZoneButtons:
@@ -212,7 +264,6 @@ func (s *ChannelOpenScreen) handlePeerListKey(
 			s.peerIdx++
 			s.peerConfirmed = false
 		} else {
-			// Bottom of peer list: cross to amounts
 			s.focusZone = coZoneAmounts
 		}
 		return s, nil
@@ -247,7 +298,6 @@ func (s *ChannelOpenScreen) handlePeerListKey(
 		// Curated peer: confirm + advance
 		s.peerConfirmed = true
 		s.focusZone = coZoneAmounts
-		s.amountPreset = 0
 		return s, nil
 	case "backspace":
 		return s, emitFocusParent
@@ -258,102 +308,106 @@ func (s *ChannelOpenScreen) handlePeerListKey(
 func (s *ChannelOpenScreen) handleAmountListKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	isCustom := s.amountPreset == len(amountPresets)-1
+	onCoinCtrl := s.amountIdx == 0
+	editing := s.amountIdx == 1 &&
+		s.amountInput.Focused()
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
-		if isCustom &&
-			!s.amountInput.Empty() {
+		if editing && !s.amountInput.Empty() {
 			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 	case "right":
-		if isCustom {
+		if editing {
 			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, nil
 	case "up":
-		if isCustom {
-			// On custom row: move to previous preset
-			s.amountPreset--
-			s.amountConfirmed = false
-			s.amountInput.Blur()
-		} else if s.amountPreset > 0 {
-			s.amountPreset--
-			s.amountConfirmed = false
-		} else {
-			// Top of amount list: cross to peers.
-			// Land on the last peer row — the user is
-			// coming from below and this is the closest
-			// row to where they were.
+		if onCoinCtrl {
 			s.enterPeersBackward()
-			s.peerIdx = len(s.peerList)
+		} else {
+			// Amount → coin control
+			if editing {
+				s.amountInput.Blur()
+			}
+			s.amountIdx = 0
 		}
 		return s, nil
 	case "down":
-		if !isCustom &&
-			s.amountPreset < len(amountPresets)-1 {
-			s.amountPreset++
-			s.amountConfirmed = false
-			if s.amountPreset == len(amountPresets)-1 {
+		if onCoinCtrl {
+			// Coin control → amount
+			s.amountIdx = 1
+			if !s.amountConfirmed {
 				s.amountInput.Focus()
 			}
 			return s, nil
 		}
-		// Bottom of amount list: cross to toggles.
-		// Custom mode auto-confirms on the way out —
-		// typing a value and moving away should use
-		// that value. Invalid → error and stay.
-		if isCustom {
-			if !s.confirmCustomAmountAndAdvance(
-				coZoneToggles) {
+		// Amount: advance to fee
+		if editing && !s.amountInput.Empty() {
+			if !s.confirmAmountAndAdvance() {
 				return s, nil
 			}
 			return s, nil
 		}
-		s.focusZone = coZoneToggles
-		s.toggleIdx = 0
+		if editing {
+			s.amountInput.Blur()
+		}
+		s.focusZone = coZoneFee
+		s.feeInput.Focus()
 		return s, nil
 	case "tab":
-		if isCustom {
-			if !s.confirmCustomAmountAndAdvance(
-				coZoneToggles) {
+		if editing && !s.amountInput.Empty() {
+			if !s.confirmAmountAndAdvance() {
 				return s, nil
 			}
 			return s, nil
 		}
-		s.focusZone = coZoneToggles
-		s.toggleIdx = 0
+		if editing {
+			s.amountInput.Blur()
+		}
+		s.focusZone = coZoneFee
+		s.feeInput.Focus()
 		return s, nil
 	case "shift+tab":
-		if isCustom {
+		if editing {
 			s.amountInput.Blur()
 		}
 		s.enterPeersBackward()
 		return s, nil
 	case "backspace":
-		if isCustom {
+		if editing {
 			cmd := s.amountInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusParent
 	case "enter":
-		if isCustom {
-			if !s.confirmCustomAmountAndAdvance(
-				coZoneToggles) {
+		if onCoinCtrl {
+			// Open coin control sub-step
+			s.ccZone = coCCZoneList
+			s.ccBtnIdx = 1
+			s.error = ""
+			s.step = coStepCoinControl
+			return s, nil
+		}
+		if s.amountConfirmed && !editing {
+			// Unlock editing on auto-confirmed amount
+			s.amountConfirmed = false
+			s.amountInput.Focus()
+			return s, nil
+		}
+		if editing {
+			if !s.confirmAmountAndAdvance() {
 				return s, nil
 			}
 			return s, nil
 		}
-		s.amountConfirmed = true
-		s.focusZone = coZoneToggles
-		s.toggleIdx = 0
 		return s, nil
 	}
-	if isCustom {
+	if editing {
 		cmd := s.amountInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
@@ -382,7 +436,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		if s.toggleIdx > 0 {
 			s.toggleIdx--
 		} else {
-			s.enterAmountsBackward()
+			s.enterFeeBackward()
 		}
 		return s, nil
 	case "down":
@@ -396,7 +450,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		s.focusZone = coZoneButtons
 		return s, nil
 	case "shift+tab":
-		s.enterAmountsBackward()
+		s.enterFeeBackward()
 		return s, nil
 	case "enter":
 		switch s.toggleIdx {
@@ -452,277 +506,56 @@ func (s *ChannelOpenScreen) handleButtonKey(
 	return s, nil
 }
 
-// ── Custom peer step ───────────────────────────────────
+// ── Fee zone key handling ─────────────────────────────
 
-func (s *ChannelOpenScreen) handleCustomPeerKey(
-	keyStr string, msg tea.KeyPressMsg,
-) (Screen, tea.Cmd) {
-	switch s.customZone {
-	case coCustomZonePubkey:
-		return s.handleCustomPubkeyKey(keyStr, msg)
-	case coCustomZoneHost:
-		return s.handleCustomHostKey(keyStr, msg)
-	case coCustomZoneButtons:
-		return s.handleCustomButtonKey(keyStr)
-	}
-	return s, nil
-}
-
-func (s *ChannelOpenScreen) handleCustomPubkeyKey(
+func (s *ChannelOpenScreen) handleFeeZoneKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
-		if s.pubkeyInput.Value() != "" {
-			var cmd tea.Cmd
-			s.pubkeyInput, cmd =
-				s.pubkeyInput.Update(tea.Msg(msg))
+		if !s.feeInput.Empty() {
+			cmd := s.feeInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 	case "right":
-		if s.pubkeyInput.Value() != "" {
-			var cmd tea.Cmd
-			s.pubkeyInput, cmd =
-				s.pubkeyInput.Update(tea.Msg(msg))
+		if !s.feeInput.Empty() {
+			cmd := s.feeInput.Update(tea.Msg(msg))
 			return s, cmd
 		}
 		return s, nil
 	case "up":
-		if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
+		s.feeInput.Blur()
+		s.enterAmountsBackward()
 		return s, nil
 	case "down":
-		s.pubkeyInput.Blur()
-		s.hostInput.Focus()
-		s.customZone = coCustomZoneHost
+		s.feeInput.Blur()
+		s.focusZone = coZoneToggles
+		s.toggleIdx = 0
 		return s, nil
 	case "tab":
-		s.pubkeyInput.Blur()
-		s.hostInput.Focus()
-		s.customZone = coCustomZoneHost
+		s.feeInput.Blur()
+		s.focusZone = coZoneToggles
+		s.toggleIdx = 0
 		return s, nil
 	case "shift+tab":
-		if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
+		s.feeInput.Blur()
+		s.enterAmountsBackward()
 		return s, nil
 	case "backspace":
-		var cmd tea.Cmd
-		s.pubkeyInput, cmd =
-			s.pubkeyInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 	case "enter":
-		s.pubkeyInput.Blur()
-		s.hostInput.Focus()
-		s.customZone = coCustomZoneHost
+		s.feeInput.Blur()
+		s.focusZone = coZoneToggles
+		s.toggleIdx = 0
 		return s, nil
 	default:
-		var cmd tea.Cmd
-		s.pubkeyInput, cmd =
-			s.pubkeyInput.Update(tea.Msg(msg))
+		cmd := s.feeInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
-}
-
-func (s *ChannelOpenScreen) handleCustomHostKey(
-	keyStr string, msg tea.KeyPressMsg,
-) (Screen, tea.Cmd) {
-	switch keyStr {
-	case "ctrl+c":
-		return s, tea.Quit
-	case "left":
-		if s.hostInput.Value() != "" {
-			var cmd tea.Cmd
-			s.hostInput, cmd =
-				s.hostInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, emitFocusSidebar
-	case "right":
-		if s.hostInput.Value() != "" {
-			var cmd tea.Cmd
-			s.hostInput, cmd =
-				s.hostInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
-	case "up":
-		s.hostInput.Blur()
-		s.pubkeyInput.Focus()
-		s.customZone = coCustomZonePubkey
-		return s, nil
-	case "down":
-		s.hostInput.Blur()
-		s.customZone = coCustomZoneButtons
-		return s, nil
-	case "tab":
-		s.hostInput.Blur()
-		s.customZone = coCustomZoneButtons
-		return s, nil
-	case "shift+tab":
-		s.hostInput.Blur()
-		s.pubkeyInput.Focus()
-		s.customZone = coCustomZonePubkey
-		return s, nil
-	case "backspace":
-		var cmd tea.Cmd
-		s.hostInput, cmd =
-			s.hostInput.Update(tea.Msg(msg))
-		return s, cmd
-	case "enter":
-		s.hostInput.Blur()
-		s.customZone = coCustomZoneButtons
-		return s, nil
-	default:
-		var cmd tea.Cmd
-		s.hostInput, cmd =
-			s.hostInput.Update(tea.Msg(msg))
-		return s, cmd
-	}
-}
-
-func (s *ChannelOpenScreen) handleCustomButtonKey(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	switch keyStr {
-	case "ctrl+c":
-		return s, tea.Quit
-	case "left":
-		if s.customBtnIdx > 0 {
-			s.customBtnIdx--
-		} else {
-			return s, emitFocusSidebar
-		}
-		return s, nil
-	case "right":
-		if s.customBtnIdx < 1 {
-			s.customBtnIdx++
-		}
-		return s, nil
-	case "up":
-		s.customZone = coCustomZoneHost
-		s.hostInput.Focus()
-		return s, nil
-	case "tab":
-		return s, nil
-	case "shift+tab":
-		s.customZone = coCustomZoneHost
-		s.hostInput.Focus()
-		return s, nil
-	case "enter":
-		switch s.customBtnIdx {
-		case 0: // Go Back
-			s.error = ""
-			s.step = coStepInput
-			return s, nil
-		case 1: // Continue
-			return s.submitCustomPeer()
-		}
-		return s, nil
-	case "backspace":
-		s.error = ""
-		s.step = coStepInput
-		return s, nil
-	}
-	return s, nil
-}
-
-// ── Confirm step ───────────────────────────────────────
-
-func (s *ChannelOpenScreen) handleConfirmKey(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	switch keyStr {
-	case "ctrl+c":
-		return s, tea.Quit
-	case "left":
-		if s.confirmBtnIdx > 0 {
-			s.confirmBtnIdx--
-		} else {
-			return s, emitFocusSidebar
-		}
-		return s, nil
-	case "right":
-		if s.confirmBtnIdx < 1 {
-			s.confirmBtnIdx++
-		}
-		return s, nil
-	case "up":
-		if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
-		return s, nil
-	case "backspace":
-		s.backToInput()
-		return s, nil
-	case "enter":
-		switch s.confirmBtnIdx {
-		case 0: // Go Back
-			s.backToInput()
-			return s, nil
-		case 1: // Confirm
-			if s.inFlight {
-				return s, nil
-			}
-			s.inFlight = true
-			s.error = ""
-			s.step = coStepOpening
-			return s, openChannelCmd(
-				s.ctx.LndClient,
-				s.selectedPubkey(),
-				s.selectedHost(),
-				s.amount,
-				s.private,
-				s.taproot,
-			)
-		}
-	}
-	return s, nil
-}
-
-func (s *ChannelOpenScreen) backToInput() {
-	s.step = coStepInput
-	s.error = ""
-	s.confirmBtnIdx = 0
-	s.focusZone = coZoneButtons
-	s.btnIdx = 1
-}
-
-// ── Opening step ───────────────────────────────────────
-
-func (s *ChannelOpenScreen) handleOpeningKey(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	// Fund-moving operation in progress — block all keys.
-	return s, nil
-}
-
-// ── Result step ────────────────────────────────────────
-
-func (s *ChannelOpenScreen) handleResultKey(
-	keyStr string,
-) (Screen, tea.Cmd) {
-	switch keyStr {
-	case "ctrl+c":
-		return s, tea.Quit
-	case "enter":
-		return s, tea.Batch(
-			emitCloseTab,
-			emitRefreshStatus)
-	case "left":
-		return s, emitFocusSidebar
-	case "up", "shift+tab":
-		if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
-	case "backspace":
-		return s, emitFocusParent
-	}
-	return s, nil
 }
 
 // ── Paste handling ─────────────────────────────────────
@@ -743,8 +576,14 @@ func (s *ChannelOpenScreen) handlePaste(
 	}
 	if s.step == coStepInput &&
 		s.focusZone == coZoneAmounts &&
-		s.amountPreset == len(amountPresets)-1 {
+		s.amountIdx == 1 &&
+		s.amountInput.Focused() {
 		cmd := s.amountInput.Update(msg)
+		return s, cmd
+	}
+	if s.step == coStepInput &&
+		s.focusZone == coZoneFee {
+		cmd := s.feeInput.Update(msg)
 		return s, cmd
 	}
 	return s, nil
@@ -765,6 +604,22 @@ func (s *ChannelOpenScreen) handleOpenResult(
 	s.step = coStepResult
 	if msg.err == nil {
 		return s, emitRefreshStatus
+	}
+	return s, nil
+}
+
+func (s *ChannelOpenScreen) handleFeeTiers(
+	msg feeTiersMsg,
+) (Screen, tea.Cmd) {
+	if msg.err != nil {
+		return s, nil
+	}
+	s.feeTiers = msg.tiers
+	// Pre-fill fee input if still empty
+	if s.feeInput.Empty() &&
+		msg.tiers[0].SatPerVB > 0 {
+		s.feeInput.SetSats(
+			int64(msg.tiers[0].SatPerVB))
 	}
 	return s, nil
 }
@@ -790,15 +645,10 @@ func (s *ChannelOpenScreen) validateCustomAmount() (int64, string) {
 	return n, ""
 }
 
-// confirmCustomAmountAndAdvance validates the custom
-// amount, commits it to s.amount, and moves focus to the
-// given zone. On validation failure, sets the error and
-// returns false without changing focus. Called from the
-// three forward-navigation handlers (enter, down, tab)
-// when the user is on the custom amount row.
-func (s *ChannelOpenScreen) confirmCustomAmountAndAdvance(
-	toZone int,
-) bool {
+// confirmAmountAndAdvance validates the amount input,
+// commits it, detects FundMax, and advances to fee zone.
+// Returns false on validation failure.
+func (s *ChannelOpenScreen) confirmAmountAndAdvance() bool {
 	n, errMsg := s.validateCustomAmount()
 	if errMsg != "" {
 		s.error = errMsg
@@ -806,12 +656,13 @@ func (s *ChannelOpenScreen) confirmCustomAmountAndAdvance(
 	}
 	s.error = ""
 	s.amount = n
+	// FundMax when amount matches selected UTXO total
+	s.fundMax = len(s.utxoSelected) > 0 &&
+		n == s.utxoSelectedTotal
 	s.amountConfirmed = true
 	s.amountInput.Blur()
-	s.focusZone = toZone
-	if toZone == coZoneToggles {
-		s.toggleIdx = 0
-	}
+	s.focusZone = coZoneFee
+	s.feeInput.Focus()
 	return true
 }
 
@@ -841,18 +692,24 @@ func (s *ChannelOpenScreen) enterPeersBackward() {
 }
 
 // enterAmountsBackward: focus returned to amounts from
-// the toggles zone. Decommits the amount. If on the
-// Custom row, refocuses the input so the cursor is
-// visible for immediate editing. The entered value
-// (if any) is preserved in s.amountInput.
+// the fee zone. Decommits the amount but preserves the
+// value in the input for review/editing. If there's a
+// committed amount, populates the AmountInput so the
+// user can arrow left/right through the number.
 func (s *ChannelOpenScreen) enterAmountsBackward() {
 	s.focusZone = coZoneAmounts
 	s.amountConfirmed = false
 	s.error = ""
-	isCustom := s.amountPreset == len(amountPresets)-1
-	if isCustom {
-		s.amountInput.Focus()
-	}
+	s.amountIdx = 1
+	s.amountInput.Focus()
+}
+
+// enterFeeBackward: focus returned to fee from the
+// toggles zone. Refocuses the fee input for editing.
+func (s *ChannelOpenScreen) enterFeeBackward() {
+	s.focusZone = coZoneFee
+	s.feeInput.Focus()
+	s.error = ""
 }
 
 // enterTogglesBackward: focus returned to toggles from
@@ -872,12 +729,25 @@ func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 	s.customPubkey = ""
 	s.customHost = ""
 	s.customAlias = ""
-	s.amountPreset = 0
+	s.amountIdx = 0
 	s.amountConfirmed = false
 	s.amountInput.Clear()
+	s.amount = 0
+	s.fundMax = false
+	s.feeInput = NewFeeInput()
+	if s.feeTiers[0].SatPerVB > 0 {
+		s.feeInput.SetSats(
+			int64(s.feeTiers[0].SatPerVB))
+	}
 	s.private = true
 	s.taproot = false
 	s.toggleIdx = 0
+	s.utxoSelected = make(map[int]bool)
+	s.utxoSelectedTotal = 0
+	s.utxoOutpoints = nil
+	s.utxoCursor = 0
+	s.utxoFetched = false
+	s.txs = nil
 	s.focusZone = coZonePeers
 	s.btnIdx = 1
 	s.error = ""
@@ -905,54 +775,51 @@ func (s *ChannelOpenScreen) submitOpenChannel() (
 	}
 
 	// Validate amount value
-	isCustom :=
-		s.amountPreset == len(amountPresets)-1
-	if isCustom {
+	if !s.fundMax {
 		n, errMsg := s.validateCustomAmount()
 		if errMsg != "" {
 			s.error = errMsg
 			return s, nil
 		}
 		s.amount = n
-	} else {
-		s.amount = amountPresets[s.amountPreset]
+	}
+
+	// Effective total for coin control checks
+	var effectiveTotal int64
+	if len(s.utxoSelected) > 0 {
+		effectiveTotal = s.utxoSelectedTotal
+	} else if s.ctx.Status != nil &&
+		s.ctx.Status.lndBalance != "" {
+		effectiveTotal = parseBalance(
+			s.ctx.Status.lndBalance)
+	}
+
+	// FundMax minimum check
+	if s.fundMax && effectiveTotal > 0 &&
+		effectiveTotal < 20000 {
+		s.error = "min 20,000 sats"
+		return s, nil
+	}
+
+	// Custom amount vs selected UTXOs check
+	feeRate := s.feeInput.Sats()
+	if !s.fundMax && len(s.utxoSelected) > 0 {
+		numInputs := len(s.utxoSelected)
+		if numInputs < 1 {
+			numInputs = 1
+		}
+		estFee := estimateSimpleFee(
+			numInputs, 2, feeRate)
+		if s.amount+estFee > effectiveTotal {
+			s.error = "not enough for amount " +
+				"and on-chain fee"
+			return s, nil
+		}
 	}
 
 	s.error = ""
 	s.confirmBtnIdx = 1
 	s.step = coStepConfirm
-	return s, nil
-}
-
-func (s *ChannelOpenScreen) submitCustomPeer() (
-	Screen, tea.Cmd,
-) {
-	pubkey := strings.TrimSpace(
-		s.pubkeyInput.Value())
-	host := strings.TrimSpace(
-		s.hostInput.Value())
-	if pubkey == "" {
-		s.error = "Pubkey is required"
-		return s, nil
-	}
-	if len(pubkey) != 66 {
-		s.error = "Pubkey must be 66 hex chars"
-		return s, nil
-	}
-	if host == "" {
-		s.error = "Host required"
-		return s, nil
-	}
-	s.customPubkey = pubkey
-	s.customHost = host
-	s.customAlias = pubkey[:16] + "..."
-	s.error = ""
-	// Return to input with custom peer confirmed
-	s.peerIdx = len(s.peerList)
-	s.peerConfirmed = true
-	s.step = coStepInput
-	s.focusZone = coZoneAmounts
-	s.amountPreset = 0
 	return s, nil
 }
 
@@ -1007,7 +874,7 @@ func (s *ChannelOpenScreen) viewInput(
 			parseBalance(s.ctx.Status.lndBalance)) +
 			" sats"
 	}
-	p.field("On-chain: ", balText)
+	p.field("On-Chain Balance: ", balText)
 	p.blank()
 
 	isFocused := s.ctx.ContentFocused
@@ -1071,37 +938,101 @@ func (s *ChannelOpenScreen) viewInput(
 		customStyle.Render(customLabel)))
 	p.blank()
 
-	// ── Amount presets ──
+	// ── Channel size: coin control + amount ──
 	p.line(" " + theme.Header.Render("Channel size:"))
-	for i, amt := range amountPresets {
-		prefix := " "
-		style := theme.Value
-		isCursor := isFocused &&
-			s.focusZone == coZoneAmounts &&
-			s.amountPreset == i
-		isConfirmed := s.amountConfirmed &&
-			s.amountPreset == i
-		if isCursor {
-			prefix = "▸"
-			style = theme.Action
+
+	amtFocused := isFocused &&
+		s.focusZone == coZoneAmounts
+
+	// Coin control button
+	ccPrefix := " "
+	ccStyle := theme.Value
+	if amtFocused && s.amountIdx == 0 {
+		ccPrefix = "▸"
+		ccStyle = theme.Action
+	}
+	var ccLabel string
+	if len(s.utxoSelected) > 0 {
+		ccLabel = fmt.Sprintf(
+			"[Coin control: %d UTXO (%s sats)]",
+			len(s.utxoSelected),
+			formatSats(s.utxoSelectedTotal))
+	} else {
+		ccLabel = "[Coin control]"
+	}
+	p.line(fmt.Sprintf(" %s %s",
+		ccPrefix, ccStyle.Render(ccLabel)))
+
+	// Amount line
+	amtPrefix := " "
+	amtStyle := theme.Value
+	amtCursor := amtFocused && s.amountIdx == 1
+	if amtCursor {
+		amtPrefix = "▸"
+		amtStyle = theme.Action
+	}
+	if s.amountConfirmed {
+		amtPrefix = "✓"
+		amtStyle = theme.Action
+	}
+
+	hasCoinCtrl := len(s.utxoSelected) > 0
+	if s.amountConfirmed && !s.amountInput.Focused() {
+		// Auto-confirmed or committed state
+		annotation := ""
+		if hasCoinCtrl &&
+			s.amount == s.utxoSelectedTotal {
+			annotation = theme.Dim.Render(
+				"  full UTXO, no change")
 		}
-		if isConfirmed {
-			prefix = "✓"
-			style = theme.Action
+		p.line(fmt.Sprintf(" %s %s%s",
+			amtPrefix,
+			amtStyle.Render(
+				formatSats(s.amount)+" sats"),
+			annotation))
+	} else {
+		// Editing state with input field
+		inputW := w - 14
+		if inputW > 20 {
+			inputW = 20
 		}
-		if amt == 0 && s.amountPreset == i {
-			p.line(fmt.Sprintf(" %s %s",
-				prefix, style.Render("Custom:")))
-			inputW := w - 6
-			if inputW > 20 {
-				inputW = 20
+		s.amountInput.SetWidth(inputW)
+		amtLine := fmt.Sprintf(" %s %s %s",
+			amtPrefix,
+			amtStyle.Render("Amount:"),
+			s.amountInput.View())
+		// Change annotation
+		if hasCoinCtrl && !s.amountInput.Empty() {
+			typed := s.amountInput.Sats()
+			if typed == s.utxoSelectedTotal {
+				amtLine += theme.Dim.Render(
+					"  full UTXO, no change")
+			} else if typed < s.utxoSelectedTotal {
+				change := s.utxoSelectedTotal - typed
+				amtLine += theme.Warning.Render(
+					fmt.Sprintf("  ~%s sats change",
+						formatSats(change)))
 			}
-			s.amountInput.SetWidth(inputW)
-			p.line("   " + s.amountInput.View())
-			continue
 		}
-		p.line(fmt.Sprintf(" %s %s",
-			prefix, style.Render(presetLabel(amt))))
+		p.line(amtLine)
+	}
+	p.blank()
+
+	// ── Fee rate ──
+	feeActive := isFocused &&
+		s.focusZone == coZoneFee
+	feeLabelStyle := theme.Label
+	feeMarker := " "
+	if feeActive {
+		feeLabelStyle = theme.NavActive
+		feeMarker = theme.NavActive.Render("▸")
+	}
+	p.line(" " + feeLabelStyle.Render(
+		"Fee Rate (sat/vB):"))
+	p.line(feeMarker + " " + s.feeInput.View())
+	hints := formatFeeHints(s.feeTiers)
+	if hints != "" {
+		p.line("  " + theme.Dim.Render(hints))
 	}
 	p.blank()
 
@@ -1181,108 +1112,6 @@ func renderToggleSwitch(
 		toggle + " " + rightStyled
 }
 
-func (s *ChannelOpenScreen) viewCustomPeer(
-	w, h int,
-) string {
-	p := newPane(w)
-	p.title(theme.Header, "Custom Peer")
-
-	isFocused := s.ctx.ContentFocused
-
-	p.input("Node Pubkey:",
-		s.pubkeyInput.View(),
-		isFocused &&
-			s.customZone == coCustomZonePubkey)
-	p.blank()
-	p.input("Host (host:port):",
-		s.hostInput.View(),
-		isFocused &&
-			s.customZone == coCustomZoneHost)
-
-	p.appendError(s.error)
-
-	btnFocused := isFocused &&
-		s.customZone == coCustomZoneButtons
-	return p.renderWithBottomButtons(
-		[]string{"Go Back", "Continue"},
-		s.customBtnIdx, btnFocused, h)
-}
-
-func (s *ChannelOpenScreen) viewConfirm(
-	w, h int,
-) string {
-	p := newPane(w)
-	p.title(theme.Warning, "Confirm Channel Open")
-
-	p.field("Peer:    ", s.selectedAlias())
-	p.field("Amount:  ",
-		formatSats(s.amount)+" sats")
-
-	chanType := "public"
-	if s.private {
-		chanType = "private"
-	}
-	if s.taproot {
-		chanType += ", taproot"
-	}
-	p.field("Type:    ", chanType)
-	p.blank()
-
-	p.labelLine("Pubkey:")
-	p.mono(s.selectedPubkey())
-	p.blank()
-	p.warn("Spend " +
-		formatSats(s.amount) + " sats?")
-
-	p.appendError(s.error)
-
-	return p.renderWithBottomButtons(
-		[]string{"Go Back", "Confirm"},
-		s.confirmBtnIdx, s.ctx.ContentFocused, h)
-}
-
-func (s *ChannelOpenScreen) viewOpening(
-	w, h int,
-) string {
-	p := newPane(w)
-	p.title(theme.Header, "Opening Channel...")
-	p.line(" " + theme.Value.Render(
-		"Connecting to peer and broadcasting tx."))
-	p.blank()
-	p.dim("May take up to 2 minutes over Tor.")
-	p.dim("Do not close the terminal.")
-	return p.renderWithBottomButtons(
-		[]string{"Opening..."}, 0, false, h)
-}
-
-func (s *ChannelOpenScreen) viewResult(
-	w int,
-) string {
-	p := newPane(w)
-
-	if s.error != "" {
-		p.title(theme.Warning, "Channel Open Failed")
-		p.warnWrap(s.error)
-	} else {
-		p.title(theme.Success, "Channel Opening")
-		p.line(" " + theme.Value.Render(
-			"Funding tx broadcast successfully."))
-		p.blank()
-		p.field("Peer:   ", s.selectedAlias())
-		p.field("Amount: ",
-			formatSats(s.amount)+" sats")
-		if s.txid != "" {
-			p.blank()
-			p.labelLine("TX ID:")
-			p.monoWrap(s.txid)
-		}
-		p.blank()
-		p.dim("Channel will appear as pending.")
-	}
-
-	return p.render()
-}
-
 // ── Helpbar bindings ───────────────────────────────────
 
 func (s *ChannelOpenScreen) inputBindings() []key.Binding {
@@ -1291,6 +1120,8 @@ func (s *ChannelOpenScreen) inputBindings() []key.Binding {
 		return s.peerListBindings()
 	case coZoneAmounts:
 		return s.amountListBindings()
+	case coZoneFee:
+		return s.feeZoneBindings()
 	case coZoneToggles:
 		return s.toggleBindings()
 	case coZoneButtons:
@@ -1325,43 +1156,20 @@ func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 	}
 }
 
+func (s *ChannelOpenScreen) feeZoneBindings() []key.Binding {
+	return []key.Binding{
+		kLeftRightCursor, kTabNext, kShiftTabBack,
+		kSidebar, kBack, kQuit,
+	}
+}
+
 func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
 	binds := buttonNav(s.btnIdx)
 	binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
 	return binds
 }
 
-func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
-	switch s.customZone {
-	case coCustomZonePubkey, coCustomZoneHost:
-		return []key.Binding{
-			kLeftRightCursor, kTabNext,
-			kShiftTabBack, kSidebar, kQuit,
-		}
-	case coCustomZoneButtons:
-		binds := buttonNav(s.customBtnIdx)
-		binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
-		return binds
-	}
-	return nil
-}
-
 // ── channelOpenPeers ───────────────────────────────────
-
-// amountPresets defines the channel size options.
-// The last entry (0) represents the custom amount option.
-var amountPresets = []int64{
-	100000, 250000, 500000,
-	1000000, 2000000,
-	0, // custom
-}
-
-func presetLabel(sats int64) string {
-	if sats == 0 {
-		return "Custom amount"
-	}
-	return formatSats(sats) + " sats"
-}
 
 func channelOpenPeers() []peerOption {
 	return []peerOption{
@@ -1372,14 +1180,6 @@ func channelOpenPeers() []peerOption {
 			TorOnly:     true,
 			Curated:     true,
 			MinChanSize: 500000,
-		},
-		{
-			Alias:       "ACINQ",
-			Pubkey:      "03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f",
-			Host:        "3.33.236.230:9735",
-			TorOnly:     false,
-			Curated:     true,
-			MinChanSize: 400000,
 		},
 		{
 			Alias:       "Zeus",
