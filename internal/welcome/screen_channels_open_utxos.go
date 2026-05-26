@@ -417,7 +417,7 @@ func (s *ChannelOpenScreen) viewUtxoTable(
 		labelCell := pad(uLabel, labelW)
 		addrCell := pad(addr, addrW)
 		valCell := fmt.Sprintf("%*s",
-			valW, formatSats(u.AmountSats)+" sats")
+			valW, formatSats(u.AmountSats))
 
 		// Marker (1 char, matching on-chain home)
 		marker := " "

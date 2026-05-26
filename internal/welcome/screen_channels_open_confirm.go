@@ -119,9 +119,6 @@ func (s *ChannelOpenScreen) viewConfirm(
 	// Estimate fee for display
 	feeRate := s.feeInput.Sats()
 	numInputs := len(s.utxoSelected)
-	if numInputs < 1 {
-		numInputs = 1
-	}
 	numOutputs := 1
 	if !s.fundMax {
 		numOutputs = 2 // channel + change
@@ -130,18 +127,13 @@ func (s *ChannelOpenScreen) viewConfirm(
 		numInputs, numOutputs, feeRate)
 
 	if s.fundMax {
-		if len(s.utxoSelected) > 0 {
-			chanAmt := s.utxoSelectedTotal - estFee
-			if chanAmt < 0 {
-				chanAmt = 0
-			}
-			p.field("Amount:  ",
-				fmt.Sprintf("~%s sats (full UTXO minus fee)",
-					formatSats(chanAmt)))
-		} else {
-			p.field("Amount:  ",
-				"Max (full balance minus fee)")
+		chanAmt := s.utxoSelectedTotal - estFee
+		if chanAmt < 0 {
+			chanAmt = 0
 		}
+		p.field("Amount:  ",
+			fmt.Sprintf("~%s sats (full UTXO(s) minus fee)",
+				formatSats(chanAmt)))
 	} else {
 		p.field("Amount:  ",
 			formatSats(s.amount)+" sats")
@@ -191,7 +183,7 @@ func (s *ChannelOpenScreen) viewConfirm(
 	p.blank()
 
 	if s.fundMax {
-		p.warn("Spend full UTXO amount minus fee?")
+		p.warn("Spend full UTXO(s) amount minus fee?")
 	} else {
 		p.warn("Spend " +
 			formatSats(s.amount) + " sats?")
@@ -237,16 +229,11 @@ func (s *ChannelOpenScreen) viewResult(
 		p.blank()
 		p.field("Peer:   ", s.selectedAlias())
 		if s.fundMax {
-			if len(s.utxoSelected) > 0 {
-				p.field("Amount: ",
-					fmt.Sprintf(
-						"Max (%s sats minus fee)",
-						formatSats(
-							s.utxoSelectedTotal)))
-			} else {
-				p.field("Amount: ",
-					"Max (full balance minus fee)")
-			}
+			p.field("Amount: ",
+				fmt.Sprintf(
+					"Max (%s sats minus fee)",
+					formatSats(
+						s.utxoSelectedTotal)))
 		} else {
 			p.field("Amount: ",
 				formatSats(s.amount)+" sats")

@@ -67,7 +67,7 @@ func NewOnChainSendScreen(
 	ctx *ScreenContext,
 	ocCtx *OnChainContext,
 ) *OnChainSendScreen {
-	return &OnChainSendScreen{
+	s := &OnChainSendScreen{
 		ctx:        ctx,
 		ocCtx:      ocCtx,
 		step:       ocStepAddr,
@@ -77,6 +77,12 @@ func NewOnChainSendScreen(
 		feeInput:   NewFeeInput(),
 		sendBtnIdx: 1, // default to Create Transaction
 	}
+	// Blur inputs that aren't active on initial render.
+	// addrInput stays focused (user starts on addr step).
+	// focusStep() manages focus on all step transitions.
+	s.amtInput.Blur()
+	s.feeInput.Blur()
+	return s
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -810,6 +816,10 @@ func (s *OnChainSendScreen) resetInputs() {
 	s.feeRate = 0
 	s.labelVal = ""
 	s.error = ""
+	// Blur inputs not active on addr step.
+	// addrInput starts focused (correct).
+	s.amtInput.Blur()
+	s.feeInput.Blur()
 	// Re-fill fee from cached tiers
 	if s.ocCtx.SendFeeTiers[0].SatPerVB > 0 {
 		s.feeInput.SetSats(

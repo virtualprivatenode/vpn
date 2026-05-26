@@ -114,20 +114,26 @@ type ChannelOpenScreen struct {
 func NewChannelOpenScreen(
 	ctx *ScreenContext,
 ) *ChannelOpenScreen {
-	return &ChannelOpenScreen{
+	s := &ChannelOpenScreen{
 		ctx:          ctx,
 		step:         coStepInput,
 		peerList:     channelOpenPeers(),
 		amountInput:  NewAmountInput(),
 		feeInput:     NewFeeInput(),
 		private:      true,
-		taproot:      false,
+		taproot:      true,
 		btnIdx:       1,
 		pubkeyInput:  newChanPubkeyInput(),
 		hostInput:    newChanHostInput(),
 		customBtnIdx: 1,
 		utxoSelected: make(map[int]bool),
 	}
+	// Blur inputs that aren't active on initial render.
+	// Focus is granted by zone navigation handlers when
+	// the user reaches each input.
+	s.amountInput.Blur()
+	s.feeInput.Blur()
+	return s
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -453,6 +459,9 @@ func (s *ChannelOpenScreen) handleToggleKey(
 		s.enterFeeBackward()
 		return s, nil
 	case "enter":
+		s.focusZone = coZoneButtons
+		return s, nil
+	case "space":
 		switch s.toggleIdx {
 		case 0:
 			s.private = !s.private
@@ -739,8 +748,9 @@ func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 		s.feeInput.SetSats(
 			int64(s.feeTiers[0].SatPerVB))
 	}
+	s.feeInput.Blur()
 	s.private = true
-	s.taproot = false
+	s.taproot = true
 	s.toggleIdx = 0
 	s.utxoSelected = make(map[int]bool)
 	s.utxoSelectedTotal = 0
@@ -768,6 +778,12 @@ func (s *ChannelOpenScreen) submitOpenChannel() (
 		return s, nil
 	}
 
+	// Mandatory coin control
+	if len(s.utxoSelected) == 0 {
+		s.error = "Select UTXOs in Coin control first"
+		return s, nil
+	}
+
 	// Validate amount confirmed
 	if !s.amountConfirmed {
 		s.error = "Select a channel size first"
@@ -784,35 +800,20 @@ func (s *ChannelOpenScreen) submitOpenChannel() (
 		s.amount = n
 	}
 
-	// Effective total for coin control checks
-	var effectiveTotal int64
-	if len(s.utxoSelected) > 0 {
-		effectiveTotal = s.utxoSelectedTotal
-	} else if s.ctx.Status != nil &&
-		s.ctx.Status.lndBalance != "" {
-		effectiveTotal = parseBalance(
-			s.ctx.Status.lndBalance)
-	}
-
 	// FundMax minimum check
-	if s.fundMax && effectiveTotal > 0 &&
-		effectiveTotal < 20000 {
+	if s.fundMax && s.utxoSelectedTotal < 20000 {
 		s.error = "min 20,000 sats"
 		return s, nil
 	}
 
 	// Custom amount vs selected UTXOs check
 	feeRate := s.feeInput.Sats()
-	if !s.fundMax && len(s.utxoSelected) > 0 {
-		numInputs := len(s.utxoSelected)
-		if numInputs < 1 {
-			numInputs = 1
-		}
+	if !s.fundMax {
 		estFee := estimateSimpleFee(
-			numInputs, 2, feeRate)
-		if s.amount+estFee > effectiveTotal {
-			s.error = "not enough for amount " +
-				"and on-chain fee"
+			len(s.utxoSelected), 2, feeRate)
+		if s.amount+estFee > s.utxoSelectedTotal {
+			s.error = "Amount plus fee exceeds " +
+				"selected UTXOs"
 			return s, nil
 		}
 	}
@@ -983,7 +984,7 @@ func (s *ChannelOpenScreen) viewInput(
 		if hasCoinCtrl &&
 			s.amount == s.utxoSelectedTotal {
 			annotation = theme.Dim.Render(
-				"  full UTXO, no change")
+				"  full UTXO(s), no change")
 		}
 		p.line(fmt.Sprintf(" %s %s%s",
 			amtPrefix,
@@ -1006,7 +1007,7 @@ func (s *ChannelOpenScreen) viewInput(
 			typed := s.amountInput.Sats()
 			if typed == s.utxoSelectedTotal {
 				amtLine += theme.Dim.Render(
-					"  full UTXO, no change")
+					"  full UTXO(s), no change")
 			} else if typed < s.utxoSelectedTotal {
 				change := s.utxoSelectedTotal - typed
 				amtLine += theme.Warning.Render(
@@ -1021,13 +1022,11 @@ func (s *ChannelOpenScreen) viewInput(
 	// ── Fee rate ──
 	feeActive := isFocused &&
 		s.focusZone == coZoneFee
-	feeLabelStyle := theme.Label
 	feeMarker := " "
 	if feeActive {
-		feeLabelStyle = theme.NavActive
 		feeMarker = theme.NavActive.Render("▸")
 	}
-	p.line(" " + feeLabelStyle.Render(
+	p.line(" " + theme.Header.Render(
 		"Fee Rate (sat/vB):"))
 	p.line(feeMarker + " " + s.feeInput.View())
 	hints := formatFeeHints(s.feeTiers)
@@ -1151,8 +1150,9 @@ func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
 
 func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 	return []key.Binding{
-		bind("←→", "toggle", "left", "right"),
-		kEnterToggle, kTabNext, kShiftTabBack, kBack, kQuit,
+		kUpDownSelect,
+		bind("space", "toggle", "space"),
+		kEnterNext, kShiftTabBack, kBack, kQuit,
 	}
 }
 
@@ -1184,8 +1184,8 @@ func channelOpenPeers() []peerOption {
 		{
 			Alias:       "Zeus",
 			Pubkey:      "031b301307574bbe9b9ac7b79cbe1700e31e544513eae0b5d7497483083f99e581",
-			Host:        "45.79.192.236:9735",
-			TorOnly:     false,
+			Host:        "r46dwvxcdri754hf6n3rwexmc53h5x4natg5g6hidnxfzejm5xrqn2id.onion:9735",
+			TorOnly:     true,
 			Curated:     true,
 			MinChanSize: 150000,
 		},
