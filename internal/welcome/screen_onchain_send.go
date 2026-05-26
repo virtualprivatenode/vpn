@@ -1271,8 +1271,20 @@ func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 		bind("enter", "continue", "enter"),
 		kSidebar,
 	}
-	if s.ctx.HasTabs {
-		binds = append(binds, kShiftTabBar)
+	switch s.step {
+	case ocStepAddr:
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
+	case ocStepAmount:
+		binds = append(binds,
+			bind("⇧tab", "address", "shift+tab"))
+	case ocStepLabel:
+		binds = append(binds,
+			bind("⇧tab", "amount", "shift+tab"))
+	case ocStepFee:
+		binds = append(binds,
+			bind("⇧tab", "label", "shift+tab"))
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -1281,7 +1293,8 @@ func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 func (s *OnChainSendScreen) inputButtonBindings() []key.Binding {
 	binds := buttonNav(s.sendBtnIdx)
 	binds = append(binds,
-		kEnter, kShiftTabBack,
+		kEnter,
+		bind("⇧tab", "fee", "shift+tab"),
 		bind("↑", "fields", "up"),
 		kBack, kQuit)
 	return binds

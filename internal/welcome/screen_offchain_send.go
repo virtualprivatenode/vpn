@@ -558,7 +558,7 @@ func (s *SendScreen) inputBindings() []key.Binding {
 		}
 	case sendZoneButtons:
 		binds = append(binds,
-			kLeftRightButtons, kEnter, kShiftTabBack,
+			kLeftRightButtons, kEnter, kShiftTabInput,
 			kBack)
 	}
 	binds = append(binds, kQuit)

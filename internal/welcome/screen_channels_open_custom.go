@@ -254,14 +254,27 @@ func (s *ChannelOpenScreen) viewCustomPeer(
 
 func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 	switch s.customZone {
-	case coCustomZonePubkey, coCustomZoneHost:
+	case coCustomZonePubkey:
+		binds := []key.Binding{
+			kLeftRightCursor, kTabNext,
+			kSidebar,
+		}
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
+		binds = append(binds, kQuit)
+		return binds
+	case coCustomZoneHost:
 		return []key.Binding{
 			kLeftRightCursor, kTabNext,
-			kShiftTabBack, kSidebar, kQuit,
+			bind("⇧tab", "pubkey", "shift+tab"),
+			kSidebar, kQuit,
 		}
 	case coCustomZoneButtons:
 		binds := buttonNav(s.customBtnIdx)
-		binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
+		binds = append(binds, kEnter,
+			bind("⇧tab", "host", "shift+tab"),
+			kBack, kQuit)
 		return binds
 	}
 	return nil

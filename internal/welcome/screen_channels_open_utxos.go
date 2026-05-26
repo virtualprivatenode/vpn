@@ -469,7 +469,9 @@ func (s *ChannelOpenScreen) coinControlBindings() []key.Binding {
 	if s.ccZone == coCCZoneButtons {
 		binds := buttonNav(s.ccBtnIdx)
 		binds = append(binds,
-			kEnter, kShiftTabBack, kBack, kQuit)
+			kEnter,
+			bind("⇧tab", "UTXOs", "shift+tab"),
+			kBack, kQuit)
 		return binds
 	}
 	if !s.utxoFetched || len(s.utxos) == 0 {

@@ -649,11 +649,21 @@ func (s *AutoUnlockScreen) HelpBindings() []key.Binding {
 }
 
 func (s *AutoUnlockScreen) enableBindings() []key.Binding {
-	if s.focusZone == auZoneInput1 ||
-		s.focusZone == auZoneInput2 {
-		return []key.Binding{
+	if s.focusZone == auZoneInput1 {
+		binds := []key.Binding{
 			kEnterNext,
 			kTabNextField,
+		}
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
+		binds = append(binds, kQuit)
+		return binds
+	}
+	if s.focusZone == auZoneInput2 {
+		return []key.Binding{
+			kEnterNext,
+			kTabButtons,
 			bind("⇧tab", "prev field", "shift+tab"),
 			kQuit,
 		}

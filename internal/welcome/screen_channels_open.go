@@ -1129,7 +1129,7 @@ func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 		kSidebar,
 	}
 	if s.ctx.HasTabs {
-		binds = append(binds, kShiftTabBack)
+		binds = append(binds, kShiftTabBar)
 	}
 	binds = append(binds, kBack, kQuit)
 	return binds
@@ -1137,7 +1137,8 @@ func (s *ChannelOpenScreen) peerListBindings() []key.Binding {
 
 func (s *ChannelOpenScreen) amountListBindings() []key.Binding {
 	return []key.Binding{
-		kUpDownSelect, kTabNext, kShiftTabBack,
+		kUpDownSelect, kTabNext,
+		bind("⇧tab", "peers", "shift+tab"),
 		kEnterConfirm, kSidebar, kBack, kQuit,
 	}
 }
@@ -1146,20 +1147,25 @@ func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 	return []key.Binding{
 		kUpDownSelect,
 		bind("space", "toggle", "space"),
-		kEnterNext, kShiftTabBack, kBack, kQuit,
+		kEnterNext,
+		bind("⇧tab", "fee", "shift+tab"),
+		kBack, kQuit,
 	}
 }
 
 func (s *ChannelOpenScreen) feeZoneBindings() []key.Binding {
 	return []key.Binding{
-		kLeftRightCursor, kTabNext, kShiftTabBack,
+		kLeftRightCursor, kTabNext,
+		bind("⇧tab", "amount", "shift+tab"),
 		kSidebar, kBack, kQuit,
 	}
 }
 
 func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
 	binds := buttonNav(s.btnIdx)
-	binds = append(binds, kEnter, kShiftTabBack, kBack, kQuit)
+	binds = append(binds, kEnter,
+		bind("⇧tab", "toggles", "shift+tab"),
+		kBack, kQuit)
 	return binds
 }
 

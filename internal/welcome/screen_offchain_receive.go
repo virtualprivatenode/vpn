@@ -146,25 +146,29 @@ func (s *ReceiveScreen) HelpBindings() []key.Binding {
 func (s *ReceiveScreen) inputBindings() []key.Binding {
 	var binds []key.Binding
 	switch s.focusZone {
-	case recvZoneAmount, recvZoneMemo:
+	case recvZoneAmount:
 		binds = append(binds,
 			kUpDownFields, kTabNext, kEnterCreate,
 			kSidebar)
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)
 		}
+	case recvZoneMemo:
+		binds = append(binds,
+			kUpDownFields, kTabNext, kEnterCreate,
+			bind("⇧tab", "amount", "shift+tab"),
+			kSidebar)
 	case recvZoneBlind:
 		binds = append(binds,
 			kUpDownFields,
 			bind("space", "toggle", "space"),
 			kEnterNext, kTabNext,
+			bind("⇧tab", "memo", "shift+tab"),
 			kSidebar)
-		if s.ctx.HasTabs {
-			binds = append(binds, kShiftTabBar)
-		}
 	case recvZoneButtons:
 		binds = append(binds,
-			kLeftRightButtons, kEnter, kShiftTabBack,
+			kLeftRightButtons, kEnter,
+			bind("⇧tab", "toggle", "shift+tab"),
 			kBack)
 	}
 	binds = append(binds, kQuit)

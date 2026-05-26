@@ -691,7 +691,8 @@ func (s *ChannelCloseScreen) confirmBindings() []key.Binding {
 		binds = append(binds,
 			kLeftRightButtons, kEnter)
 		if !s.force {
-			binds = append(binds, kShiftTabBack)
+			binds = append(binds,
+				bind("⇧tab", "fee", "shift+tab"))
 		} else {
 			binds = append(binds, kSidebar)
 			if s.ctx.HasTabs {
