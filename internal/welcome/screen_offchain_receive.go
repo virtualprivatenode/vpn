@@ -64,6 +64,7 @@ func NewReceiveScreen(
 	ctx *ScreenContext,
 ) *ReceiveScreen {
 	amt := NewAmountInput()
+	amt.Focus() // amount is the initial focus zone
 	return &ReceiveScreen{
 		ctx:         ctx,
 		step:        recvStepInput,

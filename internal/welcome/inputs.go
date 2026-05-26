@@ -41,16 +41,6 @@ func validateHostChars(s string) error {
 	return nil
 }
 
-func validateHubName(s string) error {
-	for _, ch := range s {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-			(ch >= '0' && ch <= '9') || ch == ' ' || ch == '-') {
-			return errInvalidChar{}
-		}
-	}
-	return nil
-}
-
 func validateSyncthingID(s string) error {
 	for _, ch := range s {
 		upper := ch
@@ -136,18 +126,6 @@ func newChanHostInput() textinput.Model {
 	return ti
 }
 
-func newHubNameInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "account name"
-	ti.CharLimit = 30
-	ti.SetWidth(30)
-	ti.Validate = validateHubName
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
-	return ti
-}
-
 func newSyncthingIDInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX"
@@ -191,7 +169,6 @@ func NewFeeInput() AmountInput {
 	ti.SetWidth(12)
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	ti.Focus()
 	return AmountInput{ti: ti}
 }
 

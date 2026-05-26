@@ -267,6 +267,7 @@ func (s *ChannelCloseScreen) handleTypeBtnKey(
 				s.feeInput.SetSats(
 					int64(s.feeTiers[0].SatPerVB))
 			}
+			s.feeInput.Focus()
 			s.focusZone = closeZoneFee
 		} else {
 			s.focusZone = closeZoneButtons

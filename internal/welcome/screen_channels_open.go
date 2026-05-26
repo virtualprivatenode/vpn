@@ -128,11 +128,6 @@ func NewChannelOpenScreen(
 		customBtnIdx: 1,
 		utxoSelected: make(map[int]bool),
 	}
-	// Blur inputs that aren't active on initial render.
-	// Focus is granted by zone navigation handlers when
-	// the user reaches each input.
-	s.amountInput.Blur()
-	s.feeInput.Blur()
 	return s
 }
 
@@ -748,7 +743,6 @@ func (s *ChannelOpenScreen) clearForm() *ChannelOpenScreen {
 		s.feeInput.SetSats(
 			int64(s.feeTiers[0].SatPerVB))
 	}
-	s.feeInput.Blur()
 	s.private = true
 	s.taproot = true
 	s.toggleIdx = 0
