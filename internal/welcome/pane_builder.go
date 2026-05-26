@@ -221,10 +221,9 @@ func (p *paneBuilder) success(
 func (p *paneBuilder) input(
 	label string, view string, focused bool,
 ) *paneBuilder {
-	labelStyle := theme.Label
+	labelStyle := theme.Header
 	marker := " "
 	if focused {
-		labelStyle = theme.NavActive
 		marker = theme.NavActive.Render("▸")
 	}
 	p.lines = append(p.lines,

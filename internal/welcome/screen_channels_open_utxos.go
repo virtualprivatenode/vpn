@@ -425,7 +425,7 @@ func (s *ChannelOpenScreen) viewUtxoTable(
 			marker = "✓"
 		}
 		if isCursor && !isChecked {
-			marker = "▸"
+			marker = theme.NavActive.Render("▸")
 		}
 
 		// Scroll indicator on edge rows

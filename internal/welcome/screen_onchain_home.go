@@ -675,7 +675,7 @@ func (s *OnChainHomeScreen) View(
 				marker = "✓"
 			}
 			if isSelected && !isChecked {
-				marker = "▸"
+				marker = theme.NavActive.Render("▸")
 			}
 
 			selStyle := theme.NavActive
@@ -812,7 +812,7 @@ func (s *OnChainHomeScreen) View(
 
 			marker := " "
 			if isSelected {
-				marker = "▸"
+				marker = theme.NavActive.Render("▸")
 				selStyle := theme.NavActive
 				txMidLines = append(txMidLines,
 					marker+
@@ -930,10 +930,9 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 			"┌"+strings.Repeat("─", boxW)+"┐"))
 
 	lblActive := isFocused && !s.labelOnBtn
-	lblStyle := theme.Label
+	lblStyle := theme.Header
 	marker := " "
 	if lblActive {
-		lblStyle = theme.NavActive
 		marker = theme.NavActive.Render("▸")
 	}
 	inputView := s.labelInput.View()

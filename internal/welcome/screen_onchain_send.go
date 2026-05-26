@@ -847,10 +847,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Address input (step 0) ──────────────────
 	addrActive := isFocused &&
 		s.step == ocStepAddr
-	addrLabel := theme.Label
+	addrLabel := theme.Header
 	addrMarker := " "
 	if addrActive {
-		addrLabel = theme.NavActive
 		addrMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
@@ -862,10 +861,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Amount input (step 1) ───────────────────
 	amtActive := isFocused &&
 		s.step == ocStepAmount
-	amtLabel := theme.Label
+	amtLabel := theme.Header
 	amtMarker := " "
 	if amtActive {
-		amtLabel = theme.NavActive
 		amtMarker = theme.NavActive.Render("▸")
 	}
 
@@ -896,10 +894,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Label input (step 2) ────────────────────
 	lblActive := isFocused &&
 		s.step == ocStepLabel
-	lblLabel := theme.Label
+	lblLabel := theme.Header
 	lblMarker := " "
 	if lblActive {
-		lblLabel = theme.NavActive
 		lblMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
@@ -911,10 +908,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Fee rate input (step 3) ─────────────────
 	feeActive := isFocused &&
 		s.step == ocStepFee
-	feeLabelStyle := theme.Label
+	feeLabelStyle := theme.Header
 	feeMarker := " "
 	if feeActive {
-		feeLabelStyle = theme.NavActive
 		feeMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,

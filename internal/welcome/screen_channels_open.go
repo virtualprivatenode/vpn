@@ -885,7 +885,7 @@ func (s *ChannelOpenScreen) viewInput(
 		isConfirmed := s.peerConfirmed &&
 			s.peerIdx == i
 		if isCursor {
-			prefix = "▸"
+			prefix = theme.NavActive.Render("▸")
 			style = theme.Action
 		}
 		if isConfirmed {
@@ -916,7 +916,7 @@ func (s *ChannelOpenScreen) viewInput(
 	customConfirmed := s.peerConfirmed &&
 		s.peerIdx == len(s.peerList)
 	if customCursor {
-		customPrefix = "▸"
+		customPrefix = theme.NavActive.Render("▸")
 		customStyle = theme.Action
 	}
 	if customConfirmed {
@@ -943,7 +943,7 @@ func (s *ChannelOpenScreen) viewInput(
 	ccPrefix := " "
 	ccStyle := theme.Value
 	if amtFocused && s.amountIdx == 0 {
-		ccPrefix = "▸"
+		ccPrefix = theme.NavActive.Render("▸")
 		ccStyle = theme.Action
 	}
 	var ccLabel string
@@ -963,7 +963,7 @@ func (s *ChannelOpenScreen) viewInput(
 	amtStyle := theme.Value
 	amtCursor := amtFocused && s.amountIdx == 1
 	if amtCursor {
-		amtPrefix = "▸"
+		amtPrefix = theme.NavActive.Render("▸")
 		amtStyle = theme.Action
 	}
 	if s.amountConfirmed {
@@ -1022,7 +1022,7 @@ func (s *ChannelOpenScreen) viewInput(
 	}
 	p.line(" " + theme.Header.Render(
 		"Fee Rate (sat/vB):"))
-	p.line(feeMarker + " " + s.feeInput.View())
+	p.line(" " + feeMarker + " " + s.feeInput.View())
 	hints := formatFeeHints(s.feeTiers)
 	if hints != "" {
 		p.line("  " + theme.Dim.Render(hints))
@@ -1098,7 +1098,7 @@ func renderToggleSwitch(
 
 	prefix := "  "
 	if focused {
-		prefix = " " + theme.Action.Render("▸")
+		prefix = " " + theme.NavActive.Render("▸")
 	}
 
 	return prefix + leftStyled + " " +

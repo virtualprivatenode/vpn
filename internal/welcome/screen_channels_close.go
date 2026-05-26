@@ -490,7 +490,7 @@ func (s *ChannelCloseScreen) viewType(
 	coopPrefix := " "
 	coopStyle := theme.Value
 	if onOptions && s.typeIdx == 0 {
-		coopPrefix = "▸"
+		coopPrefix = theme.NavActive.Render("▸")
 		coopStyle = theme.Action
 	} else if onButtons && s.typeIdx == 0 {
 		coopPrefix = "●"
@@ -507,7 +507,7 @@ func (s *ChannelCloseScreen) viewType(
 	forcePrefix := " "
 	forceStyle := theme.Value
 	if onOptions && s.typeIdx == 1 {
-		forcePrefix = "▸"
+		forcePrefix = theme.NavActive.Render("▸")
 		forceStyle = theme.Warning
 	} else if onButtons && s.typeIdx == 1 {
 		forcePrefix = "●"

@@ -397,7 +397,7 @@ func (s *SystemHomeScreen) View(
 		prefix := " "
 		style := theme.Value
 		if isSelected {
-			prefix = "▸"
+			prefix = theme.NavActive.Render("▸")
 			style = theme.NavActive
 		}
 

@@ -259,7 +259,7 @@ func (s *SyncthingDetailScreen) View(
 
 			marker := " "
 			if isSelected {
-				marker = "▸"
+				marker = theme.NavActive.Render("▸")
 				cursorLine = tableStart + i
 				midLines = append(midLines,
 					marker+

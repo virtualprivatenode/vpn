@@ -408,10 +408,9 @@ func (s *SyncthingPairScreen) viewInput(
 	// Input
 	inputFocused := isFocused &&
 		s.focusZone == syncPairZoneInput
-	labelStyle := theme.Label
+	labelStyle := theme.Header
 	marker := " "
 	if inputFocused {
-		labelStyle = theme.NavActive
 		marker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,

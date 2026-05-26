@@ -97,8 +97,6 @@ func newRecvMemoInput() textinput.Model {
 	ti.Validate = validatePrintableASCII
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	// Starts blurred — amount field is focused first
-	ti.Blur()
 	return ti
 }
 
@@ -122,7 +120,6 @@ func newChanHostInput() textinput.Model {
 	ti.Validate = validateHostChars
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	ti.Blur()
 	return ti
 }
 
@@ -158,7 +155,6 @@ func newOCSendLabelInput() textinput.Model {
 	ti.Validate = validatePrintableASCII
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	ti.Blur()
 	return ti
 }
 

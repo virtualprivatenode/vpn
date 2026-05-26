@@ -184,7 +184,7 @@ func (s *ChannelHistoryScreen) View(
 
 		marker := " "
 		if isSelected {
-			marker = "▸"
+			marker = theme.NavActive.Render("▸")
 			midLines = append(midLines,
 				marker+
 					selStyle.Render(peerStr)+

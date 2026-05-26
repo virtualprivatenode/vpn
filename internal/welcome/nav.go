@@ -194,15 +194,11 @@ func (n NavSidebar) BlockRows(
 			if r == titleRow {
 				styled := style.Render(label)
 				if isCursor {
-					markerStyle := theme.NavActive
-					if !isActive {
-						markerStyle = theme.NavCursor
-					}
 					// Center "▸ Label" as a single unit
 					// so the cursor doesn't push the
 					// label off-center relative to
 					// non-cursor rows.
-					combined := markerStyle.Render("▸") +
+					combined := theme.NavActive.Render("▸") +
 						" " + styled
 					rows = append(rows,
 						cellBase.Render(combined))

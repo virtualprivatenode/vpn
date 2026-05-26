@@ -166,9 +166,6 @@ func (s *ReceiveScreen) inputBindings() []key.Binding {
 		binds = append(binds,
 			kLeftRightButtons, kEnter, kShiftTabBack,
 			kBack)
-		if s.ctx.HasTabs {
-			binds = append(binds, kUpTabBar)
-		}
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -595,10 +592,9 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 	// ── Blinded paths toggle ──
 	blindFocused := isFocused &&
 		s.focusZone == recvZoneBlind
-	blindLabel := theme.Label
+	blindLabel := theme.Header
 	blindMarker := " "
 	if blindFocused {
-		blindLabel = theme.NavActive
 		blindMarker = theme.NavActive.Render("▸")
 	}
 	blindValue := theme.Good.Render("● on")
