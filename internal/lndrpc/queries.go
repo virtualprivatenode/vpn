@@ -453,13 +453,15 @@ func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, tap
 	defer cancel()
 
 	req := &lnrpc.OpenChannelRequest{
-		NodePubkey:         pubkeyBytes,
-		LocalFundingAmount: localAmount,
-		Private:            private,
-		MinConfs:           0,
-		SpendUnconfirmed:   true,
-		ScidAlias:          private,
-		FundMax:            fundMax,
+		NodePubkey:       pubkeyBytes,
+		Private:          private,
+		MinConfs:         0,
+		SpendUnconfirmed: true,
+		ScidAlias:        private,
+		FundMax:          fundMax,
+	}
+	if !fundMax {
+		req.LocalFundingAmount = localAmount
 	}
 	if taproot {
 		req.CommitmentType = lnrpc.CommitmentType_SIMPLE_TAPROOT

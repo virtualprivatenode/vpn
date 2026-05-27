@@ -422,17 +422,7 @@ func (s *ChannelOpenScreen) handleToggleKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "left":
-		if s.toggleIdx > 0 {
-			s.toggleIdx--
-		} else {
-			return s, emitFocusSidebar
-		}
-		return s, nil
-	case "right":
-		if s.toggleIdx < 1 {
-			s.toggleIdx++
-		}
-		return s, nil
+		return s, emitFocusSidebar
 	case "up":
 		if s.toggleIdx > 0 {
 			s.toggleIdx--
@@ -499,7 +489,9 @@ func (s *ChannelOpenScreen) handleButtonKey(
 	case "enter":
 		switch s.btnIdx {
 		case 0: // Clear
-			return s.clearForm(), nil
+			return s.clearForm(), tea.Batch(
+				fetchChannelUtxosCmd(s.ctx.LndClient),
+				fetchChannelTxsCmd(s.ctx.LndClient))
 		case 1: // Open Channel
 			return s.submitOpenChannel()
 		}
@@ -903,7 +895,7 @@ func (s *ChannelOpenScreen) viewInput(
 		if peer.Curated {
 			tags += " ★"
 		}
-		p.line(fmt.Sprintf(" %s %s%s",
+		p.line(fmt.Sprintf("%s %s%s",
 			prefix, style.Render(name),
 			theme.Dim.Render(tags)))
 	}
@@ -928,7 +920,7 @@ func (s *ChannelOpenScreen) viewInput(
 		customLabel = fmt.Sprintf("[%s]",
 			s.customAlias)
 	}
-	p.line(fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf("%s %s",
 		customPrefix,
 		customStyle.Render(customLabel)))
 	p.blank()
@@ -955,7 +947,7 @@ func (s *ChannelOpenScreen) viewInput(
 	} else {
 		ccLabel = "[Coin control]"
 	}
-	p.line(fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf("%s %s",
 		ccPrefix, ccStyle.Render(ccLabel)))
 
 	// Amount line
@@ -980,7 +972,7 @@ func (s *ChannelOpenScreen) viewInput(
 			annotation = theme.Dim.Render(
 				"  full UTXO(s), no change")
 		}
-		p.line(fmt.Sprintf(" %s %s%s",
+		p.line(fmt.Sprintf("%s %s%s",
 			amtPrefix,
 			amtStyle.Render(
 				formatSats(s.amount)+" sats"),
@@ -992,7 +984,7 @@ func (s *ChannelOpenScreen) viewInput(
 			inputW = 20
 		}
 		s.amountInput.SetWidth(inputW)
-		amtLine := fmt.Sprintf(" %s %s %s",
+		amtLine := fmt.Sprintf("%s %s %s",
 			amtPrefix,
 			amtStyle.Render("Amount:"),
 			s.amountInput.View())
@@ -1022,7 +1014,7 @@ func (s *ChannelOpenScreen) viewInput(
 	}
 	p.line(" " + theme.Header.Render(
 		"Fee Rate (sat/vB):"))
-	p.line(" " + feeMarker + " " + s.feeInput.View())
+	p.line(feeMarker + " " + s.feeInput.View())
 	hints := formatFeeHints(s.feeTiers)
 	if hints != "" {
 		p.line("  " + theme.Dim.Render(hints))
@@ -1096,9 +1088,9 @@ func renderToggleSwitch(
 			bracket.Render(" ]")
 	}
 
-	prefix := "  "
+	prefix := " "
 	if focused {
-		prefix = " " + theme.NavActive.Render("▸")
+		prefix = theme.NavActive.Render("▸")
 	}
 
 	return prefix + leftStyled + " " +
@@ -1149,7 +1141,7 @@ func (s *ChannelOpenScreen) toggleBindings() []key.Binding {
 		bind("space", "toggle", "space"),
 		kEnterNext,
 		bind("⇧tab", "fee", "shift+tab"),
-		kBack, kQuit,
+		kSidebar, kBack, kQuit,
 	}
 }
 
