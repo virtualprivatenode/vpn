@@ -394,7 +394,7 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 
 			marker := " "
 			if isSelected {
-				marker = "▸"
+				marker = theme.NavActive.Render("▸")
 				cursorLine = len(midLines)
 				midLines = append(midLines,
 					marker+

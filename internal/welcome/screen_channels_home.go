@@ -463,7 +463,7 @@ func (s *ChannelsHomeScreen) View(
 			marker := " "
 			nameStyle := theme.Value
 			if isSelected {
-				marker = "▸"
+				marker = theme.NavActive.Render("▸")
 				nameStyle = theme.NavActive
 			}
 			namePad := pad(name, nameW)

@@ -294,13 +294,16 @@ func (s *SSHKeyAddScreen) inputBindings() []key.Binding {
 		binds = append(binds, buttonNav(s.btnIdx)...)
 		binds = append(binds,
 			kEnter,
-			kShiftTabBack,
+			kShiftTabInput,
 			kBack)
 	} else {
 		binds = append(binds,
 			kTabButtons,
 			bind("enter", "add", "enter"),
 			kSidebar)
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
 	}
 
 	binds = append(binds, kQuit)

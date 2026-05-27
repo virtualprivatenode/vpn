@@ -41,16 +41,6 @@ func validateHostChars(s string) error {
 	return nil
 }
 
-func validateHubName(s string) error {
-	for _, ch := range s {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
-			(ch >= '0' && ch <= '9') || ch == ' ' || ch == '-') {
-			return errInvalidChar{}
-		}
-	}
-	return nil
-}
-
 func validateSyncthingID(s string) error {
 	for _, ch := range s {
 		upper := ch
@@ -107,8 +97,6 @@ func newRecvMemoInput() textinput.Model {
 	ti.Validate = validatePrintableASCII
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	// Starts blurred — amount field is focused first
-	ti.Blur()
 	return ti
 }
 
@@ -132,19 +120,6 @@ func newChanHostInput() textinput.Model {
 	ti.Validate = validateHostChars
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	ti.Blur()
-	return ti
-}
-
-func newHubNameInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "account name"
-	ti.CharLimit = 30
-	ti.SetWidth(30)
-	ti.Validate = validateHubName
-	ti.Prompt = "  "
-	applyInputStyles(&ti)
-	ti.Focus()
 	return ti
 }
 
@@ -180,7 +155,6 @@ func newOCSendLabelInput() textinput.Model {
 	ti.Validate = validatePrintableASCII
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	ti.Blur()
 	return ti
 }
 
@@ -191,7 +165,6 @@ func NewFeeInput() AmountInput {
 	ti.SetWidth(12)
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
-	ti.Focus()
 	return AmountInput{ti: ti}
 }
 

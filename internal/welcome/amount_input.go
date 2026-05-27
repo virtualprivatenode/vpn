@@ -53,7 +53,6 @@ func NewAmountInput() AmountInput {
 	// Update() by filtering the keystroke. A Validate hook
 	// would reject "22,542" because it contains a comma.
 	applyInputStyles(&ti)
-	ti.Focus()
 	return AmountInput{ti: ti}
 }
 

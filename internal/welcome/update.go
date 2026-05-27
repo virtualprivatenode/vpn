@@ -302,6 +302,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.dispatchToTab(tabSyncthingDevice, msg)
 	case channelOpenResultMsg:
 		return m.dispatchToTab(tabOpenChannel, msg)
+	case coUtxoListMsg:
+		return m.dispatchToTab(tabOpenChannel, msg)
+	case coTxListMsg:
+		return m.dispatchToTab(tabOpenChannel, msg)
 	case newAddressMsg:
 		return m.dispatchToTab(tabOCReceive, msg)
 	case invoiceCreatedMsg:
@@ -403,7 +407,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reason.
 		var cmds []tea.Cmd
 		for _, kind := range []tabKind{
-			tabChannel, tabOnChain,
+			tabChannel, tabOnChain, tabOpenChannel,
 		} {
 			rm, cmd, ok := m.routeToScreen(kind, msg)
 			if !ok {

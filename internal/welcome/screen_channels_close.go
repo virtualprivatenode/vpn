@@ -267,6 +267,7 @@ func (s *ChannelCloseScreen) handleTypeBtnKey(
 				s.feeInput.SetSats(
 					int64(s.feeTiers[0].SatPerVB))
 			}
+			s.feeInput.Focus()
 			s.focusZone = closeZoneFee
 		} else {
 			s.focusZone = closeZoneButtons
@@ -489,16 +490,16 @@ func (s *ChannelCloseScreen) viewType(
 	coopPrefix := " "
 	coopStyle := theme.Value
 	if onOptions && s.typeIdx == 0 {
-		coopPrefix = "▸"
+		coopPrefix = theme.NavActive.Render("▸")
 		coopStyle = theme.Action
 	} else if onButtons && s.typeIdx == 0 {
 		coopPrefix = "●"
 		coopStyle = theme.Action
 	}
-	p.line(fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf("%s %s",
 		coopPrefix,
 		coopStyle.Render("Cooperative close")))
-	p.line("   " + theme.Dim.Render(
+	p.line("  " + theme.Dim.Render(
 		"Requires peer online. Funds available"+
 			" immediately."))
 	p.blank()
@@ -506,16 +507,16 @@ func (s *ChannelCloseScreen) viewType(
 	forcePrefix := " "
 	forceStyle := theme.Value
 	if onOptions && s.typeIdx == 1 {
-		forcePrefix = "▸"
+		forcePrefix = theme.NavActive.Render("▸")
 		forceStyle = theme.Warning
 	} else if onButtons && s.typeIdx == 1 {
 		forcePrefix = "●"
 		forceStyle = theme.Warning
 	}
-	p.line(fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf("%s %s",
 		forcePrefix,
 		forceStyle.Render("Force close")))
-	p.line("   " + theme.Dim.Render(
+	p.line("  " + theme.Dim.Render(
 		"Unilateral. Funds locked ~2 weeks."))
 
 	return p.renderWithBottomButtons(
@@ -690,7 +691,8 @@ func (s *ChannelCloseScreen) confirmBindings() []key.Binding {
 		binds = append(binds,
 			kLeftRightButtons, kEnter)
 		if !s.force {
-			binds = append(binds, kShiftTabBack)
+			binds = append(binds,
+				bind("⇧tab", "fee", "shift+tab"))
 		} else {
 			binds = append(binds, kSidebar)
 			if s.ctx.HasTabs {

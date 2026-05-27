@@ -406,7 +406,7 @@ func (s *WalletHomeScreen) View(
 
 			marker := " "
 			if isSelected {
-				marker = "▸"
+				marker = theme.NavActive.Render("▸")
 				midLines = append(midLines,
 					marker+
 						selBg.Render(dateStr)+

@@ -64,6 +64,7 @@ func NewReceiveScreen(
 	ctx *ScreenContext,
 ) *ReceiveScreen {
 	amt := NewAmountInput()
+	amt.Focus() // amount is the initial focus zone
 	return &ReceiveScreen{
 		ctx:         ctx,
 		step:        recvStepInput,
@@ -145,27 +146,30 @@ func (s *ReceiveScreen) HelpBindings() []key.Binding {
 func (s *ReceiveScreen) inputBindings() []key.Binding {
 	var binds []key.Binding
 	switch s.focusZone {
-	case recvZoneAmount, recvZoneMemo:
+	case recvZoneAmount:
 		binds = append(binds,
 			kUpDownFields, kTabNext, kEnterCreate,
 			kSidebar)
 		if s.ctx.HasTabs {
 			binds = append(binds, kShiftTabBar)
 		}
+	case recvZoneMemo:
+		binds = append(binds,
+			kUpDownFields, kTabNext, kEnterCreate,
+			bind("⇧tab", "amount", "shift+tab"),
+			kSidebar)
 	case recvZoneBlind:
 		binds = append(binds,
-			kEnterToggle, kUpDownFields, kTabNext,
+			kUpDownFields,
+			bind("space", "toggle", "space"),
+			kEnterNext, kTabNext,
+			bind("⇧tab", "memo", "shift+tab"),
 			kSidebar)
-		if s.ctx.HasTabs {
-			binds = append(binds, kShiftTabBar)
-		}
 	case recvZoneButtons:
 		binds = append(binds,
-			kLeftRightButtons, kEnter, kShiftTabBack,
+			kLeftRightButtons, kEnter,
+			bind("⇧tab", "toggle", "shift+tab"),
 			kBack)
-		if s.ctx.HasTabs {
-			binds = append(binds, kUpTabBar)
-		}
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -191,158 +195,172 @@ func (s *ReceiveScreen) focusInputZone() {
 func (s *ReceiveScreen) handleInputKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
+	switch s.focusZone {
+	case recvZoneAmount:
+		return s.handleAmountKey(keyStr, msg)
+	case recvZoneMemo:
+		return s.handleMemoKey(keyStr, msg)
+	case recvZoneBlind:
+		return s.handleBlindKey(keyStr)
+	case recvZoneButtons:
+		return s.handleButtonKey(keyStr)
+	}
+	return s, nil
+}
+
+// advanceToButtons blurs text inputs and moves focus to
+// the buttons zone with Create Invoice as the default.
+func (s *ReceiveScreen) advanceToButtons() {
+	s.amountInput.Blur()
+	s.memoInput.Blur()
+	s.focusZone = recvZoneButtons
+	s.btnIdx = 1 // default to Create Invoice
+}
+
+// ── Per-zone key handlers ─────────────────────────────
+
+func (s *ReceiveScreen) handleAmountKey(
+	keyStr string, msg tea.KeyPressMsg,
+) (Screen, tea.Cmd) {
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
-
 	case "left":
-		// Buttons: move left
-		if s.focusZone == recvZoneButtons &&
-			s.btnIdx > 0 {
-			s.btnIdx--
-			return s, nil
-		}
-		// Text inputs: pass through for cursor
-		if s.focusZone == recvZoneAmount {
-			if !s.amountInput.Empty() {
-				cmd := s.amountInput.Update(
-					tea.Msg(msg))
-				return s, cmd
-			}
-		}
-		if s.focusZone == recvZoneMemo {
-			if s.memoInput.Value() != "" {
-				var cmd tea.Cmd
-				s.memoInput, cmd =
-					s.memoInput.Update(
-						tea.Msg(msg))
-				return s, cmd
-			}
+		if !s.amountInput.Empty() {
+			cmd := s.amountInput.Update(
+				tea.Msg(msg))
+			return s, cmd
 		}
 		return s, emitFocusSidebar
-
 	case "right":
-		// Buttons: move right
-		if s.focusZone == recvZoneButtons &&
-			s.btnIdx < 1 {
-			s.btnIdx++
-			return s, nil
-		}
-		// Text inputs: pass through for cursor
-		if s.focusZone == recvZoneAmount {
-			cmd := s.amountInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		if s.focusZone == recvZoneMemo {
-			var cmd tea.Cmd
-			s.memoInput, cmd =
-				s.memoInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, nil
-
+		cmd := s.amountInput.Update(tea.Msg(msg))
+		return s, cmd
 	case "backspace":
-		if s.focusZone == recvZoneAmount {
-			cmd := s.amountInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		if s.focusZone == recvZoneMemo {
-			var cmd tea.Cmd
-			s.memoInput, cmd =
-				s.memoInput.Update(tea.Msg(msg))
-			return s, cmd
-		}
-		return s, emitFocusParent
-
-	case "tab":
-		// Express forward jump between zones
-		if s.focusZone < recvZoneButtons {
-			s.focusZone++
-			if s.focusZone == recvZoneButtons {
-				s.amountInput.Blur()
-				s.memoInput.Blur()
-				s.btnIdx = 1 // default to Create Invoice
-			} else {
-				s.focusInputZone()
-			}
-		}
-		return s, nil
-
-	case "shift+tab":
-		// Express backward jump between zones
-		if s.focusZone > recvZoneAmount {
-			s.focusZone--
-			s.focusInputZone()
-		} else if s.ctx.HasTabs {
-			return s, emitFocusTabBar
-		}
-		return s, nil
-
-	case "down":
-		// Move to next zone at boundary
-		if s.focusZone < recvZoneButtons {
-			s.focusZone++
-			if s.focusZone == recvZoneButtons {
-				s.amountInput.Blur()
-				s.memoInput.Blur()
-				s.btnIdx = 1
-			} else {
-				s.focusInputZone()
-			}
-		}
-		return s, nil
-
-	case "up":
-		// Move to previous zone at boundary
-		if s.focusZone > recvZoneAmount {
-			s.focusZone--
-			s.focusInputZone()
-			return s, nil
-		}
+		cmd := s.amountInput.Update(tea.Msg(msg))
+		return s, cmd
+	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
 		}
 		return s, nil
-
-	case "enter":
-		// Buttons
-		if s.focusZone == recvZoneButtons {
-			switch s.btnIdx {
-			case 0: // Clear
-				s.amountInput.Clear()
-				s.memoInput = newRecvMemoInput()
-				s.blindPaths = true
-				s.inputError = ""
-				s.focusZone = recvZoneAmount
-				s.focusInputZone()
-				return s, nil
-			case 1: // Create Invoice
-				return s.submitInvoice()
-			}
-			return s, nil
-		}
-		// Blind toggle
-		if s.focusZone == recvZoneBlind {
-			s.blindPaths = !s.blindPaths
-			return s, nil
-		}
-		// Enter in text field → advance to buttons
-		s.focusZone = recvZoneButtons
-		s.amountInput.Blur()
-		s.memoInput.Blur()
-		s.btnIdx = 1 // default to Create Invoice
+	case "down", "tab":
+		s.focusZone = recvZoneMemo
+		s.focusInputZone()
 		return s, nil
-
+	case "enter":
+		s.advanceToButtons()
+		return s, nil
 	default:
-		var cmd tea.Cmd
-		if s.focusZone == recvZoneAmount {
-			cmd = s.amountInput.Update(tea.Msg(msg))
-		} else if s.focusZone == recvZoneMemo {
-			s.memoInput, cmd =
-				s.memoInput.Update(tea.Msg(msg))
-		}
+		cmd := s.amountInput.Update(tea.Msg(msg))
 		return s, cmd
 	}
+}
+
+func (s *ReceiveScreen) handleMemoKey(
+	keyStr string, msg tea.KeyPressMsg,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.memoInput.Value() != "" {
+			var cmd tea.Cmd
+			s.memoInput, cmd =
+				s.memoInput.Update(tea.Msg(msg))
+			return s, cmd
+		}
+		return s, emitFocusSidebar
+	case "right":
+		var cmd tea.Cmd
+		s.memoInput, cmd =
+			s.memoInput.Update(tea.Msg(msg))
+		return s, cmd
+	case "backspace":
+		var cmd tea.Cmd
+		s.memoInput, cmd =
+			s.memoInput.Update(tea.Msg(msg))
+		return s, cmd
+	case "up", "shift+tab":
+		s.focusZone = recvZoneAmount
+		s.focusInputZone()
+		return s, nil
+	case "down", "tab":
+		s.focusZone = recvZoneBlind
+		s.focusInputZone()
+		return s, nil
+	case "enter":
+		s.advanceToButtons()
+		return s, nil
+	default:
+		var cmd tea.Cmd
+		s.memoInput, cmd =
+			s.memoInput.Update(tea.Msg(msg))
+		return s, cmd
+	}
+}
+
+func (s *ReceiveScreen) handleBlindKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		return s, emitFocusSidebar
+	case "backspace":
+		return s, emitFocusParent
+	case "up", "shift+tab":
+		s.focusZone = recvZoneMemo
+		s.focusInputZone()
+		return s, nil
+	case "down", "tab", "enter":
+		s.advanceToButtons()
+		return s, nil
+	case "space":
+		s.blindPaths = !s.blindPaths
+		return s, nil
+	}
+	return s, nil
+}
+
+func (s *ReceiveScreen) handleButtonKey(
+	keyStr string,
+) (Screen, tea.Cmd) {
+	switch keyStr {
+	case "ctrl+c":
+		return s, tea.Quit
+	case "left":
+		if s.btnIdx > 0 {
+			s.btnIdx--
+			return s, nil
+		}
+		return s, emitFocusSidebar
+	case "right":
+		if s.btnIdx < 1 {
+			s.btnIdx++
+		}
+		return s, nil
+	case "up", "shift+tab":
+		s.focusZone = recvZoneBlind
+		s.focusInputZone()
+		return s, nil
+	case "backspace":
+		return s, emitFocusParent
+	case "enter":
+		switch s.btnIdx {
+		case 0: // Clear
+			s.amountInput.Clear()
+			s.memoInput = newRecvMemoInput()
+			s.blindPaths = true
+			s.inputError = ""
+			s.focusZone = recvZoneAmount
+			s.focusInputZone()
+			return s, nil
+		case 1: // Create Invoice
+			return s.submitInvoice()
+		}
+	}
+	return s, nil
 }
 
 // submitInvoice validates and creates the invoice.
@@ -578,10 +596,9 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 	// ── Blinded paths toggle ──
 	blindFocused := isFocused &&
 		s.focusZone == recvZoneBlind
-	blindLabel := theme.Label
+	blindLabel := theme.Header
 	blindMarker := " "
 	if blindFocused {
-		blindLabel = theme.NavActive
 		blindMarker = theme.NavActive.Render("▸")
 	}
 	blindValue := theme.Good.Render("● on")

@@ -32,7 +32,6 @@ var (
 	kUpTabBar         = bind("↑", "tab bar", "up")
 	kShiftTabBar      = bind("⇧tab", "tab bar", "shift+tab")
 	kUpShiftTabBar    = bind("↑/⇧tab", "tab bar", "up", "shift+tab")
-	kShiftTabBack     = bind("⇧tab", "back", "shift+tab")
 	kShiftTabButtons  = bind("⇧tab", "buttons", "shift+tab")
 	kShiftTabInput    = bind("⇧tab", "input", "shift+tab")
 	kTabNext          = bind("tab", "next", "tab")

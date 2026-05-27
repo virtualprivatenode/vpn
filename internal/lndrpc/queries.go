@@ -434,8 +434,11 @@ func (c *Client) WaitForPeer(pubkey string, timeout time.Duration) error {
 
 // OpenChannel opens a channel to a peer. This is a fund-moving operation.
 // The caller MUST verify the peer is connected and show a confirmation
-// dialog before calling this.
-func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, taproot bool) (*ChannelOpenResult, error) {
+// dialog before calling this. When outpoints is non-empty, only those
+// UTXOs are used to fund the channel (coin control). When fundMax is
+// true, the entire selected balance (minus fees) funds the channel,
+// producing no change output.
+func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, taproot bool, outpoints []string, fundMax bool, satPerVbyte uint64) (*ChannelOpenResult, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
@@ -450,16 +453,43 @@ func (c *Client) OpenChannel(pubkey string, localAmount int64, private bool, tap
 	defer cancel()
 
 	req := &lnrpc.OpenChannelRequest{
-		NodePubkey:         pubkeyBytes,
-		LocalFundingAmount: localAmount,
-		Private:            private,
-		MinConfs:           0,
-		SpendUnconfirmed:   true,
-		ScidAlias:          private,
+		NodePubkey:       pubkeyBytes,
+		Private:          private,
+		MinConfs:         0,
+		SpendUnconfirmed: true,
+		ScidAlias:        private,
+		FundMax:          fundMax,
+	}
+	if !fundMax {
+		req.LocalFundingAmount = localAmount
 	}
 	if taproot {
 		req.CommitmentType = lnrpc.CommitmentType_SIMPLE_TAPROOT
 	}
+	if satPerVbyte > 0 {
+		req.SatPerVbyte = satPerVbyte
+	}
+
+	// Coin control: restrict inputs to selected UTXOs
+	for _, op := range outpoints {
+		parts := strings.SplitN(op, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		txid := parts[0]
+		var idx uint32
+		for _, c := range parts[1] {
+			if c >= '0' && c <= '9' {
+				idx = idx*10 + uint32(c-'0')
+			}
+		}
+		req.Outpoints = append(req.Outpoints,
+			&lnrpc.OutPoint{
+				TxidStr:     txid,
+				OutputIndex: idx,
+			})
+	}
+
 	resp, err := rpc.OpenChannelSync(ctx, req)
 	if err != nil {
 		c.handleError(err)

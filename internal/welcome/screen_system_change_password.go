@@ -178,12 +178,21 @@ func (s *ChangePasswordScreen) HelpBindings() []key.Binding {
 			binds = append(binds, buttonNav(s.btnIdx)...)
 			binds = append(binds,
 				kEnter,
-				kShiftTabBack,
+				bind("⇧tab", "fields", "shift+tab"),
 				kBack)
-		} else {
+		} else if s.focusZone == changePwZoneInputNew {
 			binds = append(binds,
 				kTabNextField,
 				kEnterNext,
+				kSidebar)
+			if s.ctx.HasTabs {
+				binds = append(binds, kShiftTabBar)
+			}
+		} else {
+			binds = append(binds,
+				kTabButtons,
+				kEnterNext,
+				bind("⇧tab", "prev field", "shift+tab"),
 				kSidebar)
 		}
 		binds = append(binds, kQuit)
@@ -478,16 +487,6 @@ func (s *ChangePasswordScreen) focusButtons(on bool) {
 func (s *ChangePasswordScreen) isOnInput() bool {
 	return s.focusZone == changePwZoneInputNew ||
 		s.focusZone == changePwZoneInputConfirm
-}
-
-func (s *ChangePasswordScreen) activeInputValue() string {
-	switch s.focusZone {
-	case changePwZoneInputNew:
-		return s.newInput.Value()
-	case changePwZoneInputConfirm:
-		return s.confInput.Value()
-	}
-	return ""
 }
 
 func (s *ChangePasswordScreen) routeKeyToInput(

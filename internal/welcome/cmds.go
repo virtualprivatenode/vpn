@@ -85,6 +85,8 @@ func removeSyncthingDeviceCmd(
 func openChannelCmd(
 	client *lndrpc.Client, pubkey, host string,
 	amount int64, private bool, taproot bool,
+	outpoints []string, fundMax bool,
+	satPerVbyte uint64,
 ) tea.Cmd {
 	return func() tea.Msg {
 		if client == nil {
@@ -105,7 +107,8 @@ func openChannelCmd(
 					"could not connect: %v", err)}
 		}
 		result, err := client.OpenChannel(
-			pubkey, amount, private, taproot)
+			pubkey, amount, private, taproot,
+			outpoints, fundMax, satPerVbyte)
 		if err != nil {
 			return channelOpenResultMsg{err: err}
 		}

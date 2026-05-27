@@ -67,7 +67,7 @@ func NewOnChainSendScreen(
 	ctx *ScreenContext,
 	ocCtx *OnChainContext,
 ) *OnChainSendScreen {
-	return &OnChainSendScreen{
+	s := &OnChainSendScreen{
 		ctx:        ctx,
 		ocCtx:      ocCtx,
 		step:       ocStepAddr,
@@ -77,6 +77,7 @@ func NewOnChainSendScreen(
 		feeInput:   NewFeeInput(),
 		sendBtnIdx: 1, // default to Create Transaction
 	}
+	return s
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -846,10 +847,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Address input (step 0) ──────────────────
 	addrActive := isFocused &&
 		s.step == ocStepAddr
-	addrLabel := theme.Label
+	addrLabel := theme.Header
 	addrMarker := " "
 	if addrActive {
-		addrLabel = theme.NavActive
 		addrMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
@@ -861,10 +861,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Amount input (step 1) ───────────────────
 	amtActive := isFocused &&
 		s.step == ocStepAmount
-	amtLabel := theme.Label
+	amtLabel := theme.Header
 	amtMarker := " "
 	if amtActive {
-		amtLabel = theme.NavActive
 		amtMarker = theme.NavActive.Render("▸")
 	}
 
@@ -895,10 +894,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Label input (step 2) ────────────────────
 	lblActive := isFocused &&
 		s.step == ocStepLabel
-	lblLabel := theme.Label
+	lblLabel := theme.Header
 	lblMarker := " "
 	if lblActive {
-		lblLabel = theme.NavActive
 		lblMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
@@ -910,10 +908,9 @@ func (s *OnChainSendScreen) viewInput(
 	// ── Fee rate input (step 3) ─────────────────
 	feeActive := isFocused &&
 		s.step == ocStepFee
-	feeLabelStyle := theme.Label
+	feeLabelStyle := theme.Header
 	feeMarker := " "
 	if feeActive {
-		feeLabelStyle = theme.NavActive
 		feeMarker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
@@ -1274,8 +1271,20 @@ func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 		bind("enter", "continue", "enter"),
 		kSidebar,
 	}
-	if s.ctx.HasTabs {
-		binds = append(binds, kShiftTabBar)
+	switch s.step {
+	case ocStepAddr:
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
+	case ocStepAmount:
+		binds = append(binds,
+			bind("⇧tab", "address", "shift+tab"))
+	case ocStepLabel:
+		binds = append(binds,
+			bind("⇧tab", "amount", "shift+tab"))
+	case ocStepFee:
+		binds = append(binds,
+			bind("⇧tab", "label", "shift+tab"))
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -1284,7 +1293,8 @@ func (s *OnChainSendScreen) inputFieldBindings() []key.Binding {
 func (s *OnChainSendScreen) inputButtonBindings() []key.Binding {
 	binds := buttonNav(s.sendBtnIdx)
 	binds = append(binds,
-		kEnter, kShiftTabBack,
+		kEnter,
+		bind("⇧tab", "fee", "shift+tab"),
 		bind("↑", "fields", "up"),
 		kBack, kQuit)
 	return binds

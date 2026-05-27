@@ -132,14 +132,14 @@ func (s *SyncthingPairScreen) inputBindings() []key.Binding {
 		binds = append(binds,
 			bind("enter", "pair", "enter"),
 			kTabButtons, kSidebar)
+		if s.ctx.HasTabs {
+			binds = append(binds, kShiftTabBar)
+		}
 	} else {
 		binds = append(binds, kEnter)
 		binds = append(binds, buttonNav(s.btnIdx)...)
 		binds = append(binds, kShiftTabInput,
 			kBack)
-	}
-	if s.ctx.HasTabs {
-		binds = append(binds, kShiftTabBar)
 	}
 	binds = append(binds, kQuit)
 	return binds
@@ -408,10 +408,9 @@ func (s *SyncthingPairScreen) viewInput(
 	// Input
 	inputFocused := isFocused &&
 		s.focusZone == syncPairZoneInput
-	labelStyle := theme.Label
+	labelStyle := theme.Header
 	marker := " "
 	if inputFocused {
-		labelStyle = theme.NavActive
 		marker = theme.NavActive.Render("▸")
 	}
 	lines = append(lines,
