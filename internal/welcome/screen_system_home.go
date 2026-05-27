@@ -401,7 +401,7 @@ func (s *SystemHomeScreen) View(
 			style = theme.NavActive
 		}
 
-		svcLine := " " + prefix + " " + dot + " " +
+		svcLine := prefix + " " + dot + " " +
 			style.Render(name)
 
 		if isSelected && s.svcPending != "" {

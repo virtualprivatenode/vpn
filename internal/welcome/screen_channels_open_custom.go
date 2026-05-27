@@ -266,7 +266,7 @@ func (s *ChannelOpenScreen) customPeerBindings() []key.Binding {
 		return binds
 	case coCustomZoneHost:
 		return []key.Binding{
-			kLeftRightCursor, kTabNext,
+			kLeftRightCursor, kTabButtons,
 			bind("⇧tab", "pubkey", "shift+tab"),
 			kSidebar, kQuit,
 		}

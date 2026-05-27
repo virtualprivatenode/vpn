@@ -496,10 +496,10 @@ func (s *ChannelCloseScreen) viewType(
 		coopPrefix = "●"
 		coopStyle = theme.Action
 	}
-	p.line(fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf("%s %s",
 		coopPrefix,
 		coopStyle.Render("Cooperative close")))
-	p.line("   " + theme.Dim.Render(
+	p.line("  " + theme.Dim.Render(
 		"Requires peer online. Funds available"+
 			" immediately."))
 	p.blank()
@@ -513,10 +513,10 @@ func (s *ChannelCloseScreen) viewType(
 		forcePrefix = "●"
 		forceStyle = theme.Warning
 	}
-	p.line(fmt.Sprintf(" %s %s",
+	p.line(fmt.Sprintf("%s %s",
 		forcePrefix,
 		forceStyle.Render("Force close")))
-	p.line("   " + theme.Dim.Render(
+	p.line("  " + theme.Dim.Render(
 		"Unilateral. Funds locked ~2 weeks."))
 
 	return p.renderWithBottomButtons(

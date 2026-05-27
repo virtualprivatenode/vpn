@@ -302,7 +302,7 @@ func (s *ChannelOpenScreen) viewCoinControl(
 	// Selection summary
 	if len(s.utxoSelected) > 0 {
 		p.field("Selected: ",
-			fmt.Sprintf("%d UTXO (%s sats)",
+			fmt.Sprintf("%d UTXO(s) (%s sats)",
 				len(s.utxoSelected),
 				formatSats(s.utxoSelectedTotal)))
 	} else {
