@@ -220,9 +220,8 @@ type peerOption struct {
 	Host        string
 	Alias       string
 	TorOnly     bool
-	Curated     bool
+	Taproot     bool
 	MinChanSize int64
-	Note        string
 }
 
 type statusMsg struct {
