@@ -10,8 +10,8 @@ Private by default, simple by design. Your keys, your node.
 ## Screenshots
 
 <p>
-  <img src="docs/images/create_wallet_dark.png" width="49%" />
   <img src="docs/images/channels_home_dark.png" width="49%" />
+  <img src="docs/images/channels_open_dark.png" width="49%" />
 </p>
 <p>
   <img src="docs/images/channels_home_light.png" width="49%" />
@@ -38,6 +38,16 @@ Private by default, simple by design. Your keys, your node.
 
 - Fresh Debian 13+ Box
 - 2 (v)CPU, 4+ GB RAM, 90+ GB SSD
+
+### Privacy
+
+- **Private channels by default.** Channel funding transactions are not linked to your node in the public graph. SCID alias hides the real channel ID from route hints when supported by the channel peer. Blinded paths (default on) go further by eliminating route hints entirely.
+- **Blinded paths on invoices (default on).** Invoices use encrypted route data instead of plain hop hints. Senders can pay you without learning your node's pubkey, channel partners, or channel funding UTXOs.
+- **Coin control for channel opens.** You choose which UTXOs fund each channel. One UTXO in, one channel out. No silent coin consolidation linking your channels on-chain.
+- **Taproot channels (default on).** Cooperative channel closes produce a MuSig2 key-path spend, which looks identical to a regular single-sig transaction on-chain. Requires peer support.
+- **Consistent P2TR address type.** All addresses (receive, change, close delivery, sweep) use the same bc1p format. P2TR has a smaller anonymity set than P2WPKH today, but matching LND's internal address type prevents change-detection fingerprints that would link your outputs regardless of anonymity set size.
+- **No node alias.** Your node appears in the network graph with only its pubkey. No identifying name broadcast.
+- **Tor-only by default.** All LND connections route through Tor hidden services. Your server IP is never published to the Lightning Network unless you explicitly upgrade to hybrid P2P mode.
 
 ### Quick Start
 
@@ -69,6 +79,30 @@ This works for `curl | sudo bash`, `sudo su -` followed by curl, and
 bare-metal root installs. If no key is found, a random password is
 printed at the end and you can add a key later from the TUI.
 
+### Build from Source
+
+```bash
+sudo apt update && sudo apt install -y git wget sudo curl
+
+cd /tmp
+wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+
+cd ~
+git clone https://github.com/ripsline/virtual-private-node.git
+cd virtual-private-node
+go mod tidy
+go build -o rlvpn ./cmd/
+sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
+sudo bash virtual-private-node.sh
+```
+
+The bootstrap script detects that `rlvpn` is already installed and
+skips the download.
+
 ### Wallet Creation
 
 On first TUI launch after bootstrap, you'll go straight to the wallet
@@ -94,7 +128,7 @@ design — the only way forward is typing the confirmation phrase.
 Every SSH login as `ripsline` opens a terminal UI with a sidebar of
 five sections plus a dark/light theme toggle:
 
-- **Channels** — open, close, and manage Lightning channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
+- **Channels** — open channels with coin control; close and manage channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
 - **Wallet** — send and receive Lightning payments; payment history
 - **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
 - **Add-On** — install and manage Syncthing (channel backup)
@@ -267,30 +301,6 @@ cat /var/log/rlvpn.log
 
 For manual binary verification before installation, see
 [Release Verification](docs/verifying.md).
-
-### Build from Source
-
-```bash
-sudo apt update && sudo apt install -y git wget sudo curl
-
-cd /tmp
-wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.26.1.linux-amd64.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
-source ~/.profile
-
-cd ~
-git clone https://github.com/ripsline/virtual-private-node.git
-cd virtual-private-node
-go mod tidy
-go build -o rlvpn ./cmd/
-sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
-sudo bash virtual-private-node.sh
-```
-
-The bootstrap script detects that `rlvpn` is already installed and
-skips the download.
 
 ### Architecture
 
