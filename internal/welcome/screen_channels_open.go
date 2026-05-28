@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -868,6 +869,10 @@ func (s *ChannelOpenScreen) viewInput(
 
 	// ── Peer list ──
 	p.line(" " + theme.Header.Render("Select a peer:"))
+	maxAlias := 0
+	for _, peer := range s.peerList {
+		maxAlias = max(maxAlias, min(len(peer.Alias), 20))
+	}
 	for i, peer := range s.peerList {
 		prefix := " "
 		style := theme.Value
@@ -888,15 +893,26 @@ func (s *ChannelOpenScreen) viewInput(
 		if len(name) > 20 {
 			name = name[:20]
 		}
-		tags := ""
+		var details []string
+		if peer.Taproot {
+			details = append(details, "Taproot")
+		}
 		if peer.TorOnly {
-			tags += " (Tor)"
+			details = append(details, "Tor")
 		}
-		if peer.Curated {
-			tags += " ★"
+		if peer.MinChanSize > 0 {
+			details = append(details,
+				formatSatsCompact(peer.MinChanSize)+
+					" min")
 		}
-		p.line(fmt.Sprintf("%s %s%s",
+		tags := "(" + strings.Join(details, " · ") + ")"
+		pad := maxAlias + 2 - len(name)
+		if pad < 2 {
+			pad = 2
+		}
+		p.line(fmt.Sprintf("%s %s%*s%s",
 			prefix, style.Render(name),
+			pad, "",
 			theme.Dim.Render(tags)))
 	}
 	// [Custom peer] option
@@ -1166,20 +1182,26 @@ func (s *ChannelOpenScreen) buttonBindings() []key.Binding {
 func channelOpenPeers() []peerOption {
 	return []peerOption{
 		{
-			Alias:       "LNBig",
-			Pubkey:      "034ea80f8b148c750463546bd999bf7321a0e6dfc60aaf84bd0400a2e8d376c0d5",
-			Host:        "qimt6abvc2iuexwrtl5tzyrygnu7mshjahvresve5hdli6nstdg7elyd.onion:9735",
-			TorOnly:     true,
-			Curated:     true,
-			MinChanSize: 500000,
-		},
-		{
 			Alias:       "Zeus",
 			Pubkey:      "031b301307574bbe9b9ac7b79cbe1700e31e544513eae0b5d7497483083f99e581",
 			Host:        "r46dwvxcdri754hf6n3rwexmc53h5x4natg5g6hidnxfzejm5xrqn2id.onion:9735",
 			TorOnly:     true,
-			Curated:     true,
+			Taproot:     true,
 			MinChanSize: 150000,
+		},
+		{
+			Alias:       "ACINQ",
+			Pubkey:      "03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f",
+			Host:        "of7husrflx7sforh3fw6yqlpwstee3wg5imvvmkp4bz6rbjxtg5nljad.onion:9735",
+			TorOnly:     true,
+			MinChanSize: 400000,
+		},
+		{
+			Alias:       "LNBig",
+			Pubkey:      "034ea80f8b148c750463546bd999bf7321a0e6dfc60aaf84bd0400a2e8d376c0d5",
+			Host:        "qimt6abvc2iuexwrtl5tzyrygnu7mshjahvresve5hdli6nstdg7elyd.onion:9735",
+			TorOnly:     true,
+			MinChanSize: 500000,
 		},
 	}
 }
