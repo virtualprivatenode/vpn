@@ -3,117 +3,339 @@
 package installer
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestParseGoodSigCount(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-		want   int
-	}{
-		{
-			name:   "two valid",
-			output: "[GNUPG:] GOODSIG E777299FC265DD04 fanquake\n[GNUPG:] GOODSIG FDE04B7075113BFB guggero\n",
-			want:   2,
-		},
-		{
-			name:   "one valid one error",
-			output: "[GNUPG:] GOODSIG E777299FC265DD04 fanquake\n[GNUPG:] ERRSIG 9343A22960A50972\n",
-			want:   1,
-		},
-		{
-			name:   "none",
-			output: "[GNUPG:] ERRSIG E777299FC265DD04\n",
-			want:   0,
-		},
-		{
-			name:   "empty",
-			output: "",
-			want:   0,
-		},
-		{
-			name:   "five valid",
-			output: "[GNUPG:] GOODSIG A f\n[GNUPG:] GOODSIG B g\n[GNUPG:] GOODSIG C h\n[GNUPG:] GOODSIG D t\n[GNUPG:] GOODSIG E w\n",
-			want:   5,
-		},
+// ── Test helpers ────────────────────────────────────────
+
+func gpgAvailable() bool {
+	_, err := exec.LookPath("gpg")
+	return err == nil
+}
+
+// testGenKey generates a GPG key in the given homedir and
+// returns the primary-key fingerprint. If addSigningSubkey
+// is true, the primary key has certify-only usage and a
+// separate signing subkey is added.
+func testGenKey(
+	t *testing.T, gpgHome, name string,
+	addSigningSubkey bool,
+) string {
+	t.Helper()
+
+	var params string
+	if addSigningSubkey {
+		params = fmt.Sprintf(`%%no-protection
+Key-Type: RSA
+Key-Length: 2048
+Key-Usage: cert
+Subkey-Type: RSA
+Subkey-Length: 2048
+Subkey-Usage: sign
+Name-Real: %s
+Name-Email: %s@test.local
+%%commit
+`, name, name)
+	} else {
+		params = fmt.Sprintf(`%%no-protection
+Key-Type: RSA
+Key-Length: 2048
+Key-Usage: sign
+Name-Real: %s
+Name-Email: %s@test.local
+%%commit
+`, name, name)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ParseGoodSigCount(tt.output)
-			if got != tt.want {
-				t.Errorf("got %d, want %d", got, tt.want)
+
+	paramFile := filepath.Join(gpgHome, "params-"+name)
+	if err := os.WriteFile(
+		paramFile, []byte(params), 0600); err != nil {
+		t.Fatalf("write key params for %s: %v", name, err)
+	}
+
+	output, err := exec.Command(
+		"gpg", "--homedir", gpgHome,
+		"--batch", "--gen-key", paramFile,
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("generate key %s: %v\n%s", name, err, output)
+	}
+
+	return testGetFingerprint(t, gpgHome, name)
+}
+
+// testGetFingerprint extracts the primary-key fingerprint for
+// the named key from the given GPG homedir.
+func testGetFingerprint(
+	t *testing.T, gpgHome, name string,
+) string {
+	t.Helper()
+
+	output, err := exec.Command(
+		"gpg", "--homedir", gpgHome,
+		"--batch", "--with-colons",
+		"--list-keys", name,
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("list key %s: %v\n%s", name, err, output)
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasPrefix(line, "fpr:") {
+			fields := strings.Split(line, ":")
+			if len(fields) >= 10 && fields[9] != "" {
+				return fields[9]
 			}
-		})
+		}
+	}
+	t.Fatalf("fingerprint not found for %s in:\n%s",
+		name, output)
+	return ""
+}
+
+// testExportKey exports the public key for the given fingerprint
+// to a file.
+func testExportKey(
+	t *testing.T, gpgHome, fingerprint, destFile string,
+) {
+	t.Helper()
+
+	output, err := exec.Command(
+		"gpg", "--homedir", gpgHome,
+		"--batch", "--armor",
+		"--export", fingerprint,
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("export key %s: %v", fingerprint, err)
+	}
+	if err := os.WriteFile(destFile, output, 0600); err != nil {
+		t.Fatalf("write key file: %v", err)
 	}
 }
 
-func TestParseBadSigCount(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-		want   int
-	}{
-		{
-			name:   "no bad sigs",
-			output: "[GNUPG:] GOODSIG A fanquake\n",
-			want:   0,
-		},
-		{
-			name:   "one bad sig",
-			output: "[GNUPG:] BADSIG A fanquake\n",
-			want:   1,
-		},
-		{
-			name:   "mixed good and bad",
-			output: "[GNUPG:] GOODSIG A fanquake\n[GNUPG:] BADSIG B guggero\n[GNUPG:] BADSIG C hebasto\n",
-			want:   2,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ParseBadSigCount(tt.output)
-			if got != tt.want {
-				t.Errorf("got %d, want %d", got, tt.want)
-			}
-		})
+// testSign creates an armored detached signature of dataFile
+// using the key identified by fingerprint.
+func testSign(
+	t *testing.T, gpgHome, fingerprint,
+	dataFile, sigFile string,
+) {
+	t.Helper()
+
+	output, err := exec.Command(
+		"gpg", "--homedir", gpgHome,
+		"--batch", "--armor",
+		"--local-user", fingerprint,
+		"--detach-sign",
+		"--output", sigFile,
+		dataFile,
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sign with %s: %v\n%s",
+			fingerprint, err, output)
 	}
 }
 
-func TestHasGoodSig(t *testing.T) {
-	if HasGoodSig("") {
-		t.Error("empty string should not have GOODSIG")
+// ── Hermetic test suite ─────────────────────────────────
+
+func TestVerifyIsolated(t *testing.T) {
+	if !gpgAvailable() {
+		t.Skip("gpg not available — skipping")
 	}
-	if !HasGoodSig("[GNUPG:] GOODSIG A fanquake") {
-		t.Error("should detect GOODSIG")
+
+	// Set up a key-generation homedir with two distinct keys
+	// and one subkey-only key.
+	genHome, err := os.MkdirTemp("", "rlvpn-test-gen-")
+	if err != nil {
+		t.Fatalf("create gen home: %v", err)
 	}
-	if HasGoodSig("[GNUPG:] BADSIG A fanquake") {
-		t.Error("BADSIG should not count as GOODSIG")
+	defer os.RemoveAll(genHome)
+
+	fpAlpha := testGenKey(t, genHome, "Alpha", false)
+	fpBeta := testGenKey(t, genHome, "Beta", false)
+	fpSubkey := testGenKey(t, genHome, "SubkeySigner", true)
+
+	// Create test data file.
+	dataDir, err := os.MkdirTemp("", "rlvpn-test-data-")
+	if err != nil {
+		t.Fatalf("create data dir: %v", err)
 	}
+	defer os.RemoveAll(dataDir)
+
+	dataFile := filepath.Join(dataDir, "testdata.txt")
+	if err := os.WriteFile(
+		dataFile, []byte("test data content\n"), 0600); err != nil {
+		t.Fatalf("write test data: %v", err)
+	}
+
+	// Create a tampered data file (for case 2).
+	tamperedFile := filepath.Join(dataDir, "tampered.txt")
+	if err := os.WriteFile(
+		tamperedFile,
+		[]byte("tampered data content\n"), 0600); err != nil {
+		t.Fatalf("write tampered data: %v", err)
+	}
+
+	// Export all keys to files (for verifyIsolated to import).
+	keyAlpha := filepath.Join(dataDir, "alpha.asc")
+	keyBeta := filepath.Join(dataDir, "beta.asc")
+	keySubkey := filepath.Join(dataDir, "subkey.asc")
+	testExportKey(t, genHome, fpAlpha, keyAlpha)
+	testExportKey(t, genHome, fpBeta, keyBeta)
+	testExportKey(t, genHome, fpSubkey, keySubkey)
+
+	// Sign test data with each key.
+	sigAlpha := filepath.Join(dataDir, "sig-alpha.asc")
+	sigBeta := filepath.Join(dataDir, "sig-beta.asc")
+	sigSubkey := filepath.Join(dataDir, "sig-subkey.asc")
+	testSign(t, genHome, fpAlpha, dataFile, sigAlpha)
+	testSign(t, genHome, fpBeta, dataFile, sigBeta)
+	testSign(t, genHome, fpSubkey, dataFile, sigSubkey)
+
+	// Create combined signatures for multi-signer tests.
+	sigAlphaData, _ := os.ReadFile(sigAlpha)
+	sigBetaData, _ := os.ReadFile(sigBeta)
+
+	// Alpha + Beta combined (for case 5).
+	sigAlphaBeta := filepath.Join(dataDir, "sig-alpha-beta.asc")
+	if err := os.WriteFile(
+		sigAlphaBeta,
+		append(sigAlphaData, sigBetaData...),
+		0600); err != nil {
+		t.Fatalf("write combined sig: %v", err)
+	}
+
+	// Alpha + Alpha combined (for case 4).
+	sigAlphaAlpha := filepath.Join(dataDir,
+		"sig-alpha-alpha.asc")
+	if err := os.WriteFile(
+		sigAlphaAlpha,
+		append(sigAlphaData, sigAlphaData...),
+		0600); err != nil {
+		t.Fatalf("write double sig: %v", err)
+	}
+
+	// ── Case 1: Good sig from a pinned key → accept ────
+	t.Run("pinned_key_accepts", func(t *testing.T) {
+		pinned := map[string]bool{fpAlpha: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha}, sigAlpha, dataFile, pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 1 {
+			t.Fatalf("distinct = %d, want 1", distinct)
+		}
+	})
+
+	// ── Case 2: Tampered file → BADSIG → reject ────────
+	t.Run("tampered_file_badsig", func(t *testing.T) {
+		pinned := map[string]bool{fpAlpha: true}
+		_, bad, err := verifyIsolated(
+			[]string{keyAlpha}, sigAlpha, tamperedFile, pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !bad {
+			t.Fatal("expected BADSIG for tampered file")
+		}
+	})
+
+	// ── Case 3: Good sig from UNPINNED key → reject ────
+	t.Run("unpinned_key_rejects", func(t *testing.T) {
+		// Alpha signed, but only Beta is pinned.
+		pinned := map[string]bool{fpBeta: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha}, sigAlpha, dataFile, pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 0 {
+			t.Fatalf("distinct = %d, want 0 "+
+				"(signature valid but not from pinned key)",
+				distinct)
+		}
+	})
+
+	// ── Case 4: Same key twice → counts as 1 ───────────
+	//     → fails threshold 2
+	t.Run("same_key_twice_counts_once", func(t *testing.T) {
+		pinned := map[string]bool{fpAlpha: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha},
+			sigAlphaAlpha, dataFile, pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 1 {
+			t.Fatalf("distinct = %d, want 1 "+
+				"(same key signing twice should count once)",
+				distinct)
+		}
+		// Would fail threshold 2.
+		if distinct >= 2 {
+			t.Fatal("same key twice should not clear threshold 2")
+		}
+	})
+
+	// ── Case 5: Two different pinned keys → clears 2 ───
+	t.Run("two_pinned_keys_clears_threshold", func(t *testing.T) {
+		pinned := map[string]bool{
+			fpAlpha: true,
+			fpBeta:  true,
+		}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha, keyBeta},
+			sigAlphaBeta, dataFile, pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 2 {
+			t.Fatalf("distinct = %d, want 2", distinct)
+		}
+	})
+
+	// ── Case 6: Subkey-signed → matches primary FP ─────
+	t.Run("subkey_signed_matches_primary", func(t *testing.T) {
+		// fpSubkey is the PRIMARY fingerprint. The signing
+		// subkey has a different fingerprint. verifyIsolated
+		// must match the VALIDSIG last field (primary), not
+		// the first field (subkey).
+		pinned := map[string]bool{fpSubkey: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keySubkey},
+			sigSubkey, dataFile, pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 1 {
+			t.Fatalf("distinct = %d, want 1 "+
+				"(subkey-signed should match primary FP)",
+				distinct)
+		}
+	})
 }
 
-func TestBadSigShouldBlockVerification(t *testing.T) {
-	// This test documents the security fix:
-	// Even with 2 good sigs, if there's a bad sig, verification should fail
-	output := "[GNUPG:] GOODSIG A fanquake\n[GNUPG:] GOODSIG B guggero\n[GNUPG:] BADSIG C hebasto\n"
-
-	good := ParseGoodSigCount(output)
-	bad := ParseBadSigCount(output)
-
-	if good < 2 {
-		t.Error("expected at least 2 good sigs")
-	}
-	if bad == 0 {
-		t.Error("expected bad sigs to be detected")
-	}
-
-	// In the fixed code, bad > 0 means verification fails
-	// regardless of good sig count
-	if bad > 0 && good >= 2 {
-		t.Log("PASS: bad sigs detected even with sufficient good sigs")
-	}
-}
+// ── Anchor validation ───────────────────────────────────
 
 func TestSignerFingerprints(t *testing.T) {
 	if len(bitcoinCoreSigners) != 5 {
@@ -143,25 +365,17 @@ func TestSignerFingerprints(t *testing.T) {
 	}
 }
 
-func TestReleaseKeyFingerprintFormat(t *testing.T) {
-	// The release signing key fingerprint is defined in setup.go's SelfUpdateSteps.
-	// We can't easily access it from here since it's a local variable,
-	// but we can test the fingerprint validation logic.
-
-	validFP := "ABCDEF1234567890ABCDEF1234567890ABCDEF12"
-	if len(validFP) != 40 {
-		t.Errorf("test fingerprint length: got %d, want 40", len(validFP))
+func TestReleaseKeyFingerprint(t *testing.T) {
+	if len(rlvpnReleaseFP) != 40 {
+		t.Errorf("release key fingerprint length %d, want 40",
+			len(rlvpnReleaseFP))
 	}
 
-	// Test that our GPG output parsing would match a fingerprint
-	sampleOutput := "fpr:::::::::ABCDEF1234567890ABCDEF1234567890ABCDEF12:"
-	if !strings.Contains(sampleOutput, validFP) {
-		t.Error("fingerprint should be found in GPG colon output")
-	}
-
-	// Test that a wrong fingerprint doesn't match
-	wrongFP := "0000000000000000000000000000000000000000"
-	if strings.Contains(sampleOutput, wrongFP) {
-		t.Error("wrong fingerprint should not match")
+	// Cross-check: must match the value baked into
+	// virtual-private-node.sh SIGNING_KEY_FP (line 24).
+	expected := "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+	if rlvpnReleaseFP != expected {
+		t.Errorf("release FP = %s, want %s",
+			rlvpnReleaseFP, expected)
 	}
 }

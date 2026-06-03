@@ -5,44 +5,52 @@ package installer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/system"
 )
 
-func downloadBitcoin(version string) error {
+func downloadBitcoin(version, workDir string) error {
 	filename := fmt.Sprintf("bitcoin-%s-x86_64-linux-gnu.tar.gz", version)
 	baseURL := fmt.Sprintf("https://bitcoincore.org/bin/bitcoin-core-%s", version)
-	if err := system.DownloadRequireTor(baseURL+"/"+filename, "/tmp/"+filename); err != nil {
+	if err := system.DownloadRequireTor(
+		baseURL+"/"+filename,
+		filepath.Join(workDir, filename)); err != nil {
 		return err
 	}
-	if err := system.DownloadRequireTor(baseURL+"/SHA256SUMS", "/tmp/SHA256SUMS"); err != nil {
+	if err := system.DownloadRequireTor(
+		baseURL+"/SHA256SUMS",
+		filepath.Join(workDir, "SHA256SUMS")); err != nil {
 		return err
 	}
-	return system.DownloadRequireTor(baseURL+"/SHA256SUMS.asc", "/tmp/SHA256SUMS.asc")
+	return system.DownloadRequireTor(
+		baseURL+"/SHA256SUMS.asc",
+		filepath.Join(workDir, "SHA256SUMS.asc"))
 }
 
-func extractAndInstallBitcoin(version string) error {
+func extractAndInstallBitcoin(version, workDir string) error {
 	filename := fmt.Sprintf("bitcoin-%s-x86_64-linux-gnu.tar.gz", version)
-	if err := system.Run("tar", "-xzf", "/tmp/"+filename, "-C", "/tmp"); err != nil {
+	if err := system.Run("tar", "-xzf",
+		filepath.Join(workDir, filename),
+		"-C", workDir); err != nil {
 		return err
 	}
-	extractDir := fmt.Sprintf("/tmp/bitcoin-%s/bin", version)
+	extractDir := filepath.Join(workDir,
+		fmt.Sprintf("bitcoin-%s", version), "bin")
 	entries, err := os.ReadDir(extractDir)
 	if err != nil {
 		return fmt.Errorf("read dir: %w", err)
 	}
 	for _, entry := range entries {
-		src := fmt.Sprintf("%s/%s", extractDir, entry.Name())
-		if err := system.SudoRun("install", "-m", "0755", "-o", "root", "-g", "root", src, "/usr/local/bin/"); err != nil {
+		src := filepath.Join(extractDir, entry.Name())
+		if err := system.SudoRun("install", "-m", "0755",
+			"-o", "root", "-g", "root",
+			src, "/usr/local/bin/"); err != nil {
 			return err
 		}
 	}
-	os.Remove("/tmp/" + filename)
-	os.Remove("/tmp/SHA256SUMS")
-	os.Remove("/tmp/SHA256SUMS.asc")
-	os.RemoveAll(fmt.Sprintf("/tmp/bitcoin-%s", version))
 	return nil
 }
 
