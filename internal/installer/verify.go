@@ -46,7 +46,9 @@ const rlvpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 // bitcoinCoreSigners are the trusted Bitcoin Core builder keys.
 // Source: github.com/bitcoin-core/guix.sigs/tree/main/builder-keys
 // Cross-check: each key's fingerprint against the .gpg file at
-// the listed URL. Threshold: 2 of 5 distinct signers required.
+// the listed URL. Verified against Bitcoin Core 29.3 SHA256SUMS.asc
+// on a live install (June 4 2026). Primary-key fingerprints, not
+// subkeys. Threshold: 2 of 5 distinct signers required.
 var bitcoinCoreSigners = []struct {
 	name        string
 	fingerprint string
@@ -59,36 +61,39 @@ var bitcoinCoreSigners = []struct {
 	},
 	{
 		name:        "guggero",
-		fingerprint: "FDE04B7075113BFB085020B57BBD8D4D95DB9F03",
+		fingerprint: "F4FC70F07310028424EFC20A8E4256593F177720",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/guggero.gpg",
 	},
 	{
 		name:        "hebasto",
-		fingerprint: "CBE89ED88EE8525FD8D79F1EDB56ADFD8B5EF498",
+		fingerprint: "D1DBF2C4B96F2DEBF4C16654410108112E7EA81F",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/hebasto.gpg",
 	},
 	{
 		name:        "theStack",
-		fingerprint: "9343A22960A50972CC1EFD7DB3B5CB8DB648B27F",
+		fingerprint: "6A8F9C266528E25AEB1D7731C2371D91CB716EA7",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/theStack.gpg",
 	},
 	{
 		name:        "willcl-ark",
-		fingerprint: "A0083660F235A27000CD3C81CE6EC49945C17EA6",
+		fingerprint: "67AA5B46E7AF78053167FE343B8F814A784218F8",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/willcl-ark.gpg",
 	},
 }
 
 // lndSigner is the trusted LND release signer.
 // Source: github.com/lightningnetwork/lnd/tree/master/scripts/keys
-// Cross-check: roasbeef.asc at the listed URL.
+// Cross-check: roasbeef.asc at the listed URL. Verified against
+// LND v0.20.0-beta manifest signature on a live install (June 4
+// 2026). Primary-key fingerprint — the signing subkey (2962...)
+// is owned by this primary.
 var lndSigner = struct {
 	name        string
 	fingerprint string
 	keyURL      string
 }{
 	name:        "roasbeef",
-	fingerprint: "296212681AADF05656A2CDEE90525F7DEEE0AD86",
+	fingerprint: "A5B61896952D9FDA83BC054CDC42612E89237182",
 	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
 }
 
