@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -223,6 +224,11 @@ func Run() error {
 }
 
 func buildSteps(cfg *config.AppConfig) []InstallStep {
+	// Pipeline working directories — created in each pipeline's
+	// first step, captured by closures, cleaned up in the final
+	// step. Random paths via os.MkdirTemp prevent symlink attacks.
+	var btcWork, lndWork string
+
 	return []InstallStep{
 		{Name: "Creating system user and directories",
 			Fn: func() error {
@@ -259,23 +265,28 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 			Fn: func() error { return configureFirewall(cfg) }},
 		{Name: "Downloading Bitcoin Core " + bitcoinVersion,
 			Fn: func() error {
-				if err := importBitcoinCoreKeys(); err != nil {
-					return err
+				var err error
+				btcWork, err = os.MkdirTemp("", "rlvpn-btc-")
+				if err != nil {
+					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadBitcoin(bitcoinVersion)
+				return downloadBitcoin(bitcoinVersion, btcWork)
 			}},
 		{Name: "Verifying Bitcoin Core",
 			Fn: func() error {
-				if err := verifyBitcoinCoreSigs(2); err != nil {
+				if err := verifyBitcoinCoreSigs(
+					btcWork, 2); err != nil {
 					return err
 				}
-				return verifyBitcoin()
+				return verifyBitcoin(btcWork)
 			}},
 		{Name: "Installing Bitcoin Core",
 			Fn: func() error {
-				if err := extractAndInstallBitcoin(bitcoinVersion); err != nil {
+				if err := extractAndInstallBitcoin(
+					bitcoinVersion, btcWork); err != nil {
 					return err
 				}
+				os.RemoveAll(btcWork)
 				if err := writeBitcoinConfig(cfg); err != nil {
 					return err
 				}
@@ -299,23 +310,28 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 		// ── LND (Tor-only, non-interactive) ─────────
 		{Name: "Downloading LND",
 			Fn: func() error {
-				if err := importLNDKey(); err != nil {
-					return err
+				var err error
+				lndWork, err = os.MkdirTemp("", "rlvpn-lnd-")
+				if err != nil {
+					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadLND(lndVersion)
+				return downloadLND(lndVersion, lndWork)
 			}},
 		{Name: "Verifying LND",
 			Fn: func() error {
-				if err := verifyLNDSig(lndVersion); err != nil {
+				if err := verifyLNDSig(
+					lndWork, lndVersion); err != nil {
 					return err
 				}
-				return verifyLND()
+				return verifyLND(lndWork)
 			}},
 		{Name: "Installing LND",
 			Fn: func() error {
-				if err := extractAndInstallLND(lndVersion); err != nil {
+				if err := extractAndInstallLND(
+					lndVersion, lndWork); err != nil {
 					return err
 				}
+				os.RemoveAll(lndWork)
 				if err := createLNDDirs(systemUser); err != nil {
 					return err
 				}
@@ -436,87 +452,47 @@ func SelfUpdateSteps(newVersion string) []InstallStep {
 	baseURL := fmt.Sprintf(
 		"https://github.com/ripsline/virtual-private-node/releases/download/v%s",
 		newVersion)
-	expectedFP := "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 	tarball := fmt.Sprintf("rlvpn-%s-amd64.tar.gz",
 		newVersion)
+
+	var workDir string
 
 	return []InstallStep{
 		{Name: "Downloading v" + newVersion,
 			Fn: func() error {
-				return system.DownloadRequireTor(
+				var err error
+				workDir, err = os.MkdirTemp("",
+					"rlvpn-update-")
+				if err != nil {
+					return fmt.Errorf(
+						"create work dir: %w", err)
+				}
+				if err := system.DownloadRequireTor(
 					baseURL+"/"+tarball,
-					"/tmp/"+tarball)
-			}},
-		{Name: "Downloading checksums",
-			Fn: func() error {
+					filepath.Join(workDir, tarball)); err != nil {
+					return err
+				}
 				if err := system.DownloadRequireTor(
 					baseURL+"/SHA256SUMS",
-					"/tmp/rlvpn-SHA256SUMS"); err != nil {
+					filepath.Join(workDir,
+						"SHA256SUMS")); err != nil {
 					return err
 				}
 				return system.DownloadRequireTor(
 					baseURL+"/SHA256SUMS.asc",
-					"/tmp/rlvpn-SHA256SUMS.asc")
-			}},
-		{Name: "Importing release key",
-			Fn: func() error {
-				// Skip download if key is already imported
-				// (e.g. from a previous update).
-				output, err := system.RunCombinedOutput(
-					"gpg", "--batch", "--with-colons",
-					"--list-keys", expectedFP)
-				if err == nil &&
-					strings.Contains(output, expectedFP) {
-					return nil
-				}
-
-				keyFile := "/tmp/rlvpn-release-key.asc"
-				keyURL := fmt.Sprintf(
-					"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
-					expectedFP)
-				if err := system.DownloadRequireTor(
-					keyURL, keyFile); err != nil {
-					return fmt.Errorf(
-						"could not download signing key: %w",
-						err)
-				}
-				defer os.Remove(keyFile)
-				if _, err := system.RunCombinedOutput(
-					"gpg", "--batch", "--import",
-					keyFile); err != nil {
-					return fmt.Errorf(
-						"could not import signing key: %w",
-						err)
-				}
-				output, err = system.RunCombinedOutput(
-					"gpg", "--batch", "--with-colons",
-					"--list-keys", expectedFP)
-				if err != nil ||
-					!strings.Contains(output, expectedFP) {
-					return fmt.Errorf(
-						"release key fingerprint mismatch")
-				}
-				return nil
+					filepath.Join(workDir,
+						"SHA256SUMS.asc"))
 			}},
 		{Name: "Verifying signature",
 			Fn: func() error {
-				output, err := system.RunCombinedOutput(
-					"gpg", "--batch", "--verify",
-					"/tmp/rlvpn-SHA256SUMS.asc",
-					"/tmp/rlvpn-SHA256SUMS")
-				if err != nil {
-					return fmt.Errorf(
-						"signature verification failed: %s",
-						output)
-				}
-				return nil
+				return verifySelfUpdate(workDir)
 			}},
 		{Name: "Verifying checksum",
 			Fn: func() error {
 				cmd := exec.Command("sha256sum",
 					"--ignore-missing", "--check",
-					"rlvpn-SHA256SUMS")
-				cmd.Dir = "/tmp"
+					"SHA256SUMS")
+				cmd.Dir = workDir
 				output, err := cmd.CombinedOutput()
 				if err != nil {
 					return fmt.Errorf(
@@ -528,19 +504,17 @@ func SelfUpdateSteps(newVersion string) []InstallStep {
 		{Name: "Installing new binary",
 			Fn: func() error {
 				if err := system.Run("tar", "-xzf",
-					"/tmp/"+tarball, "-C",
-					"/tmp"); err != nil {
+					filepath.Join(workDir, tarball),
+					"-C", workDir); err != nil {
 					return err
 				}
 				if err := system.SudoRun("install",
-					"-m", "755", "/tmp/rlvpn",
+					"-m", "755",
+					filepath.Join(workDir, "rlvpn"),
 					"/usr/local/bin/rlvpn"); err != nil {
 					return err
 				}
-				os.Remove("/tmp/" + tarball)
-				os.Remove("/tmp/rlvpn-SHA256SUMS")
-				os.Remove("/tmp/rlvpn-SHA256SUMS.asc")
-				os.Remove("/tmp/rlvpn")
+				os.RemoveAll(workDir)
 				return nil
 			}},
 	}

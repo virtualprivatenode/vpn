@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,36 +18,43 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/system"
 )
 
-func downloadLND(version string) error {
+func downloadLND(version, workDir string) error {
 	filename := fmt.Sprintf("lnd-linux-amd64-v%s.tar.gz", version)
-	url := fmt.Sprintf("https://github.com/lightningnetwork/lnd/releases/download/v%s/%s",
+	url := fmt.Sprintf(
+		"https://github.com/lightningnetwork/lnd/releases/download/v%s/%s",
 		version, filename)
-	manifestURL := fmt.Sprintf("https://github.com/lightningnetwork/lnd/releases/download/v%s/manifest-v%s.txt",
+	manifestURL := fmt.Sprintf(
+		"https://github.com/lightningnetwork/lnd/releases/download/v%s/manifest-v%s.txt",
 		version, version)
-	if err := system.DownloadRequireTor(url, "/tmp/"+filename); err != nil {
+	if err := system.DownloadRequireTor(
+		url, filepath.Join(workDir, filename)); err != nil {
 		return err
 	}
-	if err := system.DownloadRequireTor(manifestURL, "/tmp/manifest.txt"); err != nil {
+	if err := system.DownloadRequireTor(
+		manifestURL,
+		filepath.Join(workDir, "manifest.txt")); err != nil {
 		return fmt.Errorf("download LND manifest: %w", err)
 	}
 	return nil
 }
 
-func extractAndInstallLND(version string) error {
+func extractAndInstallLND(version, workDir string) error {
 	filename := fmt.Sprintf("lnd-linux-amd64-v%s.tar.gz", version)
-	if err := system.Run("tar", "-xzf", "/tmp/"+filename, "-C", "/tmp"); err != nil {
+	if err := system.Run("tar", "-xzf",
+		filepath.Join(workDir, filename),
+		"-C", workDir); err != nil {
 		return err
 	}
-	extractDir := fmt.Sprintf("/tmp/lnd-linux-amd64-v%s", version)
+	extractDir := filepath.Join(workDir,
+		fmt.Sprintf("lnd-linux-amd64-v%s", version))
 	for _, bin := range []string{"lnd", "lncli"} {
-		src := fmt.Sprintf("%s/%s", extractDir, bin)
-		if err := system.SudoRun("install", "-m", "0755", "-o", "root", "-g", "root", src, "/usr/local/bin/"); err != nil {
+		src := filepath.Join(extractDir, bin)
+		if err := system.SudoRun("install", "-m", "0755",
+			"-o", "root", "-g", "root",
+			src, "/usr/local/bin/"); err != nil {
 			return err
 		}
 	}
-	os.Remove("/tmp/" + filename)
-	os.Remove("/tmp/manifest.txt")
-	os.RemoveAll(extractDir)
 	return nil
 }
 

@@ -1,19 +1,54 @@
 // internal/installer/verify.go
 
+// Trust model
+//
+// All signing-key fingerprints are pinned in this file as the sole trust
+// anchors. Keys are fetched fresh each run and imported into an ephemeral
+// GPG home directory (os.MkdirTemp, 0700). Signatures are verified via
+// gpg --status-fd 1; only [GNUPG:] VALIDSIG lines whose primary-key
+// fingerprint (the LAST whitespace-delimited field) matches a pinned
+// value are counted. Distinct signers are counted once (deduped by
+// primary fingerprint). Any [GNUPG:] BADSIG line is a hard stop. The
+// GPG exit code is never trusted.
+//
+// Three callers use verifyIsolated:
+//   - verifySelfUpdate:      threshold 1 vs the rlvpn release key
+//   - verifyBitcoinCoreSigs: threshold 2 distinct builder fingerprints
+//   - verifyLNDSig:          threshold 1 vs roasbeef's fingerprint
+
 package installer
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/system"
 )
 
-// ── Trusted signing keys ─────────────────────────────────
+// ── Trust anchors ───────────────────────────────────────
+//
+// Each fingerprint was sourced and cross-checked as noted.
+// To re-verify: download the key from the listed URL, import
+// into an ephemeral keyring, and confirm the fingerprint with
+// gpg --with-colons --list-keys.
 
+// rlvpnReleaseFP is the primary fingerprint of the rlvpn
+// release signing key.
+// Source: generated locally; public key hosted at
+// keys.openpgp.org. Cross-check: SIGNING_KEY_FP in
+// virtual-private-node.sh (line 24).
+const rlvpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+
+// bitcoinCoreSigners are the trusted Bitcoin Core builder keys.
+// Source: github.com/bitcoin-core/guix.sigs/tree/main/builder-keys
+// Cross-check: each key's fingerprint against the .gpg file at
+// the listed URL. Verified against Bitcoin Core 29.3 SHA256SUMS.asc
+// on a live install (June 4 2026). Primary-key fingerprints, not
+// subkeys. Threshold: 2 of 5 distinct signers required.
 var bitcoinCoreSigners = []struct {
 	name        string
 	fingerprint string
@@ -26,33 +61,39 @@ var bitcoinCoreSigners = []struct {
 	},
 	{
 		name:        "guggero",
-		fingerprint: "FDE04B7075113BFB085020B57BBD8D4D95DB9F03",
+		fingerprint: "F4FC70F07310028424EFC20A8E4256593F177720",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/guggero.gpg",
 	},
 	{
 		name:        "hebasto",
-		fingerprint: "CBE89ED88EE8525FD8D79F1EDB56ADFD8B5EF498",
+		fingerprint: "D1DBF2C4B96F2DEBF4C16654410108112E7EA81F",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/hebasto.gpg",
 	},
 	{
 		name:        "theStack",
-		fingerprint: "9343A22960A50972CC1EFD7DB3B5CB8DB648B27F",
+		fingerprint: "6A8F9C266528E25AEB1D7731C2371D91CB716EA7",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/theStack.gpg",
 	},
 	{
 		name:        "willcl-ark",
-		fingerprint: "A0083660F235A27000CD3C81CE6EC49945C17EA6",
+		fingerprint: "67AA5B46E7AF78053167FE343B8F814A784218F8",
 		keyURL:      "https://raw.githubusercontent.com/bitcoin-core/guix.sigs/main/builder-keys/willcl-ark.gpg",
 	},
 }
 
+// lndSigner is the trusted LND release signer.
+// Source: github.com/lightningnetwork/lnd/tree/master/scripts/keys
+// Cross-check: roasbeef.asc at the listed URL. Verified against
+// LND v0.20.0-beta manifest signature on a live install (June 4
+// 2026). Primary-key fingerprint — the signing subkey (2962...)
+// is owned by this primary.
 var lndSigner = struct {
 	name        string
 	fingerprint string
 	keyURL      string
 }{
 	name:        "roasbeef",
-	fingerprint: "296212681AADF05656A2CDEE90525F7DEEE0AD86",
+	fingerprint: "A5B61896952D9FDA83BC054CDC42612E89237182",
 	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
 }
 
@@ -65,67 +106,93 @@ func ensureGPG() error {
 	return system.SudoRun("apt-get", "install", "-y", "-qq", "gnupg")
 }
 
-// ── Key import ───────────────────────────────────────────
+// ── Isolated signature verification ─────────────────────
 
-func importBitcoinCoreKeys() error {
-	logger.Verify("--- Bitcoin Core key import ---")
-	imported := 0
-	for _, signer := range bitcoinCoreSigners {
-		keyFile := fmt.Sprintf("/tmp/btc-key-%s.gpg", signer.name)
-		if err := system.DownloadRequireTor(signer.keyURL, keyFile); err != nil {
-			logger.Verify("SKIP %s: download failed: %v", signer.name, err)
-			continue
-		}
-
-		system.RunCombinedOutput("gpg", "--batch", "--import", keyFile)
-		os.Remove(keyFile)
-
-		if gpgHasFingerprint(signer.fingerprint) {
-			imported++
-			logger.Verify("OK %s: imported (fingerprint %s)", signer.name, signer.fingerprint)
-		} else {
-			logger.Verify("SKIP %s: fingerprint not found after import", signer.name)
-		}
-	}
-
-	logger.Verify("Bitcoin Core keys imported: %d/%d", imported, len(bitcoinCoreSigners))
-	if imported == 0 {
-		logger.Verify("FAIL: no Bitcoin Core signing keys imported")
-		return fmt.Errorf("could not import any Bitcoin Core signing keys")
-	}
-	return nil
-}
-
-func importLNDKey() error {
-	logger.Verify("--- LND key import ---")
-	keyFile := "/tmp/lnd-key-roasbeef.asc"
-	if err := system.DownloadRequireTor(lndSigner.keyURL, keyFile); err != nil {
-		logger.Verify("FAIL: download LND signing key: %v", err)
-		return fmt.Errorf("download LND signing key: %w", err)
-	}
-	defer os.Remove(keyFile)
-
-	output, err := system.RunCombinedOutput("gpg", "--batch", "--import", keyFile)
+// verifyIsolated verifies a detached GPG signature inside an
+// ephemeral keyring. It creates a temporary GPG home directory,
+// imports the provided key files, and runs gpg --verify with
+// --status-fd 1. Only VALIDSIG lines whose primary-key
+// fingerprint (the LAST field) matches a pinned fingerprint are
+// counted, and each primary fingerprint is counted at most once
+// (distinct signers). Any BADSIG line sets badSig = true.
+//
+// The GPG exit code is intentionally ignored — the VALIDSIG and
+// BADSIG parsing is the sole source of truth.
+func verifyIsolated(
+	keyFiles []string,
+	sigFile, dataFile string,
+	pinnedFPs map[string]bool,
+) (distinctValidSigners int, badSig bool, err error) {
+	// Ephemeral GPG home — 0700, random path, cleaned up on return.
+	gpgHome, err := os.MkdirTemp("", "rlvpn-gpg-")
 	if err != nil {
-		logger.Verify("FAIL: import LND key: %s", output)
-		return fmt.Errorf("import LND key: %w: %s", err, output)
+		return 0, false, fmt.Errorf(
+			"create ephemeral gpg home: %w", err)
+	}
+	defer os.RemoveAll(gpgHome)
+
+	// Import key files into the ephemeral keyring.
+	for _, kf := range keyFiles {
+		output, importErr := system.RunCombinedOutput(
+			"gpg", "--homedir", gpgHome,
+			"--batch", "--import", kf)
+		if importErr != nil {
+			logger.Verify("SKIP key import %s: %v: %s",
+				filepath.Base(kf), importErr, output)
+		}
 	}
 
-	if !gpgHasFingerprint(lndSigner.fingerprint) {
-		logger.Verify("FAIL: LND key fingerprint mismatch (expected %s)", lndSigner.fingerprint)
-		return fmt.Errorf("LND key fingerprint mismatch")
+	// Verify — exit code intentionally discarded.
+	output, _ := system.RunCombinedOutput(
+		"gpg", "--homedir", gpgHome, "--batch", "--verify",
+		"--status-fd", "1", sigFile, dataFile)
+
+	// Parse status output.
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "[GNUPG:] BADSIG") {
+			badSig = true
+			logger.Verify("BADSIG: %s", trimmed)
+		}
+
+		if strings.HasPrefix(trimmed, "[GNUPG:] VALIDSIG") {
+			fields := strings.Fields(trimmed)
+			// VALIDSIG layout (after [GNUPG:] VALIDSIG):
+			//   <signing-fpr> <date> <ts> <exp> <ver> <res>
+			//   <pkalgo> <halgo> <sigclass> <primary-fpr>
+			// The LAST field is the primary-key fingerprint.
+			// When a subkey signs, the first field after
+			// VALIDSIG is the subkey fingerprint — we must
+			// match the LAST field (primary) against our pins.
+			if len(fields) >= 3 {
+				primaryFP := fields[len(fields)-1]
+				if pinnedFPs[primaryFP] {
+					if !seen[primaryFP] {
+						seen[primaryFP] = true
+						logger.Verify(
+							"VALIDSIG pinned: %s", primaryFP)
+					}
+				} else {
+					logger.Verify(
+						"VALIDSIG unpinned (ignored): %s",
+						primaryFP)
+				}
+			}
+		}
 	}
 
-	logger.Verify("OK roasbeef: imported (fingerprint %s)", lndSigner.fingerprint)
-	return nil
+	return len(seen), badSig, nil
 }
 
-// ── Signature verification ───────────────────────────────
+// ── Bitcoin Core verification ───────────────────────────
 
-func verifyBitcoinCoreSigs(minValid int) error {
+func verifyBitcoinCoreSigs(workDir string, minValid int) error {
 	logger.Verify("--- Bitcoin Core signature verification ---")
-	sumsFile := "/tmp/SHA256SUMS"
-	sigFile := "/tmp/SHA256SUMS.asc"
+
+	sumsFile := filepath.Join(workDir, "SHA256SUMS")
+	sigFile := filepath.Join(workDir, "SHA256SUMS.asc")
 
 	if _, err := os.Stat(sumsFile); err != nil {
 		logger.Verify("FAIL: SHA256SUMS not found")
@@ -136,136 +203,222 @@ func verifyBitcoinCoreSigs(minValid int) error {
 		return fmt.Errorf("SHA256SUMS.asc not found")
 	}
 
-	outputStr, _ := system.RunCombinedOutput("gpg", "--batch", "--verify",
-		"--status-fd", "1", sigFile, sumsFile)
-
-	validCount := ParseGoodSigCount(outputStr)
-	badCount := ParseBadSigCount(outputStr)
-
-	for _, line := range strings.Split(outputStr, "\n") {
-		if strings.Contains(line, "GOODSIG") {
-			logger.Verify("GOODSIG: %s", strings.TrimSpace(line))
-		}
-		if strings.Contains(line, "BADSIG") {
-			logger.Verify("BADSIG: %s", strings.TrimSpace(line))
-		}
+	// Pin ALL fingerprints regardless of download success.
+	// The pinned set is the trust anchor — it does not change
+	// based on which keys we managed to download.
+	pinnedFPs := make(map[string]bool)
+	for _, signer := range bitcoinCoreSigners {
+		pinnedFPs[signer.fingerprint] = true
 	}
 
-	logger.Verify("Bitcoin Core valid signatures: %d/%d required (bad: %d)",
-		validCount, minValid, badCount)
-
-	if badCount > 0 {
-		logger.Verify("FAIL: %d bad signatures detected", badCount)
-		return fmt.Errorf("bad signatures detected: %d", badCount)
+	// Download signing keys into the pipeline work directory.
+	var keyFiles []string
+	for _, signer := range bitcoinCoreSigners {
+		keyFile := filepath.Join(workDir,
+			fmt.Sprintf("btc-key-%s.gpg", signer.name))
+		if err := system.DownloadRequireTor(
+			signer.keyURL, keyFile); err != nil {
+			logger.Verify("SKIP %s: download failed: %v",
+				signer.name, err)
+			continue
+		}
+		keyFiles = append(keyFiles, keyFile)
+		logger.Verify("OK %s: key downloaded", signer.name)
 	}
 
-	if validCount < minValid {
-		logger.Verify("FAIL: insufficient valid signatures: got %d, need %d",
-			validCount, minValid)
+	if len(keyFiles) == 0 {
+		logger.Verify("FAIL: no Bitcoin Core signing keys downloaded")
+		return fmt.Errorf(
+			"could not download any Bitcoin Core signing keys")
+	}
+
+	distinct, hasBadSig, err := verifyIsolated(
+		keyFiles, sigFile, sumsFile, pinnedFPs)
+	if err != nil {
+		return fmt.Errorf(
+			"signature verification failed: %w", err)
+	}
+
+	if hasBadSig {
+		logger.Verify("FAIL: bad signature detected")
+		return fmt.Errorf(
+			"bad signature detected — verification aborted")
+	}
+
+	logger.Verify(
+		"Bitcoin Core valid pinned signatures: %d/%d required",
+		distinct, minValid)
+
+	if distinct < minValid {
+		logger.Verify(
+			"FAIL: insufficient valid signatures: got %d, need %d",
+			distinct, minValid)
 		return fmt.Errorf(
 			"insufficient valid signatures: got %d, need %d",
-			validCount, minValid)
+			distinct, minValid)
 	}
 
-	logger.Verify("OK Bitcoin Core: %d valid signatures", validCount)
+	logger.Verify("OK Bitcoin Core: %d valid pinned signatures",
+		distinct)
 	return nil
 }
 
-func verifyLNDSig(version string) error {
-	logger.Verify("--- LND signature verification ---")
-	manifestFile := "/tmp/manifest.txt"
-	sigFile := fmt.Sprintf("/tmp/manifest-roasbeef-v%s.sig", version)
+// ── LND verification ────────────────────────────────────
 
+func verifyLNDSig(workDir string, version string) error {
+	logger.Verify("--- LND signature verification ---")
+
+	manifestFile := filepath.Join(workDir, "manifest.txt")
 	if _, err := os.Stat(manifestFile); err != nil {
 		logger.Verify("FAIL: LND manifest not found")
-		return fmt.Errorf("LND manifest not found at %s", manifestFile)
+		return fmt.Errorf("LND manifest not found at %s",
+			manifestFile)
 	}
 
+	// Download signature file.
+	sigFile := filepath.Join(workDir,
+		fmt.Sprintf("manifest-roasbeef-v%s.sig", version))
 	sigURL := fmt.Sprintf(
 		"https://github.com/lightningnetwork/lnd/releases/download/v%s/manifest-roasbeef-v%s.sig",
 		version, version)
-	if err := system.DownloadRequireTor(sigURL, sigFile); err != nil {
+	if err := system.DownloadRequireTor(
+		sigURL, sigFile); err != nil {
 		logger.Verify("FAIL: download LND signature: %v", err)
 		return fmt.Errorf("download LND signature: %w", err)
 	}
-	defer os.Remove(sigFile)
 
-	outputStr, _ := system.RunCombinedOutput("gpg", "--batch", "--verify",
-		"--status-fd", "1", sigFile, manifestFile)
+	// Download signing key.
+	keyFile := filepath.Join(workDir, "lnd-key-roasbeef.asc")
+	if err := system.DownloadRequireTor(
+		lndSigner.keyURL, keyFile); err != nil {
+		logger.Verify("FAIL: download LND signing key: %v", err)
+		return fmt.Errorf("download LND signing key: %w", err)
+	}
 
-	if !strings.Contains(outputStr, "GOODSIG") {
-		logger.Verify("FAIL: LND signature invalid: %s", outputStr)
+	pinnedFPs := map[string]bool{lndSigner.fingerprint: true}
+
+	distinct, hasBadSig, err := verifyIsolated(
+		[]string{keyFile}, sigFile, manifestFile, pinnedFPs)
+	if err != nil {
+		return fmt.Errorf(
+			"LND signature verification failed: %w", err)
+	}
+
+	if hasBadSig {
+		logger.Verify("FAIL: bad LND signature detected")
+		return fmt.Errorf(
+			"bad LND signature detected — verification aborted")
+	}
+
+	if distinct < 1 {
+		logger.Verify(
+			"FAIL: LND signature not valid against pinned fingerprint")
 		return fmt.Errorf("LND signature verification failed")
 	}
 
-	for _, line := range strings.Split(outputStr, "\n") {
-		if strings.Contains(line, "GOODSIG") {
-			logger.Verify("GOODSIG: %s", strings.TrimSpace(line))
-		}
-	}
-
-	logger.Verify("OK LND: signature valid")
+	logger.Verify(
+		"OK LND: signature valid (roasbeef, pinned fingerprint)")
 	return nil
 }
 
-// ── Checksum verification ────────────────────────────────
+// ── Self-update verification ────────────────────────────
 
-func verifyBitcoin() error {
+func verifySelfUpdate(workDir string) error {
+	logger.Verify("--- Self-update signature verification ---")
+
+	sumsFile := filepath.Join(workDir, "SHA256SUMS")
+	sigFile := filepath.Join(workDir, "SHA256SUMS.asc")
+
+	if _, err := os.Stat(sumsFile); err != nil {
+		logger.Verify("FAIL: SHA256SUMS not found")
+		return fmt.Errorf("SHA256SUMS not found")
+	}
+	if _, err := os.Stat(sigFile); err != nil {
+		logger.Verify("FAIL: SHA256SUMS.asc not found")
+		return fmt.Errorf("SHA256SUMS.asc not found")
+	}
+
+	// Download the release signing key fresh into the work
+	// directory. verifyIsolated imports it into an ephemeral
+	// GPG home — the shared keyring is never touched.
+	keyFile := filepath.Join(workDir, "release-key.asc")
+	keyURL := fmt.Sprintf(
+		"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
+		rlvpnReleaseFP)
+	if err := system.DownloadRequireTor(
+		keyURL, keyFile); err != nil {
+		logger.Verify(
+			"FAIL: download release signing key: %v", err)
+		return fmt.Errorf(
+			"download release signing key: %w", err)
+	}
+
+	pinnedFPs := map[string]bool{rlvpnReleaseFP: true}
+
+	distinct, hasBadSig, err := verifyIsolated(
+		[]string{keyFile}, sigFile, sumsFile, pinnedFPs)
+	if err != nil {
+		return fmt.Errorf(
+			"signature verification failed: %w", err)
+	}
+
+	if hasBadSig {
+		logger.Verify("FAIL: bad signature detected")
+		return fmt.Errorf(
+			"bad signature detected — verification aborted")
+	}
+
+	if distinct < 1 {
+		logger.Verify(
+			"FAIL: signature not from the release signing key")
+		return fmt.Errorf(
+			"signature not from the release signing key")
+	}
+
+	logger.Verify("OK self-update: signature valid " +
+		"(release key, pinned fingerprint)")
+	return nil
+}
+
+// ── Checksum verification ───────────────────────────────
+
+func verifyBitcoin(workDir string) error {
 	logger.Verify("--- Bitcoin Core checksum verification ---")
 	// exec.Command used directly because sha256sum --check needs
-	// working directory set to /tmp where the tarball was downloaded.
-	cmd := exec.Command("sha256sum", "--ignore-missing", "--check", "SHA256SUMS")
-	cmd.Dir = "/tmp"
+	// working directory set to where the tarball was downloaded.
+	cmd := exec.Command("sha256sum",
+		"--ignore-missing", "--check", "SHA256SUMS")
+	cmd.Dir = workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		logger.Verify("FAIL: Bitcoin Core checksum: %s", string(output))
+		logger.Verify("FAIL: Bitcoin Core checksum: %s",
+			string(output))
 		return fmt.Errorf("checksum failed: %w: %s", err, output)
 	}
-	logger.Verify("OK Bitcoin Core checksum: %s", strings.TrimSpace(string(output)))
+	logger.Verify("OK Bitcoin Core checksum: %s",
+		strings.TrimSpace(string(output)))
 	return nil
 }
 
-func verifyLND() error {
+func verifyLND(workDir string) error {
 	logger.Verify("--- LND checksum verification ---")
-	if _, err := os.Stat("/tmp/manifest.txt"); err != nil {
+	manifestFile := filepath.Join(workDir, "manifest.txt")
+	if _, err := os.Stat(manifestFile); err != nil {
 		logger.Verify("FAIL: LND manifest not found")
 		return fmt.Errorf("LND manifest not found")
 	}
 	// exec.Command used directly because sha256sum --check needs
-	// working directory set to /tmp where the tarball was downloaded.
-	cmd := exec.Command("sha256sum", "--ignore-missing", "--check", "manifest.txt")
-	cmd.Dir = "/tmp"
+	// working directory set to where the tarball was downloaded.
+	cmd := exec.Command("sha256sum",
+		"--ignore-missing", "--check", "manifest.txt")
+	cmd.Dir = workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		logger.Verify("FAIL: LND checksum: %s", string(output))
+		logger.Verify("FAIL: LND checksum: %s",
+			string(output))
 		return fmt.Errorf("checksum failed: %w: %s", err, output)
 	}
-	logger.Verify("OK LND checksum: %s", strings.TrimSpace(string(output)))
+	logger.Verify("OK LND checksum: %s",
+		strings.TrimSpace(string(output)))
 	return nil
-}
-
-// ── Helpers ──────────────────────────────────────────────
-
-func gpgHasFingerprint(fingerprint string) bool {
-	output, err := system.RunCombinedOutput("gpg", "--batch", "--list-keys",
-		"--with-colons", fingerprint)
-	if err != nil {
-		return false
-	}
-	return strings.Contains(output, fingerprint)
-}
-
-// ParseGoodSigCount counts GOODSIG lines in GPG status output.
-func ParseGoodSigCount(output string) int {
-	return strings.Count(output, "GOODSIG")
-}
-
-// ParseBadSigCount counts BADSIG lines in GPG status output.
-func ParseBadSigCount(output string) int {
-	return strings.Count(output, "BADSIG")
-}
-
-// HasGoodSig checks if GPG output contains at least one GOODSIG.
-func HasGoodSig(output string) bool {
-	return strings.Contains(output, "GOODSIG")
 }
