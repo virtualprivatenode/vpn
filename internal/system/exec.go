@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ripsline/virtual-private-node/internal/logger"
 )
 
 // Run executes a command and returns an error with output on failure.
@@ -93,8 +96,11 @@ func SudoRunSilent(name string, args ...string) error {
 	return RunSilent("sudo", sudoArgs...)
 }
 
-// SudoWriteFile writes content to a system path via sudo.
-// Uses os.CreateTemp for secure temp file creation (O_EXCL prevents symlink attacks).
+// SudoWriteFile atomically writes content to a root-owned path via sudo:
+// stages in a dest-dir temp (install -m), then rename(2) onto the path, so the
+// canonical path only ever holds the final mode and a crash never leaves it
+// partial or world-readable. os.CreateTemp's O_EXCL guards the staging file
+// against symlink attacks. Write failures are logged centrally for support.
 func SudoWriteFile(path string, content []byte, perm os.FileMode) error {
 	tmpFile, err := os.CreateTemp("", "rlvpn-write-")
 	if err != nil {
@@ -109,10 +115,19 @@ func SudoWriteFile(path string, content []byte, perm os.FileMode) error {
 	}
 	tmpFile.Close()
 
-	if err := SudoRun("cp", tmpPath, path); err != nil {
+	tmpDest := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
+	if err := SudoRun("install", "-m", fmt.Sprintf("%04o", perm),
+		tmpPath, tmpDest); err != nil {
+		SudoRunSilent("rm", "-f", tmpDest)
+		logger.System("write %s: install: %v", path, err)
 		return err
 	}
-	return SudoRun("chmod", fmt.Sprintf("%o", perm), path)
+	if err := SudoRun("mv", tmpDest, path); err != nil {
+		SudoRunSilent("rm", "-f", tmpDest)
+		logger.System("write %s: mv: %v", path, err)
+		return err
+	}
+	return nil
 }
 
 // Download fetches a URL to a local path.
