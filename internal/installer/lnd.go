@@ -241,14 +241,17 @@ func setupAutoUnlock(password string) error {
 	defer os.Remove(tmpPw)
 
 	passwordFile := paths.LNDWalletPassword
-	if err := system.SudoRun("cp", tmpPw, passwordFile); err != nil {
-		return err
+	tmpDest := filepath.Join(filepath.Dir(passwordFile), ".wallet_password.tmp")
+	if err := system.SudoRun("install", "-m", "0400",
+		"-o", systemUser, "-g", systemUser, tmpPw, tmpDest); err != nil {
+		system.SudoRunSilent("rm", "-f", tmpDest)
+		logger.System("auto-unlock: install wallet password: %v", err)
+		return fmt.Errorf("install wallet password: %w", err)
 	}
-	if err := system.SudoRun("chmod", "0400", passwordFile); err != nil {
-		return err
-	}
-	if err := system.SudoRunSilent("chown", systemUser+":"+systemUser, passwordFile); err != nil {
-		logger.System("Warning: chown wallet password: %v", err)
+	if err := system.SudoRun("mv", tmpDest, passwordFile); err != nil {
+		system.SudoRunSilent("rm", "-f", tmpDest)
+		logger.System("auto-unlock: move wallet password: %v", err)
+		return fmt.Errorf("move wallet password: %w", err)
 	}
 
 	content := fmt.Sprintf(`[Unit]
