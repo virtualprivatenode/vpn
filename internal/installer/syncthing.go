@@ -241,8 +241,9 @@ func verifySyncthingConfig() error {
 	if !strings.Contains(content,
 		`<configuration version="`+syncthingConfigSchema+`"`) {
 		return fmt.Errorf(
-			"version tripwire: config schema is not the pinned "+
-				"version %s", syncthingConfigSchema)
+			"version tripwire: config schema does not match "+
+				"the pinned schema version %s",
+			syncthingConfigSchema)
 	}
 
 	required := []string{
