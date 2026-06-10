@@ -11,10 +11,12 @@
 // primary fingerprint). Any [GNUPG:] BADSIG line is a hard stop. The
 // GPG exit code is never trusted.
 //
-// Three callers use verifyIsolated:
+// Four callers use verifyIsolated:
 //   - verifySelfUpdate:      threshold 1 vs the rlvpn release key
 //   - verifyBitcoinCoreSigs: threshold 2 distinct builder fingerprints
 //   - verifyLNDSig:          threshold 1 vs roasbeef's fingerprint
+//   - verifySyncthingSig:    threshold 1 vs the Syncthing release key
+//                            (CLEARSIGNED — dataFile == "")
 
 package installer
 
@@ -97,6 +99,33 @@ var lndSigner = struct {
 	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
 }
 
+// syncthingSigner is the trusted Syncthing release signer.
+// Source: https://syncthing.net/release-key.txt, linked from
+// https://syncthing.net/security/ ("Release Signatures").
+// Cross-checked June 9 2026 against an independent temporal
+// channel: the apt keyring on a months-old production install
+// (/etc/apt/keyrings/syncthing-archive-keyring.gpg) holds the
+// identical primary fingerprint. Empirically bound: the v2.1.1
+// sha256sum.txt.asc VALIDSIG primary fingerprint (last field)
+// matches this pin on a live verification.
+//
+// NOTE: Syncthing dual-signs releases during key rotation — the
+// v2.1.1 checksum file carries a second signature from the
+// pre-rotation key (ends D26E6ED000654A3E), which our keyring
+// cannot check (ERRSIG/NO_PUBKEY) and which makes gpg exit
+// non-zero even on a genuine release. This is why exit-code
+// trust is unusable here and VALIDSIG parsing is the sole
+// source of truth (the v0.6.1 finding A/B design).
+var syncthingSigner = struct {
+	name        string
+	fingerprint string
+	keyURL      string
+}{
+	name:        "Syncthing Release Management",
+	fingerprint: "FBA2E162F2F44657B38F0309E5665F9BD5970C47",
+	keyURL:      "https://syncthing.net/release-key.txt",
+}
+
 // ── GPG setup ────────────────────────────────────────────
 
 func ensureGPG() error {
@@ -117,7 +146,14 @@ func ensureGPG() error {
 // (distinct signers). Any BADSIG line sets badSig = true.
 //
 // The GPG exit code is intentionally ignored — the VALIDSIG and
-// BADSIG parsing is the sole source of truth.
+// BADSIG parsing is the sole source of truth. (Empirically
+// necessary: Syncthing's dual-signed v2.1.1 release makes gpg
+// exit non-zero on a genuine artifact — see syncthingSigner.)
+//
+// dataFile == "" means sigFile is CLEARSIGNED (data and
+// signature in one file, e.g. Syncthing's sha256sum.txt.asc);
+// gpg is invoked with the single file argument. Otherwise the
+// signature is detached and gpg gets both arguments.
 func verifyIsolated(
 	keyFiles []string,
 	sigFile, dataFile string,
@@ -143,9 +179,13 @@ func verifyIsolated(
 	}
 
 	// Verify — exit code intentionally discarded.
-	output, _ := system.RunCombinedOutput(
-		"gpg", "--homedir", gpgHome, "--batch", "--verify",
-		"--status-fd", "1", sigFile, dataFile)
+	// Clearsigned input (dataFile == "") takes one file argument.
+	args := []string{"--homedir", gpgHome, "--batch",
+		"--verify", "--status-fd", "1", sigFile}
+	if dataFile != "" {
+		args = append(args, dataFile)
+	}
+	output, _ := system.RunCombinedOutput("gpg", args...)
 
 	// Parse status output.
 	seen := make(map[string]bool)
@@ -263,6 +303,24 @@ func verifyBitcoinCoreSigs(workDir string, minValid int) error {
 	return nil
 }
 
+func verifyBitcoin(workDir string) error {
+	logger.Verify("--- Bitcoin Core checksum verification ---")
+	// exec.Command used directly because sha256sum --check needs
+	// working directory set to where the tarball was downloaded.
+	cmd := exec.Command("sha256sum",
+		"--ignore-missing", "--check", "SHA256SUMS")
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Verify("FAIL: Bitcoin Core checksum: %s",
+			string(output))
+		return fmt.Errorf("checksum failed: %w: %s", err, output)
+	}
+	logger.Verify("OK Bitcoin Core checksum: %s",
+		strings.TrimSpace(string(output)))
+	return nil
+}
+
 // ── LND verification ────────────────────────────────────
 
 func verifyLNDSig(workDir string, version string) error {
@@ -318,6 +376,104 @@ func verifyLNDSig(workDir string, version string) error {
 
 	logger.Verify(
 		"OK LND: signature valid (roasbeef, pinned fingerprint)")
+	return nil
+}
+
+func verifyLND(workDir string) error {
+	logger.Verify("--- LND checksum verification ---")
+	manifestFile := filepath.Join(workDir, "manifest.txt")
+	if _, err := os.Stat(manifestFile); err != nil {
+		logger.Verify("FAIL: LND manifest not found")
+		return fmt.Errorf("LND manifest not found")
+	}
+	// exec.Command used directly because sha256sum --check needs
+	// working directory set to where the tarball was downloaded.
+	cmd := exec.Command("sha256sum",
+		"--ignore-missing", "--check", "manifest.txt")
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Verify("FAIL: LND checksum: %s",
+			string(output))
+		return fmt.Errorf("checksum failed: %w: %s", err, output)
+	}
+	logger.Verify("OK LND checksum: %s",
+		strings.TrimSpace(string(output)))
+	return nil
+}
+
+// ── Syncthing verification ──────────────────────────────
+
+// verifySyncthingSig verifies the CLEARSIGNED checksum file
+// (sha256sum.txt.asc) against the pinned release fingerprint.
+// Unlike Bitcoin Core and LND (detached signatures: signature
+// and data in separate files), Syncthing ships the checksum
+// list and its signature in ONE file. Must run BEFORE
+// verifySyncthingChecksum — the checksums inside the file are
+// untrusted until the signature over them validates.
+func verifySyncthingSig(workDir string) error {
+	logger.Verify("--- Syncthing signature verification ---")
+
+	ascFile := filepath.Join(workDir, "sha256sum.txt.asc")
+	if _, err := os.Stat(ascFile); err != nil {
+		logger.Verify("FAIL: sha256sum.txt.asc not found")
+		return fmt.Errorf("sha256sum.txt.asc not found")
+	}
+
+	keyFile := filepath.Join(workDir, "syncthing-release-key.txt")
+	if err := system.DownloadRequireTor(
+		syncthingSigner.keyURL, keyFile); err != nil {
+		logger.Verify("FAIL: download Syncthing signing key: %v", err)
+		return fmt.Errorf("download Syncthing signing key: %w", err)
+	}
+
+	pinnedFPs := map[string]bool{syncthingSigner.fingerprint: true}
+
+	// dataFile "" → clearsigned, single-argument verify.
+	distinct, hasBadSig, err := verifyIsolated(
+		[]string{keyFile}, ascFile, "", pinnedFPs)
+	if err != nil {
+		return fmt.Errorf(
+			"Syncthing signature verification failed: %w", err)
+	}
+
+	if hasBadSig {
+		logger.Verify("FAIL: bad Syncthing signature detected")
+		return fmt.Errorf(
+			"bad Syncthing signature detected — verification aborted")
+	}
+
+	if distinct < 1 {
+		logger.Verify(
+			"FAIL: Syncthing signature not valid against pinned fingerprint")
+		return fmt.Errorf("Syncthing signature verification failed")
+	}
+
+	logger.Verify(
+		"OK Syncthing: signature valid (release key, pinned fingerprint)")
+	return nil
+}
+
+// verifySyncthingChecksum checks the tarball against the
+// now-trusted clearsigned checksum file. Same sha256sum
+// pattern as verifyBitcoin/verifyLND — the only difference is
+// that the checksum source is the clearsigned .asc itself:
+// sha256sum skips the PGP armor lines (reported as "improperly
+// formatted" warnings) and matches the real checksum lines.
+func verifySyncthingChecksum(workDir string) error {
+	logger.Verify("--- Syncthing checksum verification ---")
+	// exec.Command used directly because sha256sum --check needs
+	// working directory set to where the tarball was downloaded.
+	cmd := exec.Command("sha256sum",
+		"--ignore-missing", "--check", "sha256sum.txt.asc")
+	cmd.Dir = workDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Verify("FAIL: Syncthing checksum: %s", string(output))
+		return fmt.Errorf("checksum failed: %w: %s", err, output)
+	}
+	logger.Verify("OK Syncthing checksum: %s",
+		strings.TrimSpace(string(output)))
 	return nil
 }
 
@@ -377,48 +533,5 @@ func verifySelfUpdate(workDir string) error {
 
 	logger.Verify("OK self-update: signature valid " +
 		"(release key, pinned fingerprint)")
-	return nil
-}
-
-// ── Checksum verification ───────────────────────────────
-
-func verifyBitcoin(workDir string) error {
-	logger.Verify("--- Bitcoin Core checksum verification ---")
-	// exec.Command used directly because sha256sum --check needs
-	// working directory set to where the tarball was downloaded.
-	cmd := exec.Command("sha256sum",
-		"--ignore-missing", "--check", "SHA256SUMS")
-	cmd.Dir = workDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Verify("FAIL: Bitcoin Core checksum: %s",
-			string(output))
-		return fmt.Errorf("checksum failed: %w: %s", err, output)
-	}
-	logger.Verify("OK Bitcoin Core checksum: %s",
-		strings.TrimSpace(string(output)))
-	return nil
-}
-
-func verifyLND(workDir string) error {
-	logger.Verify("--- LND checksum verification ---")
-	manifestFile := filepath.Join(workDir, "manifest.txt")
-	if _, err := os.Stat(manifestFile); err != nil {
-		logger.Verify("FAIL: LND manifest not found")
-		return fmt.Errorf("LND manifest not found")
-	}
-	// exec.Command used directly because sha256sum --check needs
-	// working directory set to where the tarball was downloaded.
-	cmd := exec.Command("sha256sum",
-		"--ignore-missing", "--check", "manifest.txt")
-	cmd.Dir = workDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Verify("FAIL: LND checksum: %s",
-			string(output))
-		return fmt.Errorf("checksum failed: %w: %s", err, output)
-	}
-	logger.Verify("OK LND checksum: %s",
-		strings.TrimSpace(string(output)))
 	return nil
 }

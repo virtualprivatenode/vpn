@@ -93,11 +93,15 @@ const (
 	// declares PasswordAuthentication yes on cloud
 	// images). sshd's first-match-wins semantics mean
 	// loading first = winning.
-	SSHDDropIn          = "/etc/ssh/sshd_config.d/00-rlvpn-hardening.conf"
-	Fail2banJail        = "/etc/fail2ban/jail.local"
-	AutoUpgrades        = "/etc/apt/apt.conf.d/20auto-upgrades"
-	UnattendedUpgrades  = "/etc/apt/apt.conf.d/50unattended-upgrades"
-	DisableIPv6Conf     = "/etc/sysctl.d/99-disable-ipv6.conf"
+	SSHDDropIn         = "/etc/ssh/sshd_config.d/00-rlvpn-hardening.conf"
+	Fail2banJail       = "/etc/fail2ban/jail.local"
+	AutoUpgrades       = "/etc/apt/apt.conf.d/20auto-upgrades"
+	UnattendedUpgrades = "/etc/apt/apt.conf.d/50unattended-upgrades"
+	DisableIPv6Conf    = "/etc/sysctl.d/99-disable-ipv6.conf"
+	// LEGACY apt-install artifacts (pre v0.6.3 pinning). No longer
+	// written by the installer; retained ONLY so the migration
+	// for existing apt-based deployments can remove them. Delete
+	// these constants when that migration ships.
 	SyncthingKeyring    = "/etc/apt/keyrings/syncthing-archive-keyring.gpg"
 	SyncthingSourceList = "/etc/apt/sources.list.d/syncthing.list"
 )
