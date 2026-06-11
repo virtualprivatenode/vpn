@@ -60,10 +60,12 @@ curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/vi
 > [!NOTE]
 > Some downloads route through Tor and can occasionally fail on the first attempt. The script is idempotent and safe to rerun. If you hit an error, just run the above command again.
 
-This creates a `ripsline` user, copies your SSH key across automatically,
-downloads the `rlvpn` binary, installs Bitcoin Core + LND + Tor, and
-hardens the SSH daemon. Follow the on-screen instructions to SSH in as
-`ripsline` — Bitcoin Core begins syncing and the TUI opens to the wallet
+The bootstrap prepares the host: it creates a `ripsline` user, copies
+your SSH key across automatically, installs Tor, downloads and
+GPG-verifies the `rlvpn` binary, and hardens the SSH daemon. When you
+SSH in as `ripsline`, the binary takes over and installs Bitcoin Core
+and LND, every download routed through Tor and verified before
+install. Bitcoin Core begins syncing and the TUI opens to the wallet
 creation flow.
 
 For testnet4:
@@ -188,7 +190,7 @@ everything a peer needs to open a channel with you:
 ### P2P Mode
 
 LND is installed Tor-only by default. You can upgrade to hybrid mode
-later from **System → P2P Upgrade**:
+later from **System → Services → LND → P2P Upgrade**:
 
 - **Tor only** — maximum privacy, all connections through Tor
 - **Hybrid (Tor + clearnet)** — better routing, your server IP is
@@ -206,7 +208,7 @@ recover your channels with your seed phrase and the backup file.
 The sync connection is direct between your Node and your device
 over an encrypted channel. Syncthing uses mutual TLS authentication
 with device keys — only devices you explicitly approve can connect.
-Discovery servers and relays are disabled.
+Discovery servers, relays, and NAT traversal are disabled.
 
 **Setup summary:**
 
@@ -234,16 +236,12 @@ For the full setup guide, see
 - Root SSH disabled after bootstrap
 - SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth on by default (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
 - Services run as dedicated bitcoin system user
-- GPG signature verification for all software
-- Bad signature detection — any BADSIG is a hard stop
+- GPG signature verification for all software, any bad signature is a hard stop
 - Unattended security upgrades with auto-reboot
 - Base packages upgraded during bootstrap to close CVE windows on stale server images
-- LND channel backup auto-synced via Syncthing (mutual TLS, direct connection, no cloud)
-- Syncthing sync port (22000) rejects unapproved devices via mutual TLS before any data exchange
-- Syncthing web UI accessible only via Tor
+- Syncthing backup sync: mutual TLS device approval, web UI only via Tor
 - Bitcoin Core wallet disabled
-- All downloads after Tor installation route through torsocks
-- apt package manager configured to use Tor SOCKS proxy
+- All downloads and apt operations route through Tor after bootstrap
 - Atomic config writes with fsync + rename (prevents corruption on power loss)
 - Secure temp file creation with O_EXCL (prevents symlink attacks)
 - Public IP detection uses kernel routing table (no external network calls)
@@ -264,7 +262,7 @@ The bootstrap script makes two types of network calls:
 - rlvpn binary download from GitHub
 - GPG signing key file download from independent keyserver
 - Bitcoin Core and LND downloads
-- Syncthing repository key (when Syncthing is installed)
+- Syncthing download (when Syncthing is installed)
 - All subsequent apt operations
 
 After bootstrap, the only ongoing clearnet traffic is NTP clock sync
@@ -286,6 +284,11 @@ All software is verified with GPG signatures and SHA256 checksums:
   Requires 2 of 5 valid signatures. A bad signature (BADSIG) from any
   key is a hard stop.
 - **LND** — Roasbeef's signing key verified against known fingerprint.
+- **Syncthing** — pinned release binary, verified against the Syncthing
+  release signing key's known fingerprint. The release checksums are
+  clearsigned by the same key. The installer also writes Syncthing's
+  entire configuration itself and refuses to start the daemon if any
+  privacy setting does not verify.
 - **rlvpn binary** — signed with a key hosted on an independent
   keyserver (not GitHub). The bootstrap downloads the key file directly
   through Tor rather than using keyserver protocols, so compromising
@@ -301,21 +304,6 @@ cat /var/log/rlvpn.log
 
 For manual binary verification before installation, see
 [Release Verification](docs/verifying.md).
-
-### Architecture
-
-```
-User SSH → ripsline@<server-ip-address> → rlvpn TUI
-                             ↓
-              sudo → systemctl, bitcoin-cli, lncli
-              ctrl+c → shell with bitcoin-cli, lncli wrappers
-
-Services (systemd, run as bitcoin user):
-  tor.service        → SOCKS proxy, hidden services
-  bitcoind.service   → pruned node, Tor-routed, wallet disabled
-  lnd.service        → Lightning daemon, Tor-only by default
-  syncthing.service  → channel backup sync (add-on)
-```
 
 ### Directory Layout
 
