@@ -177,7 +177,7 @@ func (s *SyncthingInstallScreen) View(
 	p.line(" " + theme.Value.Render("This will:"))
 	p.blank()
 	p.line(" " + theme.Value.Render(
-		"  * Install Syncthing from official repository"))
+		"  * Install verified Syncthing release binary"))
 	p.line(" " + theme.Value.Render(
 		"  * Open port 22000 for sync connections"))
 	p.line(" " + theme.Value.Render(

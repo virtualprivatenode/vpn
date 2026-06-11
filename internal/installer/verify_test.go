@@ -140,6 +140,29 @@ func testSign(
 	}
 }
 
+// testClearsign creates a CLEARSIGNED file from dataFile using
+// the key identified by fingerprint — data and signature in one
+// file, the format Syncthing uses for sha256sum.txt.asc.
+func testClearsign(
+	t *testing.T, gpgHome, fingerprint,
+	dataFile, outFile string,
+) {
+	t.Helper()
+
+	output, err := exec.Command(
+		"gpg", "--homedir", gpgHome,
+		"--batch", "--armor",
+		"--local-user", fingerprint,
+		"--clearsign",
+		"--output", outFile,
+		dataFile,
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("clearsign with %s: %v\n%s",
+			fingerprint, err, output)
+	}
+}
+
 // ── Hermetic test suite ─────────────────────────────────
 
 func TestVerifyIsolated(t *testing.T) {
@@ -335,6 +358,123 @@ func TestVerifyIsolated(t *testing.T) {
 	})
 }
 
+// ── Clearsign test suite (Syncthing path) ───────────────
+//
+// verifyIsolated with dataFile == "" verifies a CLEARSIGNED
+// file (the format of Syncthing's sha256sum.txt.asc). These
+// cases are the automated mirror of the live verification
+// session of June 9 2026: a genuine v2.1.1 file produced
+// VALIDSIG with the pinned primary fingerprint as the LAST
+// field, and tampering with the checksum text inside the
+// armor produced BADSIG with no VALIDSIG.
+
+func TestVerifyIsolatedClearsign(t *testing.T) {
+	if !gpgAvailable() {
+		t.Skip("gpg not available — skipping")
+	}
+
+	genHome, err := os.MkdirTemp("", "rlvpn-test-gen-")
+	if err != nil {
+		t.Fatalf("create gen home: %v", err)
+	}
+	defer os.RemoveAll(genHome)
+
+	fpAlpha := testGenKey(t, genHome, "ClearAlpha", false)
+	fpBeta := testGenKey(t, genHome, "ClearBeta", false)
+
+	dataDir, err := os.MkdirTemp("", "rlvpn-test-data-")
+	if err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	defer os.RemoveAll(dataDir)
+
+	// Checksum-list-shaped content, like sha256sum.txt.asc.
+	dataFile := filepath.Join(dataDir, "sums.txt")
+	if err := os.WriteFile(dataFile, []byte(
+		"0123456789abcdef  syncthing-linux-amd64-v9.9.9.tar.gz\n"),
+		0600); err != nil {
+		t.Fatalf("write test data: %v", err)
+	}
+
+	keyAlpha := filepath.Join(dataDir, "alpha.asc")
+	keyBeta := filepath.Join(dataDir, "beta.asc")
+	testExportKey(t, genHome, fpAlpha, keyAlpha)
+	testExportKey(t, genHome, fpBeta, keyBeta)
+
+	clearAlpha := filepath.Join(dataDir, "sums-clear.asc")
+	testClearsign(t, genHome, fpAlpha, dataFile, clearAlpha)
+
+	// Tampered variant: modify the checksum text INSIDE the
+	// clearsigned armor (the exact shape of the live June 9
+	// negative test, which renamed the asset inside the file).
+	clearBytes, err := os.ReadFile(clearAlpha)
+	if err != nil {
+		t.Fatalf("read clearsigned file: %v", err)
+	}
+	tampered := strings.Replace(string(clearBytes),
+		"syncthing-linux-amd64", "syncthing-linux-tampered", 1)
+	if tampered == string(clearBytes) {
+		t.Fatal("tamper replacement did not apply")
+	}
+	tamperedFile := filepath.Join(dataDir, "sums-tampered.asc")
+	if err := os.WriteFile(tamperedFile,
+		[]byte(tampered), 0600); err != nil {
+		t.Fatalf("write tampered clearsign: %v", err)
+	}
+
+	// ── Case 1: Clearsigned by pinned key → accept ─────
+	t.Run("clearsign_pinned_key_accepts", func(t *testing.T) {
+		pinned := map[string]bool{fpAlpha: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha}, clearAlpha, "", pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 1 {
+			t.Fatalf("distinct = %d, want 1", distinct)
+		}
+	})
+
+	// ── Case 2: Tampered inside the armor → BADSIG ─────
+	t.Run("clearsign_tampered_badsig", func(t *testing.T) {
+		pinned := map[string]bool{fpAlpha: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha}, tamperedFile, "", pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !bad {
+			t.Fatal("expected BADSIG for tampered clearsign")
+		}
+		if distinct != 0 {
+			t.Fatalf("distinct = %d, want 0 "+
+				"(tampered content must not count)", distinct)
+		}
+	})
+
+	// ── Case 3: Clearsigned by UNPINNED key → reject ───
+	t.Run("clearsign_unpinned_key_rejects", func(t *testing.T) {
+		// Alpha clearsigned, but only Beta is pinned.
+		pinned := map[string]bool{fpBeta: true}
+		distinct, bad, err := verifyIsolated(
+			[]string{keyAlpha}, clearAlpha, "", pinned)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if bad {
+			t.Fatal("unexpected BADSIG")
+		}
+		if distinct != 0 {
+			t.Fatalf("distinct = %d, want 0 "+
+				"(signature valid but not from pinned key)",
+				distinct)
+		}
+	})
+}
+
 // ── Anchor validation ───────────────────────────────────
 
 func TestSignerFingerprints(t *testing.T) {
@@ -362,6 +502,14 @@ func TestSignerFingerprints(t *testing.T) {
 	}
 	if lndSigner.keyURL == "" {
 		t.Error("LND signer has empty keyURL")
+	}
+
+	if len(syncthingSigner.fingerprint) != 40 {
+		t.Errorf("Syncthing signer fingerprint length %d, want 40",
+			len(syncthingSigner.fingerprint))
+	}
+	if syncthingSigner.keyURL == "" {
+		t.Error("Syncthing signer has empty keyURL")
 	}
 }
 

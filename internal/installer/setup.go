@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	bitcoinVersion = "29.3"
-	lndVersion     = "0.20.0-beta"
-	systemUser     = "bitcoin"
+	bitcoinVersion   = "29.3"
+	lndVersion       = "0.20.0-beta"
+	syncthingVersion = "2.1.1"
+	systemUser       = "bitcoin"
 )
 
 var appVersion = "dev"
@@ -405,11 +406,34 @@ func SyncthingInstallSteps(
 	}
 	syncPassword := hexEncode(passBytes)
 
+	var syncWork string
 	steps := []InstallStep{
-		{Name: "Adding Syncthing repository",
-			Fn: installSyncthingRepo},
+		{Name: "Downloading Syncthing " + syncthingVersion,
+			Fn: func() error {
+				var err error
+				syncWork, err = os.MkdirTemp("", "rlvpn-sync-")
+				if err != nil {
+					return fmt.Errorf("create work dir: %w", err)
+				}
+				return downloadSyncthing(
+					syncthingVersion, syncWork)
+			}},
+		{Name: "Verifying Syncthing",
+			Fn: func() error {
+				if err := verifySyncthingSig(syncWork); err != nil {
+					return err
+				}
+				return verifySyncthingChecksum(syncWork)
+			}},
 		{Name: "Installing Syncthing",
-			Fn: installSyncthingPackage},
+			Fn: func() error {
+				if err := extractAndInstallSyncthing(
+					syncthingVersion, syncWork); err != nil {
+					return err
+				}
+				os.RemoveAll(syncWork)
+				return nil
+			}},
 		{Name: "Creating Syncthing directories",
 			Fn: createSyncthingDirs},
 		{Name: "Creating Syncthing service",
