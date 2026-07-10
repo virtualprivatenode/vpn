@@ -26,12 +26,14 @@ func BuildTorConfig(cfg *config.AppConfig) string {
 	b.WriteString("# Virtual Private Node — Tor Configuration\n")
 	b.WriteString("SOCKSPort 9050\n")
 
-	if cfg.HasLND() {
-		b.WriteString("\n# Control port for LND P2P onion management\n")
-		b.WriteString("ControlPort 9051\n")
-		b.WriteString("CookieAuthentication 1\n")
-		b.WriteString("CookieAuthFileGroupReadable 1\n")
-	}
+	// Control port: always emitted. Two consumers — the install-path
+	// Tor routing gate (torgate.go reads bootstrap progress here,
+	// unconditionally) and LND's P2P onion management. Loopback-only,
+	// cookie-authenticated; emitting it without LND adds no exposure.
+	b.WriteString("\n# Control port (install routing gate + LND onion management)\n")
+	b.WriteString("ControlPort 9051\n")
+	b.WriteString("CookieAuthentication 1\n")
+	b.WriteString("CookieAuthFileGroupReadable 1\n")
 
 	b.WriteString(fmt.Sprintf(`
 # Bitcoin Core P2P (static onion address for peers)

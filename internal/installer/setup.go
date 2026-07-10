@@ -250,11 +250,12 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				if err := addUserToTorGroup(systemUser); err != nil {
 					return err
 				}
-				if err := restartTor(); err != nil {
-					return err
-				}
-				return logTorStatus()
+				return restartTor()
 			}},
+		// HARD GATE (IA-2-K): no Tor-dependent network step below —
+		// apt over the socks5h proxy, every DownloadRequireTor —
+		// runs unless Tor routing is verified. See torgate.go.
+		{Name: "Verifying Tor routing", Fn: verifyTorRouting},
 		{Name: "Configuring apt for Tor",
 			Fn: func() error {
 				if err := configureAptTor(); err != nil {

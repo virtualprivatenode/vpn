@@ -5,14 +5,11 @@ package installer
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/logger"
 	"github.com/ripsline/virtual-private-node/internal/paths"
 	"github.com/ripsline/virtual-private-node/internal/system"
 )
@@ -194,35 +191,8 @@ bantime = 600
 	return system.SudoRun("systemctl", "restart", "fail2ban")
 }
 
-// logTorStatus verifies torsocks is available and Tor is routing
-// traffic correctly. Logs the result for post-install audit.
-// Returns nil even on failure — this is informational, not blocking.
-func logTorStatus() error {
-	if _, err := exec.LookPath("torsocks"); err != nil {
-		logger.Install("WARNING: torsocks not found — downloads may use clearnet")
-		return nil
-	}
-	logger.Install("torsocks available — downloads will route through Tor")
-
-	confirmed := false
-	for attempt := 0; attempt < 3; attempt++ {
-		output, err := system.RunContext(15*time.Second,
-			"torsocks", "curl", "-s", "--max-time", "10",
-			"https://check.torproject.org/api/ip")
-		if err == nil && strings.Contains(output, `"IsTor":true`) {
-			logger.Install("Tor routing CONFIRMED via check.torproject.org")
-			confirmed = true
-			break
-		}
-		if attempt < 2 {
-			time.Sleep(3 * time.Second)
-		}
-	}
-	if !confirmed {
-		logger.Install("WARNING: Tor routing check timed out after 3 attempts — verify with: torsocks curl -s https://check.torproject.org/api/ip")
-	}
-	return nil
-}
+// The Tor routing check formerly here (logTorStatus, warn-only) is
+// superseded by the hard-gate install step in torgate.go (IA-2-K).
 
 // configureAptTor sets up apt to route all package downloads through
 // Tor's SOCKS proxy. This ensures apt-get install/upgrade commands
