@@ -25,7 +25,9 @@ func TestTorConfigBitcoinOnly(t *testing.T) {
 	}
 
 	forbidden := []string{
-		"ControlPort",
+		// ControlPort is deliberately NOT forbidden here: it is
+		// unconditional since the install routing gate consumes it
+		// (see TestTorConfigControlPortAlways).
 		"bitcoin-rpc",
 		"lnd-rest",
 		"lnd-grpc",
@@ -145,11 +147,17 @@ func TestTorConfigTestnet4Ports(t *testing.T) {
 	}
 }
 
-func TestTorConfigNoControlPortWithoutLND(t *testing.T) {
+func TestTorConfigControlPortAlways(t *testing.T) {
+	// The install-path routing gate (torgate.go) reads bootstrap
+	// progress from the control port unconditionally, so every
+	// generated torrc must include it — LND or not.
 	cfg := config.Default()
 	content := BuildTorConfig(cfg)
 
-	if strings.Contains(content, "ControlPort") {
-		t.Error("should not have ControlPort without LND")
+	if !strings.Contains(content, "ControlPort 9051") {
+		t.Error("ControlPort must be present in every config (install gate depends on it)")
+	}
+	if !strings.Contains(content, "CookieAuthentication 1") {
+		t.Error("control port must require cookie auth")
 	}
 }
