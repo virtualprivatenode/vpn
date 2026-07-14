@@ -220,8 +220,7 @@ func (s *SSHKeyDetailScreen) handleConfirmKey(
 		case 1: // Remove
 			s.step = sshKeyDetailStepWorking
 			return s, removeSSHKeyCmd(
-				s.keyInfo.Fingerprint,
-				passwordAuthEnabled)
+				s.keyInfo.Fingerprint)
 		}
 	}
 	return s, nil

@@ -440,9 +440,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sshKeyRemoveMsg:
 		return m.dispatchToTab(tabSSHKeyDetail, msg)
 	case sshPwAuthDoneMsg:
-		// Cfg was mutated by SetSSHPasswordAuth before
-		// the msg was returned; persist before routing.
-		m.saveCfg()
+		// Persist only when the operation succeeded. On
+		// failure SetSSHPasswordAuth restored the
+		// in-memory value, so there is nothing new to
+		// save — and saving would durably record a value
+		// for an operation that failed. Same pattern as
+		// syncthingRemovedMsg.
+		if msg.err == nil {
+			m.saveCfg()
+		}
 		return m.dispatchToTab(tabSSHPasswordAuth, msg)
 	case changePwDoneMsg:
 		return m.dispatchToTab(tabSSHChangePassword, msg)

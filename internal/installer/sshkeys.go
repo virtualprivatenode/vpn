@@ -178,14 +178,19 @@ func AppendAuthorizedKey(line string) error {
 
 // RemoveAuthorizedKey removes the key matching the given
 // fingerprint from authorized_keys. Refuses to remove the
-// last key only when password auth is also disabled — the
-// invariant is "never leave the system with zero auth
-// methods." If passwordAuthEnabled is true, removing the
-// last key is allowed (the operator can still log in via
-// password).
-func RemoveAuthorizedKey(
-	fingerprint string, passwordAuthEnabled bool,
-) error {
+// last key when password authentication is not actually
+// available — the invariant is "never leave the system with
+// zero auth methods."
+//
+// Whether password auth is available is derived from sshd's
+// EFFECTIVE configuration (EffectiveSSHPasswordAuth), never
+// from a caller-supplied claim or this app's own config:
+// those can diverge from reality (e.g. a provider's
+// cloud-init drop-in disabled password auth before this app
+// ever ran, while the app's config still says enabled). The
+// query runs only when the last key is being removed, so
+// ordinary removals cost no extra privileged call.
+func RemoveAuthorizedKey(fingerprint string) error {
 	data, err := system.SudoReadFile(
 		paths.AuthorizedKeysFile)
 	if err != nil {
@@ -216,11 +221,21 @@ func RemoveAuthorizedKey(
 	if !found {
 		return errors.New("key not found")
 	}
-	if keyCount <= 1 && !passwordAuthEnabled {
-		return errors.New(
-			"cannot remove the last SSH key while " +
-				"password auth is disabled — re-enable " +
-				"password auth first")
+	if keyCount <= 1 {
+		pwAuthEnabled, err := EffectiveSSHPasswordAuth()
+		if err != nil {
+			return fmt.Errorf(
+				"cannot verify password auth state "+
+					"(%w) — refusing to remove the last "+
+					"SSH key", err)
+		}
+		if !pwAuthEnabled {
+			return errors.New(
+				"cannot remove the last SSH key while " +
+					"password authentication is disabled " +
+					"in the effective sshd configuration " +
+					"— enable password auth first")
+		}
 	}
 
 	// Second pass: rebuild without the target line.
