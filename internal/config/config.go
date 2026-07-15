@@ -41,7 +41,7 @@ type AppConfig struct {
 	Theme              string            `json:"theme,omitempty"`
 
 	// SSHPasswordAuthDisabled mirrors the value
-	// 99-rlvpn-hardening.conf writes for sshd's
+	// 00-rlvpn-hardening.conf writes for sshd's
 	// PasswordAuthentication directive. False = password
 	// auth enabled (matches debian default and the
 	// bootstrap-written drop-in, which is silent on the

@@ -42,6 +42,15 @@ func TestDefaultValues(t *testing.T) {
 	if cfg.WalletCreated {
 		t.Error("WalletCreated: expected false")
 	}
+	// Password auth must default to ENABLED (false).
+	// The SSH lockout guards fail safe only because a
+	// fresh or clobbered config yields this value; a
+	// future change flipping the default would turn a
+	// config-load failure into a possible lockout.
+	if cfg.SSHPasswordAuthDisabled {
+		t.Error("SSHPasswordAuthDisabled: expected false " +
+			"(password auth enabled by default)")
+	}
 }
 
 func TestHasLND(t *testing.T) {

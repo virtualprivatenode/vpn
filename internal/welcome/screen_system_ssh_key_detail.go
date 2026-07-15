@@ -247,10 +247,15 @@ func (s *SSHKeyDetailScreen) viewConfirm(
 
 	p.blank()
 
-	// Lockout copy is driven by the actual auth state.
-	// Invariant: never let the system end up with zero
-	// auth methods. Hard-block only when removing this
-	// key would leave neither keys nor password.
+	// Lockout copy is driven by this app's recorded
+	// setting, which can diverge from sshd's effective
+	// config — so the copy below never asserts the
+	// live state as fact. The authoritative gate is in
+	// the installer: removing the LAST key triggers a
+	// live query of sshd's effective config, and the
+	// removal is refused unless password login is
+	// actually available. Invariant: never let the
+	// system end up with zero auth methods.
 	passwordAuthEnabled :=
 		!s.ctx.Cfg.SSHPasswordAuthDisabled
 	isLastKey := s.keyCount <= 1
@@ -258,19 +263,26 @@ func (s *SSHKeyDetailScreen) viewConfirm(
 
 	switch {
 	case hardBlock:
-		p.warn("This is your only key and password " +
-			"auth is disabled.")
-		p.warn("Removing it would lock you out.")
+		p.warn("This is your only key, and this app's")
+		p.warn("settings say password auth is disabled.")
+		p.warn("Removing it could lock you out.")
 		p.warn("Re-enable password auth first.")
 		p.blank()
 	case isLastKey:
-		p.warn("This is your only key, but password " +
-			"auth is enabled —")
-		p.warn("you'll still be able to log in by " +
-			"password.")
+		p.warn("This is your only SSH key. Removal is")
+		p.warn("only permitted if password login is")
+		p.warn("actually available — the system checks")
+		p.warn("the live sshd configuration and")
+		p.warn("refuses otherwise.")
 		p.blank()
 	}
-	p.warn("Remove this key?")
+	// Under a hard block there is no Remove button, so
+	// don't ask a question the operator cannot answer.
+	if hardBlock {
+		p.warn("Removal is blocked.")
+	} else {
+		p.warn("Remove this key?")
+	}
 
 	// When hard-blocked, show only Go Back (no Remove).
 	buttons := []string{"Go Back", "Remove"}

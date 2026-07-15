@@ -25,8 +25,6 @@ import (
 // as root (uid 0) so we never accidentally rewrite root's
 // password from a misconfigured launch.
 
-const minPasswordLen = 16
-
 type changePwStep int
 
 const (
@@ -44,7 +42,7 @@ const (
 type changePwDoneMsg struct{ err error }
 
 func setUserPasswordCmd(
-	username, newPassword string,
+	username string, newPassword installer.LoginPassword,
 ) tea.Cmd {
 	return func() tea.Msg {
 		return changePwDoneMsg{
@@ -141,7 +139,7 @@ func (s *ChangePasswordScreen) HandleMsg(
 		// to whichever input is currently focused.
 		// Strip a single trailing newline since password
 		// managers often add one; embedded newlines are
-		// rejected by SetUserPassword anyway.
+		// rejected by NewLoginPassword at submit anyway.
 		if s.step != changePwStepInput {
 			return s, nil
 		}
@@ -349,15 +347,19 @@ func (s *ChangePasswordScreen) submit() (Screen, tea.Cmd) {
 		s.inputErr = "Passwords do not match"
 		return s, nil
 	}
-	if len(newPw) < minPasswordLen {
-		s.inputErr = "Password must be at least " +
-			strconv.Itoa(minPasswordLen) + " characters"
+	// Validation policy (minimum length, no newline)
+	// lives in the constructor, shared with the
+	// privileged boundary — this screen just surfaces
+	// its error.
+	pw, err := installer.NewLoginPassword(newPw)
+	if err != nil {
+		s.inputErr = err.Error()
 		return s, nil
 	}
 
 	s.inputErr = ""
 	s.step = changePwStepWorking
-	return s, setUserPasswordCmd(s.username, newPw)
+	return s, setUserPasswordCmd(s.username, pw)
 }
 
 func (s *ChangePasswordScreen) viewInput(w, h int) string {
@@ -380,7 +382,8 @@ func (s *ChangePasswordScreen) viewInput(w, h int) string {
 	p.dim("before submitting — this screen will not")
 	p.dim("show it back to you.")
 	p.blank()
-	p.dim("Minimum length: " + strconv.Itoa(minPasswordLen) +
+	p.dim("Minimum length: " +
+		strconv.Itoa(installer.MinLoginPasswordLen) +
 		" characters.")
 	p.blank()
 
