@@ -85,6 +85,10 @@ const (
 // ── System ───────────────────────────────────────────────
 
 const (
+	OSRelease   = "/etc/os-release"
+	SudoersFile = "/etc/sudoers"
+	SudoersDir  = "/etc/sudoers.d"
+
 	SyncthingConfigXML = "/etc/syncthing/config.xml"
 	UFWDefault         = "/etc/default/ufw"
 	SSHDConfig         = "/etc/ssh/sshd_config"

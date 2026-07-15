@@ -4,7 +4,6 @@ package installer
 
 import (
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -111,34 +110,5 @@ func TestVersionCacheFileConsistency(t *testing.T) {
 	}
 }
 
-func TestCheckOSReadsFile(t *testing.T) {
-	err := checkOS()
-	if err != nil {
-		t.Logf("checkOS returned error (expected on non-Debian): %v", err)
-	}
-}
-
-func TestCheckOSVersionParsing(t *testing.T) {
-	tests := []struct {
-		ver  string
-		pass bool
-	}{
-		{"13", true},
-		{"14", true},
-		{"15", true},
-		{"12", false},
-		{"11", false},
-		{"9", false},
-	}
-	for _, tt := range tests {
-		verNum, err := strconv.Atoi(tt.ver)
-		if err != nil {
-			t.Fatalf("bad test version: %s", tt.ver)
-		}
-		result := verNum >= 13
-		if result != tt.pass {
-			t.Errorf("version %q >= 13: got %v, want %v",
-				tt.ver, result, tt.pass)
-		}
-	}
-}
+// The checkOS tests formerly here moved to preflight_test.go
+// (TestCheckOSRelease*), against the preflight's exactly-13 rule.

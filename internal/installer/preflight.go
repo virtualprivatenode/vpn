@@ -1,0 +1,432 @@
+// internal/installer/preflight.go
+
+package installer
+
+// Install preflight (sprint principle 3): before the install engine
+// mutates anything, assert the environmental bets this binary makes
+// and refuse to proceed if the box is not one we can trust. All
+// checks run and every failure is reported at once, so the operator
+// fixes everything in one round trip.
+//
+// Placement: called at the top of Run(), before the install TUI
+// opens, at the seam the old checkOS() occupied (preflight absorbs
+// it). A refused box is untouched — no user created, no config
+// written, no service restarted. The commit-6 root install re-homes
+// this call under the `vpn install` dispatch; notes for that session
+// are on the individual checks below.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/ripsline/virtual-private-node/internal/logger"
+	"github.com/ripsline/virtual-private-node/internal/paths"
+	"github.com/ripsline/virtual-private-node/internal/system"
+)
+
+// PreflightResult is one check's outcome. Err == nil means pass.
+type PreflightResult struct {
+	Name string
+	Err  error
+}
+
+// Check names double as report labels — short, present-tense facts.
+const (
+	checkNameDebian    = "Debian version is exactly 13"
+	checkNameSudo      = "passwordless sudo works"
+	checkNameTorsocks  = "torsocks is installed"
+	checkNameIOLogging = "sudo I/O logging is disabled"
+	checkNameDpkg      = "package system is healthy (dpkg --audit)"
+	checkNameUfw       = "ufw is installable"
+)
+
+// RunPreflight runs every check, prints a full report to stderr on
+// any failure (and mirrors the failures to the log file, so the log
+// trail never just stops), and returns a summary error that aborts
+// the install before its first step.
+func RunPreflight() error {
+	results := runPreflightChecks()
+
+	failed := 0
+	for _, r := range results {
+		if r.Err != nil {
+			failed++
+		}
+	}
+	if failed == 0 {
+		logger.Install("Preflight passed (%d/%d checks)",
+			len(results), len(results))
+		return nil
+	}
+
+	fmt.Fprint(os.Stderr, "\n"+FormatPreflightReport(results))
+	for _, r := range results {
+		if r.Err != nil {
+			logger.Install("Preflight FAIL: %s: %v", r.Name, r.Err)
+		}
+	}
+	return fmt.Errorf(
+		"preflight: %d of %d checks failed — nothing was changed",
+		failed, len(results))
+}
+
+// runPreflightChecks executes the checks in dependency order. The
+// sudoers scan needs working sudo to read root-owned files, so it is
+// reported as a failure (not silently passed) when the sudo check
+// already failed — fail-safe direction: cannot verify means refuse.
+func runPreflightChecks() []PreflightResult {
+	results := []PreflightResult{
+		{checkNameDebian, checkDebian13()},
+	}
+
+	sudoErr := checkPasswordlessSudo()
+	results = append(results, PreflightResult{checkNameSudo, sudoErr})
+	results = append(results,
+		PreflightResult{checkNameTorsocks, checkTorsocks()})
+
+	var ioLogErr error
+	if sudoErr != nil {
+		ioLogErr = errors.New(
+			"skipped — cannot read the sudo configuration " +
+				"while passwordless sudo is not working")
+	} else {
+		ioLogErr = checkSudoersIOLogging()
+	}
+	results = append(results,
+		PreflightResult{checkNameIOLogging, ioLogErr})
+
+	results = append(results,
+		PreflightResult{checkNameDpkg, checkDpkgAudit()})
+	results = append(results,
+		PreflightResult{checkNameUfw, checkUfwInstallable()})
+	return results
+}
+
+// ── Check 1: OS ──────────────────────────────────────────
+
+// checkDebian13 asserts /etc/os-release says ID=debian AND
+// VERSION_ID exactly 13 (ruling ix). Exactly, not at-least:
+// every external interface this binary invokes (sshd -T -C flags,
+// chpasswd, dpkg, apt) is [LIVE]-verified against the package
+// versions frozen in Debian 13; a future Debian 14 ships new
+// versions that may falsify those contracts (precedent: the
+// commit-2 -G/-C flag rejection). Debian 14 support = re-verify
+// the interface inventory, then widen this check in a release.
+func checkDebian13() error {
+	data, err := os.ReadFile(paths.OSRelease)
+	if err != nil {
+		return fmt.Errorf("cannot read %s: %w", paths.OSRelease, err)
+	}
+	return checkOSRelease(string(data))
+}
+
+// checkOSRelease parses os-release content. Pure function —
+// unit-tested. Line-anchored prefix parsing, not substring search,
+// so ID_LIKE=debian (Ubuntu and friends) can never match.
+func checkOSRelease(content string) error {
+	id, versionID := "", ""
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if v, ok := strings.CutPrefix(line, "ID="); ok {
+			id = strings.Trim(v, `"`)
+		}
+		if v, ok := strings.CutPrefix(line, "VERSION_ID="); ok {
+			versionID = strings.Trim(v, `"`)
+		}
+	}
+	if id != "debian" {
+		return fmt.Errorf(
+			"this installer supports Debian only (found ID=%q)", id)
+	}
+	if versionID != "13" {
+		return fmt.Errorf(
+			"this release is verified for Debian 13 only "+
+				"(found VERSION_ID=%q); newer Debian releases are "+
+				"refused until their system commands are re-verified",
+			versionID)
+	}
+	return nil
+}
+
+// ── Check 2: sudo ────────────────────────────────────────
+
+// checkPasswordlessSudo asserts the bootstrap's NOPASSWD rule is
+// actually usable: `sudo -n true` fails instead of prompting when a
+// password would be required. Without this, a half-bootstrapped box
+// dies mid-install with the sudo error buried in whichever step ran
+// first.
+//
+// SCAFFOLDING for the pre-commit-6 world: once `vpn install` runs
+// as root (commit 6) there is no sudo rule to depend on during
+// install, and commit 7 deletes NOPASSWD entirely. The commit-6
+// session deletes this check.
+func checkPasswordlessSudo() error {
+	if _, err := system.RunContext(
+		15*time.Second, "sudo", "-n", "true"); err != nil {
+		return fmt.Errorf(
+			"passwordless sudo is not working (%v) — re-run the "+
+				"bootstrap script or restore /etc/sudoers.d/%s",
+			err, paths.AdminUser)
+	}
+	return nil
+}
+
+// ── Check 3: torsocks ────────────────────────────────────
+
+// checkTorsocks asserts torsocks is on PATH. The bootstrap script
+// installed it before this binary ever ran, so its absence means a
+// tampered or unfinished bootstrap. All downloads route through it
+// (the torgate step re-checks at its own point in the sequence).
+// Retired when the Go-native Tor client lands (standalone queue #6).
+func checkTorsocks() error {
+	if _, err := exec.LookPath("torsocks"); err != nil {
+		return errors.New(
+			"torsocks not found — all downloads must route " +
+				"through Tor; re-run the bootstrap script")
+	}
+	return nil
+}
+
+// ── Check 4: sudo I/O logging (IA-3-H) ───────────────────
+
+// checkSudoersIOLogging asserts no sudoers file enables sudo's
+// input/output recording. With log_input set, the moment this app
+// pipes the admin password to `sudo chpasswd`, sudo would tee the
+// plaintext to /var/log/sudo-io — a passive credential sink. Scope:
+// /etc/sudoers plus every file sudo's @includedir would parse in
+// /etc/sudoers.d. Residual (documented, accepted): a nonstandard
+// @includedir pointing elsewhere is not followed.
+func checkSudoersIOLogging() error {
+	files := []string{paths.SudoersFile}
+	entries, err := os.ReadDir(paths.SudoersDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf(
+				"cannot list %s: %w", paths.SudoersDir, err)
+		}
+	} else {
+		for _, e := range entries {
+			if e.IsDir() || !sudoersFileIncluded(e.Name()) {
+				continue
+			}
+			files = append(files,
+				filepath.Join(paths.SudoersDir, e.Name()))
+		}
+	}
+
+	for _, f := range files {
+		data, err := system.SudoReadFile(f)
+		if err != nil {
+			return fmt.Errorf("cannot read %s: %w", f, err)
+		}
+		if directive, found :=
+			sudoersEnablesIOLogging(string(data)); found {
+			return fmt.Errorf(
+				"%s enables sudo I/O recording (%s) — it would "+
+					"write the admin password to disk when this app "+
+					"sets it; remove that setting and try again",
+				f, directive)
+		}
+	}
+	return nil
+}
+
+// sudoersFileIncluded mirrors sudo's @includedir rule: files whose
+// names contain a '.' or end in '~' are ignored by sudo, so a
+// finding in them would be a false refusal. Pure — unit-tested.
+func sudoersFileIncluded(name string) bool {
+	return !strings.Contains(name, ".") &&
+		!strings.HasSuffix(name, "~")
+}
+
+// sudoersEnablesIOLogging reports whether sudoers content enables
+// I/O recording, via either mechanism:
+//
+//   - a Defaults option: `Defaults log_input` / `Defaults
+//     log_output` (negation-aware: an odd number of leading '!'
+//     disables; comments and @include/#include lines cannot enable
+//     anything and are skipped)
+//   - a command tag in a user spec: `LOG_INPUT:` / `LOG_OUTPUT:`
+//     (uppercase, colon-suffixed; NOLOG_* tags disable and do not
+//     match)
+//
+// Direction on ambiguity: over-refusal. Pure — unit-tested.
+func sudoersEnablesIOLogging(content string) (string, bool) {
+	// Join backslash line continuations first.
+	content = strings.ReplaceAll(content, "\\\n", " ")
+
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		for _, f := range strings.Fields(line) {
+			if f == "LOG_INPUT:" || f == "LOG_OUTPUT:" {
+				return f, true
+			}
+		}
+
+		if !strings.HasPrefix(line, "Defaults") {
+			continue
+		}
+		rest := line[len("Defaults"):]
+		for _, tok := range strings.FieldsFunc(rest,
+			func(r rune) bool {
+				return r == ' ' || r == '\t' ||
+					r == ',' || r == '='
+			}) {
+			neg := 0
+			for strings.HasPrefix(tok, "!") {
+				tok = tok[1:]
+				neg++
+			}
+			if (tok == "log_input" || tok == "log_output") &&
+				neg%2 == 0 {
+				return tok, true
+			}
+		}
+	}
+	return "", false
+}
+
+// ── Check 5: dpkg ────────────────────────────────────────
+
+// checkDpkgAudit asserts the package database has no packages stuck
+// in broken states — a wedged dpkg would otherwise kill the install
+// midway through the engine's own apt operations. Read-only; no
+// lock taken.
+func checkDpkgAudit() error {
+	out, err := system.RunContext(60*time.Second, "dpkg", "--audit")
+	return dpkgAuditVerdict(out, err)
+}
+
+// dpkgAuditVerdict: clean means rc 0 AND empty output — no bet on
+// dpkg's exit-code behavior across versions (principle 2). Pure —
+// unit-tested.
+func dpkgAuditVerdict(output string, err error) error {
+	if err != nil {
+		return fmt.Errorf("dpkg --audit failed: %v", err)
+	}
+	if s := strings.TrimSpace(output); s != "" {
+		first := strings.SplitN(s, "\n", 2)[0]
+		return fmt.Errorf(
+			"dpkg reports packages in a broken state (%s ...) — "+
+				"fix with: sudo dpkg --configure -a && "+
+				"sudo apt-get -f install", first)
+	}
+	return nil
+}
+
+// ── Check 6: ufw ─────────────────────────────────────────
+
+// checkUfwInstallable asserts apt's on-disk package index can
+// deliver ufw when the engine's firewall step apt-installs it
+// mid-sequence. Offline; installs nothing; passes instantly when
+// ufw is already present (re-runs).
+//
+// Today this is nearly redundant — the bootstrap script proved apt
+// working minutes earlier — but it becomes LOAD-BEARING at commit 6
+// when the binary absorbs the script and nothing has pre-proven
+// apt. It lives here so commit 6 inherits it for free.
+func checkUfwInstallable() error {
+	if _, err := exec.LookPath("ufw"); err == nil {
+		return nil
+	}
+	out, err := runAptCachePolicy("ufw", 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("apt-cache policy ufw failed: %v", err)
+	}
+	return ufwCandidateVerdict(out)
+}
+
+// runAptCachePolicy runs `apt-cache policy <pkg>` with LC_ALL=C so
+// the Candidate line is stable across locales. Local exec (not the
+// system wrappers) purely for the env override; no sudo involved.
+func runAptCachePolicy(
+	pkg string, timeout time.Duration,
+) (string, error) {
+	ctx, cancel := context.WithTimeout(
+		context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "apt-cache", "policy", pkg)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("apt-cache policy %s: %w", pkg, err)
+	}
+	return string(out), nil
+}
+
+// ufwCandidateVerdict parses apt-cache policy output: installable
+// means a Candidate line with a real version. Pure — unit-tested.
+func ufwCandidateVerdict(output string) error {
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if v, ok := strings.CutPrefix(line, "Candidate:"); ok {
+			v = strings.TrimSpace(v)
+			if v != "" && v != "(none)" {
+				return nil
+			}
+			return errors.New(
+				"apt has no installable ufw candidate — package " +
+					"lists may be broken; run: sudo apt-get update")
+		}
+	}
+	return errors.New(
+		"no Candidate line in apt-cache policy output — apt " +
+			"package lists may be missing; run: sudo apt-get update")
+}
+
+// ── Report formatting ────────────────────────────────────
+
+// FormatPreflightReport renders the full check list with every
+// failure's reason. Pure — unit-tested.
+func FormatPreflightReport(results []PreflightResult) string {
+	var b strings.Builder
+	b.WriteString("  Preflight — checking the environment " +
+		"before changing anything:\n\n")
+	failed := 0
+	for _, r := range results {
+		if r.Err == nil {
+			fmt.Fprintf(&b, "    [ OK ] %s\n", r.Name)
+			continue
+		}
+		failed++
+		fmt.Fprintf(&b, "    [FAIL] %s\n", r.Name)
+		for _, line := range wrapText(r.Err.Error(), 56) {
+			fmt.Fprintf(&b, "           %s\n", line)
+		}
+	}
+	if failed > 0 {
+		b.WriteString("\n  Refusing to install. Nothing on this " +
+			"system has been changed.\n")
+	}
+	return b.String()
+}
+
+// wrapText word-wraps s to width columns. Words longer than width
+// get their own line, unbroken. Pure — unit-tested.
+func wrapText(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	var lines []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		if len(cur)+1+len(w) <= width {
+			cur += " " + w
+			continue
+		}
+		lines = append(lines, cur)
+		cur = w
+	}
+	return append(lines, cur)
+}
