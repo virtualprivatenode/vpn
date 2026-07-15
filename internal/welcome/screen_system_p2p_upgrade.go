@@ -420,6 +420,12 @@ func (s *P2PUpgradeScreen) viewConfirm(
 		"  • Open ports 9735 and 8080"+
 			" in the firewall"))
 	p.line(" " + theme.Value.Render(
+		"  • Expose LND's full REST API (port 8080)"))
+	p.line(" " + theme.Value.Render(
+		"    to the internet, protected by TLS and"))
+	p.line(" " + theme.Value.Render(
+		"    macaroon authentication"))
+	p.line(" " + theme.Value.Render(
 		"  • Allow Zeus to connect over clearnet"))
 	p.line(" " + theme.Value.Render(
 		"  • Restart LND with the new config"))

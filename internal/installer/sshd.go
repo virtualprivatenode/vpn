@@ -14,8 +14,13 @@ import (
 )
 
 // BuildSSHHardeningConfig generates the complete contents
-// of /etc/ssh/sshd_config.d/99-rlvpn-hardening.conf from
-// AppConfig. Pure function — no side effects.
+// of /etc/ssh/sshd_config.d/00-rlvpn-hardening.conf from
+// AppConfig. Pure function — no side effects. (The 00-
+// prefix is load-bearing: sshd applies the first match
+// per directive, so this drop-in must sort before a
+// provider's 50-cloud-init.conf to win contested
+// directives. paths.SSHDDropIn is the single source of
+// truth for the name.)
 //
 // Bootstrap writes the same static lines minus the
 // PasswordAuthentication directive (it's intentionally

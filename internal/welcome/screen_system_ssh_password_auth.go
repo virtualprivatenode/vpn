@@ -290,6 +290,10 @@ func (s *SSHPasswordAuthScreen) viewConfirm(
 		p.dim("Confirm that:")
 		p.dim("  • You have at least one key that works")
 		p.dim("  • You have tested logging in with it")
+		p.blank()
+		p.warn("After applying: keep this session open")
+		p.warn("and verify key login from a new")
+		p.warn("terminal before disconnecting.")
 	} else {
 		p.title(theme.Header, "Enable password auth?")
 		p.blank()

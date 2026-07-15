@@ -300,15 +300,21 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 			s.btnIdx, onButtons, w))
 	headerLines = append(headerLines, "")
 
-	// Status line: shows the actual SSH password auth
-	// state. Mirrors what's surfaced in the Password
-	// Auth screen.
+	// Status line: shows THIS APP'S recorded password
+	// auth setting, and says so — sshd's effective
+	// config can diverge (e.g. a provider's cloud-init
+	// drop-in that disabled password auth before this
+	// app ever ran). The guard that actually protects
+	// key removal derives the live state from sshd
+	// itself; this label must not claim more than the
+	// app can verify.
 	pwAuthLabel := theme.Success.Render("enabled")
 	if s.ctx.Cfg.SSHPasswordAuthDisabled {
 		pwAuthLabel = theme.Warning.Render("disabled")
 	}
 	headerLines = append(headerLines,
-		" "+theme.Label.Render("Password Auth: ")+
+		" "+theme.Label.Render(
+			"Password Auth (app setting): ")+
 			pwAuthLabel)
 	headerLines = append(headerLines, "")
 
