@@ -60,13 +60,11 @@ func addSSHKeyCmd(line string) tea.Cmd {
 	}
 }
 
-func removeSSHKeyCmd(
-	fingerprint string, passwordAuthEnabled bool,
-) tea.Cmd {
+func removeSSHKeyCmd(fingerprint string) tea.Cmd {
 	return func() tea.Msg {
 		return sshKeyRemoveMsg{
 			err: installer.RemoveAuthorizedKey(
-				fingerprint, passwordAuthEnabled)}
+				fingerprint)}
 	}
 }
 
