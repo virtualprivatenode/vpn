@@ -194,7 +194,10 @@ func RunInstallTUI(steps []InstallStep, version string) error {
 // ── Main install flow ────────────────────────────────────
 
 func Run() error {
-	if err := checkOS(); err != nil {
+	// Preflight (principle 3): assert the environment before the
+	// first mutation; refuses with a full report on any failure.
+	// Absorbs the old checkOS(). See preflight.go.
+	if err := RunPreflight(); err != nil {
 		return err
 	}
 

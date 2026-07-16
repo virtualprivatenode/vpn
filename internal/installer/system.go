@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/user"
-	"strconv"
 	"strings"
 
 	"github.com/ripsline/virtual-private-node/internal/config"
@@ -14,33 +13,9 @@ import (
 	"github.com/ripsline/virtual-private-node/internal/system"
 )
 
-func checkOS() error {
-	data, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return fmt.Errorf("cannot read /etc/os-release")
-	}
-	content := string(data)
-	if !strings.Contains(content, "ID=debian") {
-		return fmt.Errorf("requires Debian 13+")
-	}
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "VERSION_ID=") {
-			ver := strings.Trim(
-				strings.TrimPrefix(line, "VERSION_ID="), `"`)
-			verNum, err := strconv.Atoi(ver)
-			if err != nil {
-				return fmt.Errorf(
-					"cannot parse Debian version: %s", ver)
-			}
-			if verNum < 13 {
-				return fmt.Errorf(
-					"requires Debian 13+, found %s", ver)
-			}
-			return nil
-		}
-	}
-	return fmt.Errorf("cannot determine Debian version")
-}
+// The OS check formerly here (checkOS, Debian 13-or-newer) is
+// superseded by the preflight's exactly-13 assertion (ruling ix).
+// See preflight.go.
 
 func createSystemUser(username string) error {
 	if _, err := user.Lookup(username); err == nil {
