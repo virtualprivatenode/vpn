@@ -204,21 +204,11 @@ func checkTorsocks() error {
 // @includedir pointing elsewhere is not followed.
 func checkSudoersIOLogging() error {
 	files := []string{paths.SudoersFile}
-	entries, err := os.ReadDir(paths.SudoersDir)
+	dropIns, err := listSudoersDropIns()
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf(
-				"cannot list %s: %w", paths.SudoersDir, err)
-		}
-	} else {
-		for _, e := range entries {
-			if e.IsDir() || !sudoersFileIncluded(e.Name()) {
-				continue
-			}
-			files = append(files,
-				filepath.Join(paths.SudoersDir, e.Name()))
-		}
+		return err
 	}
+	files = append(files, dropIns...)
 
 	for _, f := range files {
 		data, err := system.SudoReadFile(f)
@@ -235,6 +225,48 @@ func checkSudoersIOLogging() error {
 		}
 	}
 	return nil
+}
+
+// listSudoersDropIns enumerates the files sudo's @includedir would
+// parse. The directory is enumerated THROUGH sudo: /etc/sudoers.d
+// itself is not world-listable on Debian 13 ([LIVE], commit-4 run —
+// an unprivileged os.ReadDir here got permission denied, which
+// would have refused every clean box). find emits regular files
+// only, so a stray subdirectory can never reach the file reads. A
+// missing directory means nothing to scan; any other stat failure
+// refuses (stat needs no permission on the directory itself).
+func listSudoersDropIns() ([]string, error) {
+	if _, err := os.Stat(paths.SudoersDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf(
+			"cannot stat %s: %w", paths.SudoersDir, err)
+	}
+	out, err := system.SudoRunOutput("find", paths.SudoersDir,
+		"-maxdepth", "1", "-type", "f")
+	if err != nil {
+		return nil, fmt.Errorf(
+			"cannot list %s: %w", paths.SudoersDir, err)
+	}
+	return filterSudoersDropIns(out), nil
+}
+
+// filterSudoersDropIns applies sudo's includedir filename rule to
+// find output (one absolute path per line). Pure — unit-tested.
+func filterSudoersDropIns(findOutput string) []string {
+	var files []string
+	for _, line := range strings.Split(findOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !sudoersFileIncluded(filepath.Base(line)) {
+			continue
+		}
+		files = append(files, line)
+	}
+	return files
 }
 
 // sudoersFileIncluded mirrors sudo's @includedir rule: files whose

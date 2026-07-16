@@ -101,6 +101,37 @@ func TestSudoersFileIncluded(t *testing.T) {
 	}
 }
 
+// ── filterSudoersDropIns ─────────────────────────────────
+
+func TestFilterSudoersDropIns(t *testing.T) {
+	findOutput := "/etc/sudoers.d/ripsline\n" +
+		"/etc/sudoers.d/zz-preflight-test\n" +
+		"/etc/sudoers.d/README\n" +
+		"/etc/sudoers.d/backup.bak\n" +
+		"/etc/sudoers.d/ripsline~\n"
+	got := filterSudoersDropIns(findOutput)
+	want := []string{
+		"/etc/sudoers.d/ripsline",
+		"/etc/sudoers.d/zz-preflight-test",
+		"/etc/sudoers.d/README",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d: got %q, want %q",
+				i, got[i], want[i])
+		}
+	}
+	if out := filterSudoersDropIns(""); len(out) != 0 {
+		t.Errorf("empty find output: got %v, want none", out)
+	}
+	if out := filterSudoersDropIns("\n  \n"); len(out) != 0 {
+		t.Errorf("blank lines: got %v, want none", out)
+	}
+}
+
 // ── sudoersEnablesIOLogging ──────────────────────────────
 
 func TestSudoersIOLoggingDetected(t *testing.T) {
