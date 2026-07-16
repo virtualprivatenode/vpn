@@ -42,34 +42,24 @@ func NeedsInstall() bool {
 	return !cfg.InstallComplete
 }
 
-// ── Install step types ──────────────────────────────────
-// Exported for use by welcome.InstallProgressScreen.
-// The step functions themselves stay unexported — callers
-// use the builder functions below to get step slices.
-
-type StepStatus int
-
-const (
-	StepPending StepStatus = iota
-	StepRunning
-	StepDone
-	StepFailed
-)
-
-type InstallStep struct {
-	Name   string
-	Fn     func() error
-	Status StepStatus
-	Err    error
-}
+// ── Initial-install TUI front-end ────────────────────────
+// The step model (InstallStep, StepStatus, StepKind, Group,
+// Phase), the resume planner, and the step runner live in
+// engine.go; the ledger lives in ledger.go. This file owns
+// the interactive front-end and the step lists. The front-end
+// renders what the runner reports — it makes no skip or
+// record decisions of its own, so the TUI and the unattended
+// runner cannot diverge.
 
 type stepDoneMsg struct {
-	index int
-	err   error
+	index   int
+	skipped bool
+	err     error
 }
 
 type installModel struct {
 	steps         []InstallStep
+	runner        *stepRunner
 	current       int
 	done, failed  bool
 	version       string
@@ -83,7 +73,8 @@ func (m installModel) runStep(i int) tea.Cmd {
 		if i >= len(m.steps) {
 			return stepDoneMsg{index: i}
 		}
-		return stepDoneMsg{index: i, err: m.steps[i].Fn()}
+		skipped, err := m.runner.runIndex(i)
+		return stepDoneMsg{index: i, skipped: skipped, err: err}
 	}
 }
 
@@ -97,6 +88,13 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.String() == "ctrl+c" {
+			// Quitting is allowed at any instant — an
+			// interrupt is SAFE now (the ledger records a
+			// step only after it verified complete, so any
+			// death leaves a truthful record) — and it is
+			// HONEST: a quit before all steps ran leaves
+			// m.done false, which classifies the run as
+			// interrupted, never complete (IA-1-9).
 			return m, tea.Quit
 		}
 	case stepDoneMsg:
@@ -108,7 +106,11 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.done = true
 				return m, nil
 			}
-			m.steps[msg.index].Status = StepDone
+			if msg.skipped {
+				m.steps[msg.index].Status = StepSkipped
+			} else {
+				m.steps[msg.index].Status = StepDone
+			}
 			next := msg.index + 1
 			if next < len(m.steps) {
 				m.current = next
@@ -139,6 +141,10 @@ func (m installModel) View() tea.View {
 			sty, ind = theme.ProgRunning, "[....]"
 		case StepFailed:
 			sty, ind = theme.ProgFail, "[FAIL]"
+		case StepSkipped:
+			// Resume skip: completed by an earlier run
+			// (per the install ledger).
+			sty, ind = theme.Dim, "[skip]"
 		default:
 			sty, ind = theme.ProgPending, "[wait]"
 		}
@@ -169,26 +175,40 @@ func (m installModel) View() tea.View {
 	return v
 }
 
-func RunInstallTUI(steps []InstallStep, version string) error {
+// RunInstallTUI runs the initial-install steps under the
+// interactive front-end and reports HOW the run ended —
+// complete, failed, or interrupted — via RunResult. It no
+// longer collapses "the TUI returned" into "the install
+// succeeded": that inference was IA-1-9 (a swallowed ctrl+c
+// returned cleanly and was recorded as a complete install).
+// The caller decides what each outcome means; only
+// RunComplete may reach the InstallComplete write.
+func RunInstallTUI(
+	steps []InstallStep, version string,
+) (RunResult, error) {
 	if len(steps) == 0 {
-		return nil
+		return RunResult{Outcome: RunComplete}, nil
+	}
+	runner, err := newStepRunner(
+		steps, version, paths.InstallStateFile)
+	if err != nil {
+		return RunResult{}, err
 	}
 	steps[0].Status = StepRunning
-	m := installModel{steps: steps, version: version}
+	m := installModel{
+		steps: steps, runner: runner, version: version,
+	}
 	p := tea.NewProgram(m)
 	result, err := p.Run()
 	if err != nil {
-		return err
+		return RunResult{}, err
 	}
 	final := result.(installModel)
-	if final.failed {
-		for _, s := range final.steps {
-			if s.Status == StepFailed {
-				return fmt.Errorf("%s: %w", s.Name, s.Err)
-			}
-		}
-	}
-	return nil
+	// done=false here means the render loop was quit before
+	// the last step reported — an interrupt, by any cause.
+	return classifyRun(final.steps,
+		final.done && !final.failed,
+		final.failed, final.current), nil
 }
 
 // ── Main install flow ────────────────────────────────────
@@ -206,43 +226,82 @@ func Run() error {
 		cfg = preCfg
 	}
 
-	// LND is now installed during initial setup (Tor-only default).
-	// Set config fields before buildSteps so Tor config and firewall
-	// rules include LND hidden services and ports.
+	// LND is installed during initial setup (Tor-only default).
+	// These fields are set IN MEMORY before buildSteps because
+	// the steps read them (Tor config and firewall rules include
+	// LND hidden services and ports) — but they are PERSISTED
+	// only on a complete run, below. A failed or interrupted run
+	// must not record intent as fact (IA-1-9: Gate 0 observed
+	// lnd_installed:true on disk for software never downloaded).
 	cfg.P2PMode = "tor"
 	cfg.LNDInstalled = true
 	cfg.Components = "bitcoin+lnd"
 
 	steps := buildSteps(cfg)
 
-	if err := RunInstallTUI(steps, appVersion); err != nil {
+	res, err := RunInstallTUI(steps, appVersion)
+	if err != nil {
 		return err
 	}
-	if err := setupShellEnvironment(cfg); err != nil {
-		logger.Install("Warning: shell setup failed: %v", err)
-		fmt.Printf("  Warning: shell setup failed: %v\n", err)
+	switch res.Outcome {
+	case RunFailed:
+		// The runner already logged the failure line; the
+		// error surfaces to stderr via main.
+		return fmt.Errorf("%s: %w", res.StepName, res.Err)
+	case RunInterrupted:
+		// The log trail must not just stop (commit-5
+		// addendum): record how far the run got, and that a
+		// re-run resumes.
+		logger.Install(
+			"install INTERRUPTED at step %d/%d: %s — "+
+				"run again to resume", res.StepNum, res.Total,
+			res.StepName)
+		return fmt.Errorf(
+			"install interrupted at step %d/%d (%s) — "+
+				"run again to resume", res.StepNum, res.Total,
+			res.StepName)
 	}
+
+	// Every step verified complete this run — only now may the
+	// durable record say so. InstallComplete is DERIVED from
+	// per-step results, never from a front-end returning
+	// (IA-1-9); the intent fields set above reach disk only on
+	// this path.
+	logger.Install("all %d install steps complete", res.Total)
 	cfg.InstallComplete = true
 	cfg.InstallVersion = appVersion
 	return config.Save(cfg)
 }
 
+// buildSteps returns the initial-install step list. Every step
+// carries a stable Key (the ledger identity — versionless, so
+// "which work is done" survives version bumps in display
+// names), a Kind (gates re-run every pass), and a Group where
+// steps hand ephemeral material to each other (see engine.go).
+// Phase is provisionally Bake throughout — the phase map is
+// ratified by the image-track session (ruling xiv / iv).
 func buildSteps(cfg *config.AppConfig) []InstallStep {
 	// Pipeline working directories — created in each pipeline's
 	// first step, captured by closures, cleaned up in the final
 	// step. Random paths via os.MkdirTemp prevent symlink attacks.
+	// NOTE these closures are exactly why the btc/lnd triplets
+	// are resume-atomic Groups: the workdir path lives only in
+	// this process, so a resumed process can never re-enter a
+	// pipeline midway.
 	var btcWork, lndWork string
 
 	return []InstallStep{
-		{Name: "Creating system user and directories",
+		{Key: "user.create",
+			Name: "Creating system user and directories",
 			Fn: func() error {
 				if err := createSystemUser(systemUser); err != nil {
 					return err
 				}
 				return createBitcoinDirs(systemUser)
 			}},
-		{Name: "Disabling IPv6", Fn: disableIPv6},
-		{Name: "Installing Tor",
+		{Key: "ipv6.disable", Name: "Disabling IPv6",
+			Fn: disableIPv6},
+		{Key: "tor.install", Name: "Installing Tor",
 			Fn: func() error {
 				if err := installTor(); err != nil {
 					return err
@@ -258,17 +317,22 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 		// HARD GATE (IA-2-K): no Tor-dependent network step below —
 		// apt over the socks5h proxy, every DownloadRequireTor —
 		// runs unless Tor routing is verified. See torgate.go.
-		{Name: "Verifying Tor routing", Fn: verifyTorRouting},
-		{Name: "Configuring apt for Tor",
+		// StepGate: re-verified on EVERY pass including resumes —
+		// no download step can execute in a pass whose Tor routing
+		// was not verified in that same pass.
+		{Key: "tor.gate", Name: "Verifying Tor routing",
+			Kind: StepGate, Fn: verifyTorRouting},
+		{Key: "apt.torproxy", Name: "Configuring apt for Tor",
 			Fn: func() error {
 				if err := configureAptTor(); err != nil {
 					return err
 				}
 				return ensureGPG()
 			}},
-		{Name: "Configuring firewall",
+		{Key: "firewall", Name: "Configuring firewall",
 			Fn: func() error { return configureFirewall(cfg) }},
-		{Name: "Downloading Bitcoin Core " + bitcoinVersion,
+		{Key: "btc.download", Group: "btc",
+			Name: "Downloading Bitcoin Core " + bitcoinVersion,
 			Fn: func() error {
 				var err error
 				btcWork, err = os.MkdirTemp("", "rlvpn-btc-")
@@ -277,7 +341,8 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return downloadBitcoin(bitcoinVersion, btcWork)
 			}},
-		{Name: "Verifying Bitcoin Core",
+		{Key: "btc.verify", Group: "btc",
+			Name: "Verifying Bitcoin Core",
 			Fn: func() error {
 				if err := verifyBitcoinCoreSigs(
 					btcWork, 2); err != nil {
@@ -285,7 +350,8 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return verifyBitcoin(btcWork)
 			}},
-		{Name: "Installing Bitcoin Core",
+		{Key: "btc.install", Group: "btc",
+			Name: "Installing Bitcoin Core",
 			Fn: func() error {
 				if err := extractAndInstallBitcoin(
 					bitcoinVersion, btcWork); err != nil {
@@ -297,8 +363,9 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return writeBitcoindService(systemUser)
 			}},
-		{Name: "Starting Bitcoin Core", Fn: startBitcoind},
-		{Name: "Configuring security",
+		{Key: "btc.start", Name: "Starting Bitcoin Core",
+			Fn: startBitcoind},
+		{Key: "security", Name: "Configuring security",
 			Fn: func() error {
 				if err := installUnattendedUpgrades(); err != nil {
 					return err
@@ -313,7 +380,8 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 			}},
 
 		// ── LND (Tor-only, non-interactive) ─────────
-		{Name: "Downloading LND",
+		{Key: "lnd.download", Group: "lnd",
+			Name: "Downloading LND",
 			Fn: func() error {
 				var err error
 				lndWork, err = os.MkdirTemp("", "rlvpn-lnd-")
@@ -322,7 +390,8 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return downloadLND(lndVersion, lndWork)
 			}},
-		{Name: "Verifying LND",
+		{Key: "lnd.verify", Group: "lnd",
+			Name: "Verifying LND",
 			Fn: func() error {
 				if err := verifyLNDSig(
 					lndWork, lndVersion); err != nil {
@@ -330,7 +399,8 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return verifyLND(lndWork)
 			}},
-		{Name: "Installing LND",
+		{Key: "lnd.install", Group: "lnd",
+			Name: "Installing LND",
 			Fn: func() error {
 				if err := extractAndInstallLND(
 					lndVersion, lndWork); err != nil {
@@ -345,14 +415,22 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return writeLNDServiceInitial(systemUser)
 			}},
-		{Name: "Configuring Tor for LND",
+		{Key: "tor.lnd", Name: "Configuring Tor for LND",
 			Fn: func() error {
 				if err := RebuildTorConfig(cfg); err != nil {
 					return err
 				}
 				return restartTor()
 			}},
-		{Name: "Starting LND", Fn: startLND},
+		{Key: "lnd.start", Name: "Starting LND", Fn: startLND},
+		// Formerly a post-TUI special case that warned but
+		// completed anyway (IA-1-16). As a real step it
+		// inherits the ledger, the completion gate, failure
+		// logging, and resume — the special case is dead.
+		{Key: "shellenv", Name: "Configuring shell environment",
+			Fn: func() error {
+				return setupShellEnvironment(cfg)
+			}},
 	}
 }
 
