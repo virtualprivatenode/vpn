@@ -12,6 +12,14 @@ const (
 	ConfigDir  = "/etc/rlvpn"
 	ConfigFile = "/etc/rlvpn/config.json"
 
+	// InstallStateFile is the per-step install ledger: which
+	// install steps have completed, keyed by stable step key
+	// (installer/ledger.go). A SEPARATE file from config.json
+	// so a config load failure cannot erase install history,
+	// and so its ownership flips to root with root-dispatched
+	// install without touching config's story.
+	InstallStateFile = "/etc/rlvpn/install-state.json"
+
 	BitcoinConf = "/etc/bitcoin/bitcoin.conf"
 	BitcoinDir  = "/etc/bitcoin"
 
