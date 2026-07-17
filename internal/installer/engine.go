@@ -5,7 +5,7 @@ package installer
 import (
 	"fmt"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
 // ── Install engine core ──────────────────────────────────
@@ -15,7 +15,7 @@ import (
 // (setup.go) and the unattended runner (below) both drive the
 // same runner, so ledger recording, skip decisions, and the
 // log trail cannot diverge between them, and a failed or
-// interrupted run reaches /var/log/rlvpn.log identically from
+// interrupted run reaches /var/log/vpn.log identically from
 // either.
 //
 // Resume rules (one place, ruled 2026-07-16):
@@ -212,7 +212,7 @@ func newStepRunner(
 
 // runIndex executes one step per the plan. Every path leaves a
 // log line — start, skip, complete, FAILED — so a run's trail
-// in rlvpn.log never just stops (the commit-5 addendum fix,
+// in vpn.log never just stops (the commit-5 addendum fix,
 // once, in the core). The ledger entry is written only after
 // Fn returns nil; a ledger persist failure is logged and does
 // NOT fail the step (this run's authority is its in-process

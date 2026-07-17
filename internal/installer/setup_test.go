@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripsline/virtual-private-node/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
 func TestVersionConstants(t *testing.T) {
@@ -45,14 +45,6 @@ func TestLndVersionStr(t *testing.T) {
 	}
 	if v != lndVersion {
 		t.Errorf("got %q, want %q", v, lndVersion)
-	}
-}
-
-func TestNeedsInstallNoConfig(t *testing.T) {
-	// No config file exists on dev machine, so install is needed
-	result := NeedsInstall()
-	if !result {
-		t.Error("NeedsInstall should return true when config is missing")
 	}
 }
 
@@ -94,7 +86,7 @@ func TestWriteAndReadVersionCache(t *testing.T) {
 }
 
 func TestVersionCacheDirConsistency(t *testing.T) {
-	if !strings.HasSuffix(paths.VersionCacheDir, ".cache/rlvpn") {
+	if !strings.HasSuffix(paths.VersionCacheDir, ".cache/vpn") {
 		t.Errorf("VersionCacheDir unexpected suffix: %s",
 			paths.VersionCacheDir)
 	}
@@ -112,3 +104,5 @@ func TestVersionCacheFileConsistency(t *testing.T) {
 
 // The checkOS tests formerly here moved to preflight_test.go
 // (TestCheckOSRelease*), against the preflight's exactly-13 rule.
+// The NeedsInstall tests died with NeedsInstall itself: commit 6
+// replaced state-sniffing with explicit dispatch (IA-1-8).

@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── Confirm step ───────────────────────────────────────

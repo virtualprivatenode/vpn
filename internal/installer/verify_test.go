@@ -172,7 +172,7 @@ func TestVerifyIsolated(t *testing.T) {
 
 	// Set up a key-generation homedir with two distinct keys
 	// and one subkey-only key.
-	genHome, err := os.MkdirTemp("", "rlvpn-test-gen-")
+	genHome, err := os.MkdirTemp("", "vpn-test-gen-")
 	if err != nil {
 		t.Fatalf("create gen home: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestVerifyIsolated(t *testing.T) {
 	fpSubkey := testGenKey(t, genHome, "SubkeySigner", true)
 
 	// Create test data file.
-	dataDir, err := os.MkdirTemp("", "rlvpn-test-data-")
+	dataDir, err := os.MkdirTemp("", "vpn-test-data-")
 	if err != nil {
 		t.Fatalf("create data dir: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestVerifyIsolatedClearsign(t *testing.T) {
 		t.Skip("gpg not available — skipping")
 	}
 
-	genHome, err := os.MkdirTemp("", "rlvpn-test-gen-")
+	genHome, err := os.MkdirTemp("", "vpn-test-gen-")
 	if err != nil {
 		t.Fatalf("create gen home: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestVerifyIsolatedClearsign(t *testing.T) {
 	fpAlpha := testGenKey(t, genHome, "ClearAlpha", false)
 	fpBeta := testGenKey(t, genHome, "ClearBeta", false)
 
-	dataDir, err := os.MkdirTemp("", "rlvpn-test-data-")
+	dataDir, err := os.MkdirTemp("", "vpn-test-data-")
 	if err != nil {
 		t.Fatalf("create data dir: %v", err)
 	}
@@ -514,16 +514,16 @@ func TestSignerFingerprints(t *testing.T) {
 }
 
 func TestReleaseKeyFingerprint(t *testing.T) {
-	if len(rlvpnReleaseFP) != 40 {
+	if len(vpnReleaseFP) != 40 {
 		t.Errorf("release key fingerprint length %d, want 40",
-			len(rlvpnReleaseFP))
+			len(vpnReleaseFP))
 	}
 
 	// Cross-check: must match the value baked into
-	// virtual-private-node.sh SIGNING_KEY_FP (line 24).
+	// the fingerprint published in MIGRATION.md (Step 1).
 	expected := "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
-	if rlvpnReleaseFP != expected {
+	if vpnReleaseFP != expected {
 		t.Errorf("release FP = %s, want %s",
-			rlvpnReleaseFP, expected)
+			vpnReleaseFP, expected)
 	}
 }

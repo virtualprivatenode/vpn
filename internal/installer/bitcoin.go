@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 func downloadBitcoin(version, workDir string) error {
@@ -66,7 +66,7 @@ server=1
 disablewallet=1
 %s
 prune=%d
-dbcache=512
+dbcache=%d
 maxmempool=300
 proxy=127.0.0.1:9050
 listen=1
@@ -79,7 +79,7 @@ rpcport=%d
 rpcallowip=127.0.0.1
 zmqpubrawblock=tcp://127.0.0.1:%d
 zmqpubrawtx=tcp://127.0.0.1:%d
-`, net.BitcoinFlag, pruneMB,
+`, net.BitcoinFlag, pruneMB, cfg.DbCacheMB(),
 			net.RPCPort, net.ZMQBlockPort, net.ZMQTxPort)
 	}
 
@@ -87,7 +87,7 @@ zmqpubrawtx=tcp://127.0.0.1:%d
 server=1
 disablewallet=1
 prune=%d
-dbcache=512
+dbcache=%d
 maxmempool=300
 proxy=127.0.0.1:9050
 listen=1
@@ -99,7 +99,7 @@ rpcport=%d
 rpcallowip=127.0.0.1
 zmqpubrawblock=tcp://127.0.0.1:%d
 zmqpubrawtx=tcp://127.0.0.1:%d
-`, pruneMB,
+`, pruneMB, cfg.DbCacheMB(),
 		net.RPCPort, net.ZMQBlockPort, net.ZMQTxPort)
 }
 

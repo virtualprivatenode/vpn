@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
 // Run executes a command and returns an error with output on failure.
@@ -23,10 +23,38 @@ func Run(name string, args ...string) error {
 	return nil
 }
 
-// SudoRun executes a command via sudo.
+// maybeSudo prepends sudo to a command line unless the process
+// already runs as root. `vpn install` runs under root dispatch
+// (commit 6), where a sudo prefix would be pointless AND would
+// make the install depend on sudo being installed before the
+// base-package step has run; the TUI runs as the unprivileged
+// admin user, where the sudo prefix is load-bearing (until the
+// commit-7 root helper replaces this seam entirely).
+func maybeSudo(name string, args []string) (string, []string) {
+	if os.Geteuid() == 0 {
+		return name, args
+	}
+	return "sudo", append([]string{name}, args...)
+}
+
+// SudoRun executes a command with root privilege: via sudo when
+// unprivileged, directly when already root.
 func SudoRun(name string, args ...string) error {
-	sudoArgs := append([]string{name}, args...)
-	return Run("sudo", sudoArgs...)
+	n, a := maybeSudo(name, args)
+	return Run(n, a...)
+}
+
+// SudoRunStdin executes a command with root privilege, feeding
+// stdin from the given string. The payload never appears in argv
+// (which would leak via /proc/*/cmdline). Returns trimmed
+// combined output alongside any error, for caller-side message
+// formatting.
+func SudoRunStdin(stdin, name string, args ...string) (string, error) {
+	n, a := maybeSudo(name, args)
+	cmd := exec.Command(n, a...)
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }
 
 // RunOutput executes a command and returns stdout as a string.
@@ -40,10 +68,11 @@ func RunOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunOutput executes a command via sudo and returns stdout.
+// SudoRunOutput executes a command with root privilege and
+// returns stdout.
 func SudoRunOutput(name string, args ...string) (string, error) {
-	sudoArgs := append([]string{name}, args...)
-	return RunOutput("sudo", sudoArgs...)
+	n, a := maybeSudo(name, args)
+	return RunOutput(n, a...)
 }
 
 // RunContext executes a command with a timeout.
@@ -59,10 +88,11 @@ func RunContext(timeout time.Duration, name string, args ...string) (string, err
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunContext executes a command via sudo with a timeout.
+// SudoRunContext executes a command with root privilege and a
+// timeout.
 func SudoRunContext(timeout time.Duration, name string, args ...string) (string, error) {
-	sudoArgs := append([]string{name}, args...)
-	return RunContext(timeout, "sudo", sudoArgs...)
+	n, a := maybeSudo(name, args)
+	return RunContext(timeout, n, a...)
 }
 
 // RunCombinedOutput executes a command and returns combined stdout+stderr.
@@ -76,10 +106,11 @@ func RunCombinedOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunCombinedOutput executes a command via sudo and returns combined stdout+stderr.
+// SudoRunCombinedOutput executes a command with root privilege
+// and returns combined stdout+stderr.
 func SudoRunCombinedOutput(name string, args ...string) (string, error) {
-	sudoArgs := append([]string{name}, args...)
-	return RunCombinedOutput("sudo", sudoArgs...)
+	n, a := maybeSudo(name, args)
+	return RunCombinedOutput(n, a...)
 }
 
 // RunSilent executes a command and discards all output.
@@ -90,19 +121,21 @@ func RunSilent(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// SudoRunSilent executes a command via sudo and discards all output.
+// SudoRunSilent executes a command with root privilege and
+// discards all output.
 func SudoRunSilent(name string, args ...string) error {
-	sudoArgs := append([]string{name}, args...)
-	return RunSilent("sudo", sudoArgs...)
+	n, a := maybeSudo(name, args)
+	return RunSilent(n, a...)
 }
 
-// SudoWriteFile atomically writes content to a root-owned path via sudo:
+// SudoWriteFile atomically writes content to a root-owned path
+// (directly as root, via sudo otherwise):
 // stages in a dest-dir temp (install -m), then rename(2) onto the path, so the
 // canonical path only ever holds the final mode and a crash never leaves it
 // partial or world-readable. os.CreateTemp's O_EXCL guards the staging file
 // against symlink attacks. Write failures are logged centrally for support.
 func SudoWriteFile(path string, content []byte, perm os.FileMode) error {
-	tmpFile, err := os.CreateTemp("", "rlvpn-write-")
+	tmpFile, err := os.CreateTemp("", "vpn-write-")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
@@ -178,10 +211,16 @@ func torWrapper() string {
 	return ""
 }
 
-// SudoReadFile reads a file that requires root/sudo access.
-// Uses os.CreateTemp for secure temp file creation.
+// SudoReadFile reads a file that requires root access. As root
+// it reads directly (the error preserves os.IsNotExist for
+// callers that treat a missing file as empty); unprivileged it
+// stages a copy via sudo. Uses os.CreateTemp for secure temp
+// file creation.
 func SudoReadFile(path string) ([]byte, error) {
-	tmpFile, err := os.CreateTemp("", "rlvpn-read-")
+	if os.Geteuid() == 0 {
+		return os.ReadFile(path)
+	}
+	tmpFile, err := os.CreateTemp("", "vpn-read-")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}

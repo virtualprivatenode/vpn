@@ -1,4 +1,8 @@
 # Binary
+/vpn
+vpn-test*
+# Old binary names — kept one release cycle for stale local
+# builds, drop after v0.7.0.
 /rlvpn
 rlvpn-test*
 
@@ -19,4 +23,3 @@ release/
 
 # Dev
 notes/
-test-run.sh

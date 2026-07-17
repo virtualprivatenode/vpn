@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // SSHKeyInfo holds parsed metadata for a single authorized key.
@@ -91,7 +91,7 @@ func ValidateSSHKey(line string) error {
 }
 
 // ListAuthorizedKeys reads and parses all keys from the
-// ripsline user's authorized_keys file. Returns an empty
+// admin user's authorized_keys file. Returns an empty
 // slice (not an error) if the file does not exist.
 func ListAuthorizedKeys() ([]SSHKeyInfo, error) {
 	data, err := system.SudoReadFile(

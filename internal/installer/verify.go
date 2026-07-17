@@ -12,7 +12,7 @@
 // GPG exit code is never trusted.
 //
 // Four callers use verifyIsolated:
-//   - verifySelfUpdate:      threshold 1 vs the rlvpn release key
+//   - verifySelfUpdate:      threshold 1 vs the vpn release key
 //   - verifyBitcoinCoreSigs: threshold 2 distinct builder fingerprints
 //   - verifyLNDSig:          threshold 1 vs roasbeef's fingerprint
 //   - verifySyncthingSig:    threshold 1 vs the Syncthing release key
@@ -27,8 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // ── Trust anchors ───────────────────────────────────────
@@ -38,12 +38,13 @@ import (
 // into an ephemeral keyring, and confirm the fingerprint with
 // gpg --with-colons --list-keys.
 
-// rlvpnReleaseFP is the primary fingerprint of the rlvpn
+// vpnReleaseFP is the primary fingerprint of the vpn
 // release signing key.
 // Source: generated locally; public key hosted at
-// keys.openpgp.org. Cross-check: SIGNING_KEY_FP in
-// virtual-private-node.sh (line 24).
-const rlvpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
+// keys.openpgp.org. Cross-check: the fingerprint in
+// MIGRATION.md (Step 1) — the SAME key signed every release
+// under the old name.
+const vpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 
 // bitcoinCoreSigners are the trusted Bitcoin Core builder keys.
 // Source: github.com/bitcoin-core/guix.sigs/tree/main/builder-keys
@@ -160,7 +161,7 @@ func verifyIsolated(
 	pinnedFPs map[string]bool,
 ) (distinctValidSigners int, badSig bool, err error) {
 	// Ephemeral GPG home — 0700, random path, cleaned up on return.
-	gpgHome, err := os.MkdirTemp("", "rlvpn-gpg-")
+	gpgHome, err := os.MkdirTemp("", "vpn-gpg-")
 	if err != nil {
 		return 0, false, fmt.Errorf(
 			"create ephemeral gpg home: %w", err)
@@ -500,7 +501,7 @@ func verifySelfUpdate(workDir string) error {
 	keyFile := filepath.Join(workDir, "release-key.asc")
 	keyURL := fmt.Sprintf(
 		"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
-		rlvpnReleaseFP)
+		vpnReleaseFP)
 	if err := system.DownloadRequireTor(
 		keyURL, keyFile); err != nil {
 		logger.Verify(
@@ -509,7 +510,7 @@ func verifySelfUpdate(workDir string) error {
 			"download release signing key: %w", err)
 	}
 
-	pinnedFPs := map[string]bool{rlvpnReleaseFP: true}
+	pinnedFPs := map[string]bool{vpnReleaseFP: true}
 
 	distinct, hasBadSig, err := verifyIsolated(
 		[]string{keyFile}, sigFile, sumsFile, pinnedFPs)

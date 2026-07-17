@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/config"
 )
 
 func TestTorConfigBitcoinOnly(t *testing.T) {

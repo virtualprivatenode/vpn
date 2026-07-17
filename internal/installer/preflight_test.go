@@ -86,49 +86,18 @@ func TestSudoersFileIncluded(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"ripsline", true},
+		{"vpn", true},
 		{"README", true},
 		{"99-custom", true},
 		{"backup.bak", false},    // contains '.'
 		{"50-cloud.conf", false}, // contains '.'
-		{"ripsline~", false},     // editor backup
+		{"vpn~", false},          // editor backup
 	}
 	for _, tt := range cases {
 		if got := sudoersFileIncluded(tt.name); got != tt.want {
 			t.Errorf("sudoersFileIncluded(%q) = %v, want %v",
 				tt.name, got, tt.want)
 		}
-	}
-}
-
-// ── filterSudoersDropIns ─────────────────────────────────
-
-func TestFilterSudoersDropIns(t *testing.T) {
-	findOutput := "/etc/sudoers.d/ripsline\n" +
-		"/etc/sudoers.d/zz-preflight-test\n" +
-		"/etc/sudoers.d/README\n" +
-		"/etc/sudoers.d/backup.bak\n" +
-		"/etc/sudoers.d/ripsline~\n"
-	got := filterSudoersDropIns(findOutput)
-	want := []string{
-		"/etc/sudoers.d/ripsline",
-		"/etc/sudoers.d/zz-preflight-test",
-		"/etc/sudoers.d/README",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("entry %d: got %q, want %q",
-				i, got[i], want[i])
-		}
-	}
-	if out := filterSudoersDropIns(""); len(out) != 0 {
-		t.Errorf("empty find output: got %v, want none", out)
-	}
-	if out := filterSudoersDropIns("\n  \n"); len(out) != 0 {
-		t.Errorf("blank lines: got %v, want none", out)
 	}
 }
 
@@ -141,19 +110,19 @@ func TestSudoersIOLoggingDetected(t *testing.T) {
 	}{
 		{"plain log_input", "Defaults log_input\n"},
 		{"plain log_output", "Defaults log_output\n"},
-		{"user-scoped", "Defaults:ripsline log_input\n"},
+		{"user-scoped", "Defaults:vpn log_input\n"},
 		{"comma list", "Defaults env_reset, log_input\n"},
 		{"double negation enables", "Defaults !!log_input\n"},
 		{"tab separated", "Defaults\tlog_output\n"},
 		{"line continuation",
 			"Defaults env_reset, \\\n    log_input\n"},
 		{"LOG_INPUT tag",
-			"ripsline ALL=(ALL) LOG_INPUT: /usr/bin/foo\n"},
+			"vpn ALL=(ALL) LOG_INPUT: /usr/bin/foo\n"},
 		{"LOG_OUTPUT tag",
-			"ripsline ALL=(ALL) NOPASSWD: LOG_OUTPUT: ALL\n"},
+			"vpn ALL=(ALL) NOPASSWD: LOG_OUTPUT: ALL\n"},
 		{"buried among safe lines",
 			"# comment\nDefaults env_reset\n" +
-				"ripsline ALL=(ALL) NOPASSWD:ALL\n" +
+				"vpn ALL=(ALL) NOPASSWD:ALL\n" +
 				"Defaults log_input\n"},
 	}
 	for _, tt := range cases {
@@ -170,7 +139,7 @@ func TestSudoersIOLoggingClean(t *testing.T) {
 	}{
 		{"empty", ""},
 		{"bootstrap rule only",
-			"ripsline ALL=(ALL) NOPASSWD:ALL\n"},
+			"vpn ALL=(ALL) NOPASSWD:ALL\n"},
 		{"stock debian",
 			"Defaults env_reset\n" +
 				"Defaults mail_badpass\n" +
@@ -185,7 +154,7 @@ func TestSudoersIOLoggingClean(t *testing.T) {
 		{"iolog_dir alone does not enable",
 			"Defaults iolog_dir=/var/log/sudo-io\n"},
 		{"NOLOG tags disable",
-			"ripsline ALL=(ALL) NOLOG_INPUT: NOLOG_OUTPUT: ALL\n"},
+			"vpn ALL=(ALL) NOLOG_INPUT: NOLOG_OUTPUT: ALL\n"},
 		{"similar option names",
 			"Defaults log_year\nDefaults logfile=/var/log/sudo\n"},
 	}
@@ -305,8 +274,8 @@ func TestWrapText(t *testing.T) {
 
 func TestPreflightCheckNamesNonEmpty(t *testing.T) {
 	for _, n := range []string{
-		checkNameDebian, checkNameSudo, checkNameTorsocks,
-		checkNameIOLogging, checkNameDpkg, checkNameUfw,
+		checkNameDebian, checkNameIOLogging,
+		checkNameDpkg, checkNameUfw, checkNameSSHState,
 	} {
 		if strings.TrimSpace(n) == "" {
 			t.Error("empty check name")

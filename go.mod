@@ -1,4 +1,4 @@
-module github.com/ripsline/virtual-private-node
+module github.com/virtualprivatenode/vpn
 
 go 1.26.1
 

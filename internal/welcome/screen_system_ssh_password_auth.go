@@ -4,8 +4,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/installer"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── SSHPasswordAuthScreen ──────────────────────────────

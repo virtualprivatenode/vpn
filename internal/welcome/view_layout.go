@@ -7,7 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 func (m Model) View() tea.View {
@@ -198,12 +200,32 @@ func (m Model) viewMain() string {
 	helpLine := centerInWidth(helpStr, totalW)
 
 	fullContent := frame + "\n" + helpLine
+	// First-run verification banner (ruling xvi): shown until
+	// the journal proves a real sshd login for the admin user.
+	if m.cfg.KeyVerificationPending {
+		fullContent = centerInWidth(
+			m.renderVerifyBanner(), totalW) +
+			"\n" + fullContent
+	}
 
 	return lipgloss.Place(
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		fullContent,
 	)
+}
+
+// renderVerifyBanner is the first-run access-verification
+// banner line. Copy is deliberately imperative and small: it
+// nags, it never blocks.
+func (m Model) renderVerifyBanner() string {
+	target := "ssh " + paths.AdminUser + "@<server-ip>"
+	if ip := system.PublicIPv4(); ip != "" {
+		target = "ssh " + paths.AdminUser + "@" + ip
+	}
+	return theme.Warning.Render("⚠ Key verification pending") +
+		theme.Dim.Render(
+			" — connect from a second terminal: "+target)
 }
 
 func (m Model) hasDetailTabs() bool {

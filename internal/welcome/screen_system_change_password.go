@@ -1,6 +1,7 @@
 package welcome
 
 import (
+	"fmt"
 	"os/user"
 	"strconv"
 	"strings"
@@ -9,8 +10,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/installer"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── ChangePasswordScreen ───────────────────────────────
@@ -21,7 +22,7 @@ import (
 // Targets the current real user (os/user.Current()), not
 // a hardcoded username — this matches the "change MY
 // password" expectation and avoids assuming the codebase
-// always runs as ripsline. Refuses to operate if running
+// always runs as the admin user (vpn). Refuses to operate if running
 // as root (uid 0) so we never accidentally rewrite root's
 // password from a misconfigured launch.
 
@@ -393,8 +394,19 @@ func (s *ChangePasswordScreen) viewInput(w, h int) string {
 	confFocused := isFocused &&
 		s.focusZone == changePwZoneInputConfirm
 
+	// Live character count on both masked inputs (ruling xii:
+	// IA-3-U accepted — paste-overrun recovery outweighs the
+	// length leak; same treatment as auto_unlock's inputs).
 	p.input("New Password:", s.newInput.View(), newFocused)
+	if len(s.newInput.Value()) > 0 {
+		p.dim(fmt.Sprintf("(%d chars)",
+			len(s.newInput.Value())))
+	}
 	p.input("Confirm:     ", s.confInput.View(), confFocused)
+	if len(s.confInput.Value()) > 0 {
+		p.dim(fmt.Sprintf("(%d chars)",
+			len(s.confInput.Value())))
+	}
 
 	p.appendError(s.inputErr)
 

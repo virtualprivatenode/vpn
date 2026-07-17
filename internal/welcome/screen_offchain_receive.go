@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── Receive screen steps ────────────────────────────────

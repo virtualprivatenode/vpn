@@ -5,9 +5,30 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
+
+// ── First-run verification banner (ruling xvi) ───────────
+//
+// While cfg.KeyVerificationPending is set, the layout shows a
+// banner asking the operator to verify SSH access from a SECOND
+// terminal. It clears only on journal evidence of a real sshd
+// login for the admin user — the in-session handoff console is
+// deliberately not evidence. The check rides the status tick and
+// costs one privileged journal read per poll while pending.
+
+type adminLoginVerifiedMsg struct{}
+
+func checkAdminLoginCmd() tea.Cmd {
+	return func() tea.Msg {
+		if installer.AdminLoginObserved() {
+			return adminLoginVerifiedMsg{}
+		}
+		return nil
+	}
+}
 
 // ── Focus helpers ────────────────────────────────────────
 
@@ -490,14 +511,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Tab not found (shouldn't happen, but be
 		// defensive). Just refresh status.
 		return m, fetchStatus(m.cfg, m.lndClient)
+	case adminLoginVerifiedMsg:
+		if m.cfg.KeyVerificationPending {
+			m.cfg.KeyVerificationPending = false
+			m.saveCfg()
+		}
+		return m, nil
 	case tickMsg:
 		if m.fetchInFlight {
 			return m, tickEveryCmd(m.pollInterval())
 		}
 		m.fetchInFlight = true
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			fetchStatus(m.cfg, m.lndClient),
-			tickEveryCmd(m.pollInterval()))
+			tickEveryCmd(m.pollInterval()),
+		}
+		if m.cfg.KeyVerificationPending {
+			cmds = append(cmds, checkAdminLoginCmd())
+		}
+		return m, tea.Batch(cmds...)
 	}
 	return m, nil
 }

@@ -4,11 +4,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ripsline/virtual-private-node/internal/bitcoin"
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/bitcoin"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 
 	tea "charm.land/bubbletea/v2"
 )

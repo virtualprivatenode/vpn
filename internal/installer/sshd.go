@@ -8,13 +8,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // BuildSSHHardeningConfig generates the complete contents
-// of /etc/ssh/sshd_config.d/00-rlvpn-hardening.conf from
+// of /etc/ssh/sshd_config.d/00-vpn-hardening.conf from
 // AppConfig. Pure function — no side effects. (The 00-
 // prefix is load-bearing: sshd applies the first match
 // per directive, so this drop-in must sort before a
@@ -22,27 +22,39 @@ import (
 // directives. paths.SSHDDropIn is the single source of
 // truth for the name.)
 //
-// Bootstrap writes the same static lines minus the
-// PasswordAuthentication directive (it's intentionally
-// silent so the user isn't locked out before logging in
-// via TUI). Once the TUI's SSH Password Auth screen runs,
-// this function takes over and the drop-in becomes the
-// authoritative source for password auth state.
+// The installer writes the initial drop-in with the
+// PasswordAuthentication value EXPLICIT-from-observed
+// (ruling xvi(a); see sshstep.go) — "no flip at install"
+// holds by identity, not omission. Once the TUI's SSH
+// Password Auth screen runs, this function takes over and
+// the drop-in stays the authoritative source for password
+// auth state.
 func BuildSSHHardeningConfig(cfg *config.AppConfig) string {
 	passwordAuth := "yes"
 	if cfg.SSHPasswordAuthDisabled {
 		passwordAuth = "no"
 	}
+	return buildHardeningDropIn(passwordAuth)
+}
 
-	return fmt.Sprintf(`# Virtual Private Node — SSH hardening
-# Managed by the rlvpn TUI. Do not edit by hand.
+// buildHardeningDropIn renders the drop-in body.
+// passwordAuth is "yes", "no", or "" — empty OMITS the
+// directive entirely (the install step's degraded mode when
+// the sshd observation failed: asserting nothing beats
+// asserting a guess, ruling xvi(a)). Pure — unit-tested.
+func buildHardeningDropIn(passwordAuth string) string {
+	base := `# Virtual Private Node — SSH hardening
+# Managed by the vpn TUI. Do not edit by hand.
 PermitRootLogin no
 PubkeyAuthentication yes
 ChallengeResponseAuthentication no
 KbdInteractiveAuthentication no
 X11Forwarding no
-PasswordAuthentication %s
-`, passwordAuth)
+`
+	if passwordAuth == "" {
+		return base
+	}
+	return base + "PasswordAuthentication " + passwordAuth + "\n"
 }
 
 // RebuildSSHHardeningConfig writes the drop-in to disk and

@@ -2,6 +2,7 @@ package installer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,14 +10,10 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 const (
@@ -31,215 +28,140 @@ var appVersion = "dev"
 func SetVersion(v string)   { appVersion = v }
 func LndVersionStr() string { return lndVersion }
 
-func NeedsInstall() bool {
-	cfg, err := config.Load()
-	if err != nil {
-		if system.IsServiceActive("bitcoind") {
-			return false
-		}
-		return true
-	}
-	return !cfg.InstallComplete
-}
-
-// ── Initial-install TUI front-end ────────────────────────
-// The step model (InstallStep, StepStatus, StepKind, Group,
-// Phase), the resume planner, and the step runner live in
-// engine.go; the ledger lives in ledger.go. This file owns
-// the interactive front-end and the step lists. The front-end
-// renders what the runner reports — it makes no skip or
-// record decisions of its own, so the TUI and the unattended
+// ── Main install flow ────────────────────────────────────
+//
+// `vpn install` — explicit dispatch only (IA-1-8's fix): this
+// runs because the operator asked, never because the binary
+// sniffed box state and decided for itself. The old
+// NeedsInstall() config/service-probe is deleted with the old
+// implicit flow.
+//
+// The step model, resume planner, and step runner live in
+// engine.go; the ledger in ledger.go; the interactive front-end
+// (wizard screens + step renderer) in wizard.go. Front-ends are
+// thin: they render what the runner reports and make no skip or
+// record decisions of their own, so the TUI and the unattended
 // runner cannot diverge.
 
-type stepDoneMsg struct {
-	index   int
-	skipped bool
-	err     error
+// InstallOptions carries the `vpn install` command line.
+type InstallOptions struct {
+	// Network from --testnet4 ("" = mainnet, or keep a
+	// pre-existing config's answer).
+	Network string
+	// Unattended runs with no TUI and no prompts (ruling iv/vii:
+	// keys auto-copied from enumeration, password randomly
+	// generated and printed once — the image path's fallback).
+	Unattended bool
+	// UntilBake runs only PhaseBake steps (image build
+	// pipeline, ruling iv). Requires Unattended. The run ends
+	// WITHOUT InstallComplete, without handoff, without the
+	// verification banner — first-boot steps are still owed.
+	UntilBake bool
 }
 
-type installModel struct {
-	steps         []InstallStep
-	runner        *stepRunner
-	current       int
-	done, failed  bool
-	version       string
-	width, height int
-}
+// RunInstall is the `sudo vpn install` entry point.
+func RunInstall(opts InstallOptions) error {
+	if os.Geteuid() != 0 {
+		return errors.New(
+			"the installer must run as root — run: sudo vpn install")
+	}
+	if opts.UntilBake && !opts.Unattended {
+		return errors.New(
+			"--until=bake requires --unattended (image build path)")
+	}
 
-func (m installModel) Init() tea.Cmd { return m.runStep(0) }
+	// Non-interactive package operations for the whole run
+	// (absorbed from the retired bootstrap): debconf prompts
+	// suppressed, needrestart auto-restarts services instead of
+	// showing its dialog mid-upgrade.
+	os.Setenv("DEBIAN_FRONTEND", "noninteractive")
+	os.Setenv("NEEDRESTART_MODE", "a")
 
-func (m installModel) runStep(i int) tea.Cmd {
-	return func() tea.Msg {
-		if i >= len(m.steps) {
-			return stepDoneMsg{index: i}
-		}
-		skipped, err := m.runner.runIndex(i)
-		return stepDoneMsg{index: i, skipped: skipped, err: err}
-	}
-}
-
-func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-	case tea.KeyPressMsg:
-		if msg.String() == "enter" && m.done {
-			return m, tea.Quit
-		}
-		if msg.String() == "ctrl+c" {
-			// Quitting is allowed at any instant — an
-			// interrupt is SAFE now (the ledger records a
-			// step only after it verified complete, so any
-			// death leaves a truthful record) — and it is
-			// HONEST: a quit before all steps ran leaves
-			// m.done false, which classifies the run as
-			// interrupted, never complete (IA-1-9).
-			return m, tea.Quit
-		}
-	case stepDoneMsg:
-		if msg.index < len(m.steps) {
-			if msg.err != nil {
-				m.steps[msg.index].Status = StepFailed
-				m.steps[msg.index].Err = msg.err
-				m.failed = true
-				m.done = true
-				return m, nil
-			}
-			if msg.skipped {
-				m.steps[msg.index].Status = StepSkipped
-			} else {
-				m.steps[msg.index].Status = StepDone
-			}
-			next := msg.index + 1
-			if next < len(m.steps) {
-				m.current = next
-				m.steps[next].Status = StepRunning
-				return m, m.runStep(next)
-			}
-			m.done = true
-		}
-	}
-	return m, nil
-}
-
-func (m installModel) View() tea.View {
-	if m.width == 0 {
-		v := tea.NewView("Loading...")
-		v.AltScreen = true
-		return v
-	}
-	bw := min(m.width-4, theme.ContentWidth)
-	var lines []string
-	for i, s := range m.steps {
-		var sty lipgloss.Style
-		var ind string
-		switch s.Status {
-		case StepDone:
-			sty, ind = theme.ProgDone, "[done]"
-		case StepRunning:
-			sty, ind = theme.ProgRunning, "[....]"
-		case StepFailed:
-			sty, ind = theme.ProgFail, "[FAIL]"
-		case StepSkipped:
-			// Resume skip: completed by an earlier run
-			// (per the install ledger).
-			sty, ind = theme.Dim, "[skip]"
-		default:
-			sty, ind = theme.ProgPending, "[wait]"
-		}
-		lines = append(lines, sty.Render(fmt.Sprintf("  %s [%d/%d] %s",
-			ind, i+1, len(m.steps), s.Name)))
-		if s.Status == StepFailed && s.Err != nil {
-			lines = append(lines, theme.ProgFail.Render(
-				fmt.Sprintf("      Error: %v", s.Err)))
-		}
-	}
-	box := theme.ProgBox.Width(bw).Render(strings.Join(lines, "\n"))
-	var footer string
-	if m.done && !m.failed {
-		footer = theme.Success.Render(
-			"  Complete -- press Enter to continue  ")
-	} else if m.failed {
-		footer = theme.ProgFail.Render(
-			"  Failed. Press ctrl+c to exit.  ")
-	} else {
-		footer = theme.Dim.Render("  Installing... please wait  ")
-	}
-	full := lipgloss.JoinVertical(lipgloss.Center,
-		"", box, "", footer)
-	content := lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center, full)
-	v := tea.NewView(content)
-	v.AltScreen = true
-	return v
-}
-
-// RunInstallTUI runs the initial-install steps under the
-// interactive front-end and reports HOW the run ended —
-// complete, failed, or interrupted — via RunResult. It no
-// longer collapses "the TUI returned" into "the install
-// succeeded": that inference was IA-1-9 (a swallowed ctrl+c
-// returned cleanly and was recorded as a complete install).
-// The caller decides what each outcome means; only
-// RunComplete may reach the InstallComplete write.
-func RunInstallTUI(
-	steps []InstallStep, version string,
-) (RunResult, error) {
-	if len(steps) == 0 {
-		return RunResult{Outcome: RunComplete}, nil
-	}
-	runner, err := newStepRunner(
-		steps, version, paths.InstallStateFile)
-	if err != nil {
-		return RunResult{}, err
-	}
-	steps[0].Status = StepRunning
-	m := installModel{
-		steps: steps, runner: runner, version: version,
-	}
-	p := tea.NewProgram(m)
-	result, err := p.Run()
-	if err != nil {
-		return RunResult{}, err
-	}
-	final := result.(installModel)
-	// done=false here means the render loop was quit before
-	// the last step reported — an interrupt, by any cause.
-	return classifyRun(final.steps,
-		final.done && !final.failed,
-		final.failed, final.current), nil
-}
-
-// ── Main install flow ────────────────────────────────────
-
-func Run() error {
 	// Preflight (principle 3): assert the environment before the
 	// first mutation; refuses with a full report on any failure.
-	// Absorbs the old checkOS(). See preflight.go.
-	if err := RunPreflight(); err != nil {
+	// Returns the sshd observation (ruling xvi(b)) consumed by
+	// the firewall rules, the wizard copy, and the config seed.
+	obs, err := RunPreflight()
+	if err != nil {
 		return err
 	}
 
+	// A pre-existing loadable config is the operator's prior
+	// answers (migration requirement 1, ruling xv): a migrated
+	// box pre-creates /etc/vpn/config.json by copy. Values it
+	// carries are never clobbered; only ABSENT fields are
+	// seeded. install_complete:true with an empty ledger is NOT
+	// refused — explicit dispatch means the operator asked.
 	cfg := config.Default()
-	if preCfg, err := config.Load(); err == nil {
-		cfg = preCfg
+	preExisting := false
+	if pre, loadErr := config.Load(); loadErr == nil {
+		cfg = pre
+		preExisting = true
+	} else if !os.IsNotExist(loadErr) {
+		// An unloadable (present but corrupt) config is a
+		// fail-stop, same direction as the TUI path (IA-1-C1):
+		// silently installing over the operator's carried
+		// answers would destroy them.
+		return fmt.Errorf(
+			"cannot read %s: %v — fix or remove the file, "+
+				"then re-run", config.DefaultPath, loadErr)
 	}
 
+	if opts.Network != "" {
+		if preExisting && cfg.Network != opts.Network {
+			return fmt.Errorf(
+				"--%s conflicts with network %q already set in %s "+
+					"— drop the flag to keep the existing answer",
+				opts.Network, cfg.Network, config.DefaultPath)
+		}
+		cfg.Network = opts.Network
+	}
+
+	// Seed from observation ONLY where the config never
+	// answered (on a migrated box the two agree anyway: the
+	// observation runs while the old drop-in still stands).
+	if !config.RawFieldPresent("ssh_password_auth_disabled") {
+		cfg.SSHPasswordAuthDisabled = !obs.PasswordAuth
+	}
+	// Observed ports are a recorded observation, not an
+	// operator answer — a fresh observation always wins.
+	cfg.SSHPorts = obs.Ports
+
 	// LND is installed during initial setup (Tor-only default).
-	// These fields are set IN MEMORY before buildSteps because
-	// the steps read them (Tor config and firewall rules include
-	// LND hidden services and ports) — but they are PERSISTED
-	// only on a complete run, below. A failed or interrupted run
-	// must not record intent as fact (IA-1-9: Gate 0 observed
-	// lnd_installed:true on disk for software never downloaded).
+	// These fields are set IN MEMORY before the steps are built
+	// because steps read them (Tor config and firewall rules
+	// include LND hidden services and ports) — but they are
+	// PERSISTED only on a complete run, below. A failed or
+	// interrupted run must not record intent as fact (IA-1-9).
 	cfg.P2PMode = "tor"
 	cfg.LNDInstalled = true
 	cfg.Components = "bitcoin+lnd"
 
-	steps := buildSteps(cfg)
+	// The ledger lives in the config dir; the dir must exist
+	// before the first step completes. Root-owned during the
+	// install; ownership of the dir and config.json passes to
+	// the admin user at completion (migration requirement 2).
+	if err := os.MkdirAll(paths.ConfigDir, 0750); err != nil {
+		return fmt.Errorf("create %s: %w", paths.ConfigDir, err)
+	}
 
-	res, err := RunInstallTUI(steps, appVersion)
+	dec := &InstallDecisions{Obs: obs}
+	steps := buildInstallSteps(cfg, dec)
+	if opts.UntilBake {
+		steps = FilterPhase(steps, PhaseBake)
+	}
+
+	var res RunResult
+	if opts.Unattended {
+		if err := fillUnattendedDecisions(dec); err != nil {
+			return err
+		}
+		fmt.Printf("\n  Virtual Private Node — unattended install\n\n")
+		res, err = RunInstallUnattended(
+			steps, appVersion, paths.InstallStateFile)
+	} else {
+		res, err = runInstallWizard(cfg, steps, dec, appVersion)
+	}
 	if err != nil {
 		return err
 	}
@@ -249,9 +171,8 @@ func Run() error {
 		// error surfaces to stderr via main.
 		return fmt.Errorf("%s: %w", res.StepName, res.Err)
 	case RunInterrupted:
-		// The log trail must not just stop (commit-5
-		// addendum): record how far the run got, and that a
-		// re-run resumes.
+		// The log trail must not just stop (commit-5 addendum):
+		// record how far the run got, and that a re-run resumes.
 		logger.Install(
 			"install INTERRUPTED at step %d/%d: %s — "+
 				"run again to resume", res.StepNum, res.Total,
@@ -262,6 +183,17 @@ func Run() error {
 			res.StepName)
 	}
 
+	if opts.UntilBake {
+		// The bake slice completing is not the install
+		// completing: first-boot steps (identity, hardware fit,
+		// SSH hardening) are still owed on the deployed box.
+		logger.Install(
+			"bake phase complete (%d steps) — install NOT marked "+
+				"complete; first-boot steps pending", res.Total)
+		fmt.Printf("\n  Bake phase complete (%d steps).\n", res.Total)
+		return nil
+	}
+
 	// Every step verified complete this run — only now may the
 	// durable record say so. InstallComplete is DERIVED from
 	// per-step results, never from a front-end returning
@@ -270,27 +202,194 @@ func Run() error {
 	logger.Install("all %d install steps complete", res.Total)
 	cfg.InstallComplete = true
 	cfg.InstallVersion = appVersion
-	return config.Save(cfg)
+	if dec.DbCacheMB > 0 {
+		cfg.DbCache = dec.DbCacheMB
+	}
+	// First-run verification: the in-session handoff console is
+	// NOT evidence SSH access works; the TUI banner asks for a
+	// second-terminal login and clears on journal evidence
+	// (ruling xvi).
+	cfg.KeyVerificationPending = true
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+	finalizeOwnership()
+
+	if dec.GeneratedPassword != "" && dec.PasswordApplied {
+		// Unattended fallback only (ruling vii), and only when
+		// the identity step actually applied it this pass (a
+		// ledger-skip means an older password stands). Printed
+		// once, never logged.
+		fmt.Printf("\n  Login password for %q (SAVE IT — it will "+
+			"not be shown again):\n\n    %s\n",
+			paths.AdminUser, dec.GeneratedPassword)
+	}
+
+	if opts.Unattended {
+		printConnectInstructions()
+		return nil
+	}
+	// In-session identity drop: the wizard flows into the node
+	// console as the admin user on this same terminal (ruling
+	// xvi). Degrades to printed instructions, never to an error
+	// — the install is already complete.
+	HandoffToAdminConsole()
+	return nil
 }
 
-// buildSteps returns the initial-install step list. Every step
-// carries a stable Key (the ledger identity — versionless, so
-// "which work is done" survives version bumps in display
-// names), a Kind (gates re-run every pass), and a Group where
-// steps hand ephemeral material to each other (see engine.go).
-// Phase is provisionally Bake throughout — the phase map is
-// ratified by the image-track session (ruling xiv / iv).
-func buildSteps(cfg *config.AppConfig) []InstallStep {
+// finalizeOwnership hands the admin user the files it owns in
+// the post-install world: the config dir + config.json
+// (migration requirement 2 — a migrated box pre-created them
+// root-owned via cp) and the log file (the TUI appends to it).
+// The install ledger deliberately stays root-owned (ruling xiv).
+// Failures are logged, not fatal: the install is complete; a
+// wrong owner surfaces as a TUI config error the operator can
+// fix, and the log names the fix.
+func finalizeOwnership() {
+	owner := paths.AdminUser + ":" + paths.AdminUser
+	for _, p := range []string{
+		paths.ConfigDir, paths.ConfigFile, paths.LogFile,
+	} {
+		if err := system.SudoRun("chown", owner, p); err != nil {
+			logger.Install(
+				"WARNING: chown %s to %s failed (%v) — fix with: "+
+					"chown %s %s", p, owner, err, owner, p)
+		}
+	}
+}
+
+// fillUnattendedDecisions supplies the wizard answers for
+// --unattended: every enumerated (non-decoy) key is copied — the
+// spiritual successor of the script's cascade, from enumeration
+// instead of guessing — and the password is randomly generated
+// (ruling vii: random survives ONLY here) and printed at the
+// end. dbcache takes the hardware recommendation.
+func fillUnattendedDecisions(dec *InstallDecisions) error {
+	dec.Keys = DedupeKeys(EnumerateKeySources())
+	gen, err := generateAdminPassword()
+	if err != nil {
+		return err
+	}
+	pw, err := NewLoginPassword(gen)
+	if err != nil {
+		return err
+	}
+	dec.Password = pw
+	dec.GeneratedPassword = gen
+	dec.DbCacheMB = RecommendDbCache(DetectHardware().RAMMB)
+	return nil
+}
+
+// ── Absorbed bootstrap steps (script Phase 1) ────────────
+
+// installBasePackages is the SINGLE clearnet apt operation
+// (IA-2-L disclosure: op count unchanged from the script; ufw
+// joined its package list per ruling xvi(b) so the firewall can
+// come up immediately after). On a migrated box the old
+// install's apt Tor proxy is still configured, so even this op
+// routes through Tor there.
+func installBasePackages() error {
+	if err := system.SudoRun("apt-get", "update", "-qq"); err != nil {
+		return err
+	}
+	return system.SudoRun("apt-get", "install", "-y", "-qq",
+		"sudo", "gnupg", "tor", "torsocks", "wget", "ufw")
+}
+
+// upgradeBasePackages brings the base image current (fresh VPS
+// images are often weeks old with unpatched CVEs). Runs AFTER
+// the firewall step per ruling xvi(b): default-deny now covers
+// the longest pre-Tor phase instead of following it. confdef +
+// confold keep existing config files on conflict — the safe
+// default on a fresh image.
+func upgradeBasePackages() error {
+	return system.SudoRun("apt-get", "upgrade", "-y", "-qq",
+		"-o", "Dpkg::Options::=--force-confdef",
+		"-o", "Dpkg::Options::=--force-confold")
+}
+
+// prepareHost absorbs the script's host fixes: hostname
+// resolution (prevents sudo delays) and NTP clock sync (Bitcoin
+// Core and LND depend on accurate time for block timestamps,
+// HTLC timeouts, and macaroon expiry; systemd-timesyncd uses the
+// Debian pool, UTC).
+func prepareHost() error {
+	if name, err := os.Hostname(); err == nil && name != "" {
+		if err := system.RunSilent(
+			"getent", "hosts", name); err != nil {
+			hosts, readErr := os.ReadFile("/etc/hosts")
+			if readErr == nil {
+				content := string(hosts)
+				if !strings.HasSuffix(content, "\n") {
+					content += "\n"
+				}
+				content += "127.0.0.1 " + name + "\n"
+				if err := system.SudoWriteFile("/etc/hosts",
+					[]byte(content), 0644); err != nil {
+					return fmt.Errorf(
+						"fix hostname resolution: %w", err)
+				}
+				logger.Install("hostname resolution fixed (%s)", name)
+			}
+		}
+	}
+	// Best-effort, like the script's `|| true`: a box without
+	// timedatectl still installs; the clock-sync gap is logged.
+	if err := system.SudoRunSilent(
+		"timedatectl", "set-ntp", "true"); err != nil {
+		logger.Install(
+			"WARNING: could not enable NTP sync (%v)", err)
+	}
+	return nil
+}
+
+// buildInstallSteps returns the initial-install step list. Every
+// step carries a stable Key (the ledger identity — versionless),
+// a Kind (gates re-run every pass), a Group where steps hand
+// ephemeral material to each other (see engine.go), and a Phase
+// (bake vs first-boot, ruling iv — assignments provisional until
+// the image-track session ratifies the map; identity/SSH steps
+// are first-boot per rulings vii/viii: they apply observed,
+// per-box state that an image build box cannot know).
+//
+// Order (ruling xvi(b)): the firewall step sits immediately
+// after the single clearnet apt op — default-deny lands before
+// the base upgrade, the longest pre-Tor phase. Outbound stays
+// default-allow so Tor can bootstrap behind it; established SSH
+// sessions are unaffected by `ufw enable`.
+func buildInstallSteps(
+	cfg *config.AppConfig, dec *InstallDecisions,
+) []InstallStep {
 	// Pipeline working directories — created in each pipeline's
 	// first step, captured by closures, cleaned up in the final
-	// step. Random paths via os.MkdirTemp prevent symlink attacks.
-	// NOTE these closures are exactly why the btc/lnd triplets
-	// are resume-atomic Groups: the workdir path lives only in
-	// this process, so a resumed process can never re-enter a
-	// pipeline midway.
+	// step. Random paths via os.MkdirTemp prevent symlink
+	// attacks. NOTE these closures are exactly why the btc/lnd
+	// triplets are resume-atomic Groups: the workdir path lives
+	// only in this process, so a resumed process can never
+	// re-enter a pipeline midway.
 	var btcWork, lndWork string
 
 	return []InstallStep{
+		{Key: "binary.install",
+			Name: "Installing the vpn binary",
+			Fn:   installSelfBinary},
+		{Key: "apt.base",
+			Name: "Installing base packages",
+			Fn:   installBasePackages},
+		{Key: "firewall", Name: "Configuring firewall",
+			Fn: func() error { return configureFirewall(cfg) }},
+		{Key: "base.upgrade",
+			Name: "Upgrading base packages",
+			Fn:   upgradeBasePackages},
+		{Key: "host.prep",
+			Name: "Configuring hostname and clock sync",
+			Fn:   prepareHost},
+		{Key: "identity.access", Phase: PhaseFirstBoot,
+			Name: "Creating the admin user (" +
+				paths.AdminUser + ")",
+			Fn: func() error {
+				return applyIdentityAccess(dec)
+			}},
 		{Key: "user.create",
 			Name: "Creating system user and directories",
 			Fn: func() error {
@@ -301,11 +400,8 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 			}},
 		{Key: "ipv6.disable", Name: "Disabling IPv6",
 			Fn: disableIPv6},
-		{Key: "tor.install", Name: "Installing Tor",
+		{Key: "tor.configure", Name: "Configuring Tor",
 			Fn: func() error {
-				if err := installTor(); err != nil {
-					return err
-				}
 				if err := RebuildTorConfig(cfg); err != nil {
 					return err
 				}
@@ -319,7 +415,10 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 		// runs unless Tor routing is verified. See torgate.go.
 		// StepGate: re-verified on EVERY pass including resumes —
 		// no download step can execute in a pass whose Tor routing
-		// was not verified in that same pass.
+		// was not verified in that same pass. The torsocks-present
+		// assertion re-homed here from preflight (ruling xvi(c))
+		// also lives inside this step: post-Tor-install,
+		// pre-first-download.
 		{Key: "tor.gate", Name: "Verifying Tor routing",
 			Kind: StepGate, Fn: verifyTorRouting},
 		{Key: "apt.torproxy", Name: "Configuring apt for Tor",
@@ -329,13 +428,11 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				}
 				return ensureGPG()
 			}},
-		{Key: "firewall", Name: "Configuring firewall",
-			Fn: func() error { return configureFirewall(cfg) }},
 		{Key: "btc.download", Group: "btc",
 			Name: "Downloading Bitcoin Core " + bitcoinVersion,
 			Fn: func() error {
 				var err error
-				btcWork, err = os.MkdirTemp("", "rlvpn-btc-")
+				btcWork, err = os.MkdirTemp("", "vpn-btc-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
@@ -384,7 +481,7 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 			Name: "Downloading LND",
 			Fn: func() error {
 				var err error
-				lndWork, err = os.MkdirTemp("", "rlvpn-lnd-")
+				lndWork, err = os.MkdirTemp("", "vpn-lnd-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
@@ -423,6 +520,16 @@ func buildSteps(cfg *config.AppConfig) []InstallStep {
 				return restartTor()
 			}},
 		{Key: "lnd.start", Name: "Starting LND", Fn: startLND},
+		// The initial drop-in write + stale-drop-in deletion,
+		// with the ruling-xv binding order inside (observe →
+		// write new → delete old → validate → restart). Late in
+		// the list, matching the script's placement: everything
+		// the box needs to be reachable already ran.
+		{Key: "ssh.harden", Phase: PhaseFirstBoot,
+			Name: "Hardening SSH",
+			Fn: func() error {
+				return installSSHHardening(cfg)
+			}},
 		// Formerly a post-TUI special case that warned but
 		// completed anyway (IA-1-16). As a real step it
 		// inherits the ledger, the completion gate, failure
@@ -493,7 +600,7 @@ func SyncthingInstallSteps(
 		{Name: "Downloading Syncthing " + syncthingVersion,
 			Fn: func() error {
 				var err error
-				syncWork, err = os.MkdirTemp("", "rlvpn-sync-")
+				syncWork, err = os.MkdirTemp("", "vpn-sync-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
@@ -551,14 +658,14 @@ type githubRelease struct {
 }
 
 // SelfUpdateSteps returns the install steps for updating
-// the rlvpn binary to newVersion. Steps are idempotent —
+// the vpn binary to newVersion. Steps are idempotent —
 // no rollback needed on failure. No config save on
 // success (binary replaced, takes effect on next SSH login).
 func SelfUpdateSteps(newVersion string) []InstallStep {
 	baseURL := fmt.Sprintf(
-		"https://github.com/ripsline/virtual-private-node/releases/download/v%s",
+		"https://github.com/virtualprivatenode/vpn/releases/download/v%s",
 		newVersion)
-	tarball := fmt.Sprintf("rlvpn-%s-amd64.tar.gz",
+	tarball := fmt.Sprintf("vpn-%s-amd64.tar.gz",
 		newVersion)
 
 	var workDir string
@@ -568,7 +675,7 @@ func SelfUpdateSteps(newVersion string) []InstallStep {
 			Fn: func() error {
 				var err error
 				workDir, err = os.MkdirTemp("",
-					"rlvpn-update-")
+					"vpn-update-")
 				if err != nil {
 					return fmt.Errorf(
 						"create work dir: %w", err)
@@ -616,8 +723,8 @@ func SelfUpdateSteps(newVersion string) []InstallStep {
 				}
 				if err := system.SudoRun("install",
 					"-m", "755",
-					filepath.Join(workDir, "rlvpn"),
-					"/usr/local/bin/rlvpn"); err != nil {
+					filepath.Join(workDir, "vpn"),
+					"/usr/local/bin/vpn"); err != nil {
 					return err
 				}
 				os.RemoveAll(workDir)
@@ -638,7 +745,7 @@ func CheckLatestVersion() string {
 	}
 	output, err := system.RunContext(10*time.Second,
 		"torsocks", "curl", "-sL",
-		"https://api.github.com/repos/ripsline/virtual-private-node/releases/latest")
+		"https://api.github.com/repos/virtualprivatenode/vpn/releases/latest")
 	if err != nil {
 		return ""
 	}

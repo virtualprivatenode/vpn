@@ -5,8 +5,9 @@ package installer
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // MinLoginPasswordLen is the minimum length for the admin
@@ -61,9 +62,10 @@ func (LoginPassword) String() string { return "[redacted]" }
 func (LoginPassword) GoString() string { return "[redacted]" }
 
 // SetUserPassword changes the given user's login password
-// via `sudo chpasswd`. The password is piped to chpasswd's
-// stdin so it never appears in argv (which would leak via
-// /proc/*/cmdline or `ps`).
+// via chpasswd (root-privileged through the system seam).
+// The password is piped to chpasswd's stdin so it never
+// appears in argv (which would leak via /proc/*/cmdline or
+// `ps`).
 //
 // The password arrives as a LoginPassword, so validation
 // has already happened at construction; the zero-value
@@ -84,16 +86,13 @@ func SetUserPassword(
 				"(zero LoginPassword)")
 	}
 
-	cmd := exec.Command("sudo", "chpasswd")
-	cmd.Stdin = strings.NewReader(
-		username + ":" + password.v + "\n")
-	out, err := cmd.CombinedOutput()
+	out, err := system.SudoRunStdin(
+		username+":"+password.v+"\n", "chpasswd")
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
+		if out == "" {
 			return fmt.Errorf("chpasswd: %w", err)
 		}
-		return fmt.Errorf("chpasswd: %s", msg)
+		return fmt.Errorf("chpasswd: %s", out)
 	}
 	return nil
 }

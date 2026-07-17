@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/config"
 )
 
 // realistic excerpt of sshd -T output: lowercase keywords,
@@ -148,5 +148,59 @@ func TestBuildSSHHardeningConfig(t *testing.T) {
 
 	if !strings.HasSuffix(disabled, "\n") {
 		t.Fatal("config must end with a newline")
+	}
+}
+
+// ── buildHardeningDropIn (the shared builder) ────────────
+
+func TestBuildHardeningDropInExplicit(t *testing.T) {
+	yes := buildHardeningDropIn("yes")
+	if !strings.Contains(yes, "PasswordAuthentication yes\n") {
+		t.Errorf("explicit yes missing:\n%s", yes)
+	}
+	no := buildHardeningDropIn("no")
+	if !strings.Contains(no, "PasswordAuthentication no\n") {
+		t.Errorf("explicit no missing:\n%s", no)
+	}
+}
+
+// The degraded mode (ruling xvi(a)): observation failed →
+// directive OMITTED, the script's documented semantics. The
+// static hardening still applies.
+func TestBuildHardeningDropInOmission(t *testing.T) {
+	out := buildHardeningDropIn("")
+	if strings.Contains(out, "PasswordAuthentication") {
+		t.Errorf("omission mode still emits the directive:\n%s",
+			out)
+	}
+	for _, line := range []string{
+		"PermitRootLogin no",
+		"PubkeyAuthentication yes",
+		"ChallengeResponseAuthentication no",
+		"KbdInteractiveAuthentication no",
+		"X11Forwarding no",
+	} {
+		if !strings.Contains(out, line) {
+			t.Errorf("static line %q missing in omission mode",
+				line)
+		}
+	}
+	if !strings.HasSuffix(out, "\n") {
+		t.Error("drop-in must end with a newline")
+	}
+}
+
+// The TUI-era builder and the install builder must render the
+// SAME body for the same auth state — a migrated box's later
+// TUI rebuild may not churn the file.
+func TestBuildersAgree(t *testing.T) {
+	cfg := config.Default()
+	cfg.SSHPasswordAuthDisabled = true
+	if BuildSSHHardeningConfig(cfg) != buildHardeningDropIn("no") {
+		t.Error("builders disagree for disabled state")
+	}
+	cfg.SSHPasswordAuthDisabled = false
+	if BuildSSHHardeningConfig(cfg) != buildHardeningDropIn("yes") {
+		t.Error("builders disagree for enabled state")
 	}
 }

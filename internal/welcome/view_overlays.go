@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	qrterminal "github.com/mdp/qrterminal/v3"
 
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── Fullscreen overlays ────────────────────────────────

@@ -8,9 +8,9 @@ import (
 	"os/user"
 	"strings"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // The OS check formerly here (checkOS, Debian 13-or-newer) is
@@ -65,6 +65,18 @@ net.ipv6.conf.lo.disable_ipv6 = 1
 	return system.SudoRunSilent("sysctl", "--system")
 }
 
+// configureFirewall applies the full cfg-derived rule set —
+// idempotent, called at install and again by every TUI flow that
+// changes the port surface (P2P upgrade, Syncthing). Outbound
+// stays default-allow so Tor bootstraps behind default-deny.
+//
+// SSH allow-rules come from cfg.SSHPortsOrDefault() — seeded at
+// install from the preflight sshd observation (ruling xvi(b)).
+// The previous hardcoded 22 was the one real lockout hazard on
+// nonstandard-port boxes: deny-all with only 22 open while sshd
+// listens elsewhere is a DELAYED silent lockout (this session
+// survives; the next connection is refused). A normal box
+// observes {22} and gets byte-identical behavior.
 func configureFirewall(cfg *config.AppConfig) error {
 	if err := system.SudoRun("apt-get", "install",
 		"-y", "-qq", "ufw"); err != nil {
@@ -82,7 +94,11 @@ func configureFirewall(cfg *config.AppConfig) error {
 	commands := [][]string{
 		{"ufw", "default", "deny", "incoming"},
 		{"ufw", "default", "allow", "outgoing"},
-		{"ufw", "allow", "22/tcp"},
+	}
+	for _, p := range cfg.SSHPortsOrDefault() {
+		commands = append(commands,
+			[]string{"ufw", "allow",
+				fmt.Sprintf("%d/tcp", p)})
 	}
 
 	if cfg.HasLND() && cfg.P2PMode == "hybrid" {

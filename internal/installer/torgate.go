@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // Tor runtime constants. These are Tor-owned values, not Go logic
