@@ -151,6 +151,40 @@ func RunInstall(opts InstallOptions) error {
 		steps = FilterPhase(steps, PhaseBake)
 	}
 
+	// completeInstall writes the durable completion record.
+	// Every step verified complete this pass — only then may
+	// the record say so: InstallComplete is DERIVED from
+	// per-step results, never from a front-end returning
+	// (IA-1-9); the intent fields set above reach disk only
+	// through here. On the interactive path this runs the
+	// moment the last step verifies, BEFORE the done screen
+	// waits for the operator (live-run finding: the old
+	// after-the-TUI order left completion unpersisted while
+	// the done screen sat unattended). Idempotent.
+	completeInstall := func() error {
+		logger.Install(
+			"all %d install steps complete", len(steps))
+		cfg.InstallComplete = true
+		cfg.InstallVersion = appVersion
+		if dec.DbCacheMB > 0 {
+			cfg.DbCache = dec.DbCacheMB
+		}
+		// First-run verification banner: armed ONLY when the
+		// identity step actually ran this pass (same gating
+		// shape as the generated-password print) — a resume
+		// or re-run on a finished box must not re-arm a
+		// banner whose evidence was already observed.
+		if dec.PasswordApplied {
+			cfg.KeyVerificationPending = true
+		}
+		if err := config.Save(cfg); err != nil {
+			return fmt.Errorf(
+				"write %s: %w", config.DefaultPath, err)
+		}
+		finalizeOwnership()
+		return nil
+	}
+
 	var res RunResult
 	if opts.Unattended {
 		if err := fillUnattendedDecisions(dec); err != nil {
@@ -160,7 +194,8 @@ func RunInstall(opts InstallOptions) error {
 		res, err = RunInstallUnattended(
 			steps, appVersion, paths.InstallStateFile)
 	} else {
-		res, err = runInstallWizard(cfg, steps, dec, appVersion)
+		res, err = runInstallWizard(
+			cfg, steps, dec, appVersion, completeInstall)
 	}
 	if err != nil {
 		return err
@@ -194,26 +229,13 @@ func RunInstall(opts InstallOptions) error {
 		return nil
 	}
 
-	// Every step verified complete this run — only now may the
-	// durable record say so. InstallComplete is DERIVED from
-	// per-step results, never from a front-end returning
-	// (IA-1-9); the intent fields set above reach disk only on
-	// this path.
-	logger.Install("all %d install steps complete", res.Total)
-	cfg.InstallComplete = true
-	cfg.InstallVersion = appVersion
-	if dec.DbCacheMB > 0 {
-		cfg.DbCache = dec.DbCacheMB
+	if opts.Unattended {
+		// The unattended runner has no wait-for-input gap; the
+		// record is written here, right after the last step.
+		if err := completeInstall(); err != nil {
+			return err
+		}
 	}
-	// First-run verification: the in-session handoff console is
-	// NOT evidence SSH access works; the TUI banner asks for a
-	// second-terminal login and clears on journal evidence
-	// (ruling xvi).
-	cfg.KeyVerificationPending = true
-	if err := config.Save(cfg); err != nil {
-		return err
-	}
-	finalizeOwnership()
 
 	if dec.GeneratedPassword != "" && dec.PasswordApplied {
 		// Unattended fallback only (ruling vii), and only when

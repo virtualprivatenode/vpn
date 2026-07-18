@@ -16,6 +16,18 @@ package installer
 // believed-from-ledger (a prior pass completed them — [skip]);
 // BRIGHT rows executed or verified THIS pass. Gates always
 // re-run, so gates are always bright.
+//
+// Navigation is buttons-over-keys (operator ruling at the
+// commit-6 live run): every screen that can go back has a Back
+// button; no esc bindings (esc is unmapped in the rest of the
+// TUI); each screen carries a dim hint line naming its keys.
+//
+// Completion is PERSISTED the moment the last step verifies —
+// before the done screen waits for Enter (live-run finding: the
+// old order left install_complete unwritten while the done
+// screen sat unattended; a dropped connection then meant a
+// complete install with no durable completion record until the
+// next re-run).
 
 import (
 	"fmt"
@@ -27,6 +39,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -54,6 +67,13 @@ type wizardModel struct {
 	runner  *stepRunner
 	version string
 
+	// onComplete persists the completion record; runs once,
+	// as soon as the last step verifies (before the done
+	// screen). Its error renders on the done screen and fails
+	// the run.
+	onComplete  func() error
+	completeErr string
+
 	phase         wizardPhase
 	width, height int
 
@@ -70,31 +90,37 @@ type wizardModel struct {
 
 	// Paste screen
 	pasteInput textinput.Model
+	pasteFocus int // 0 = input, 1 = buttons
+	pasteBtn   int // 0 = Back, 1 = Add key
 	pasteErr   string
 
 	// Password screen
 	pwInput   textinput.Model
 	pwConfirm textinput.Model
-	pwFocus   int // 0 = new, 1 = confirm, 2 = button
+	pwFocus   int // 0 = new, 1 = confirm, 2 = buttons
+	pwBtn     int // 0 = Back, 1 = Continue
 	pwErr     string
 
 	// Hardware screen
-	hw    Hardware
-	dbIdx int
+	hw      Hardware
+	dbIdx   int
+	hwFocus int // 0 = dbcache selector, 1 = buttons
+	hwBtn   int // index into hwButtons()
 
 	// Steps
 	current           int
 	stepsDone, failed bool
-	stepsStarted      bool
 }
 
 func newWizardModel(
 	cfg *config.AppConfig, steps []InstallStep,
 	runner *stepRunner, dec *InstallDecisions, version string,
+	onComplete func() error,
 ) wizardModel {
 	m := wizardModel{
 		cfg: cfg, dec: dec, steps: steps,
 		runner: runner, version: version,
+		onComplete: onComplete,
 	}
 
 	// Resume-aware screen skipping: a screen exists to collect
@@ -158,14 +184,20 @@ func newWizardPasswordInput() textinput.Model {
 	return ti
 }
 
+// pasteFirstLine normalizes pasted text for a single-line
+// input: first line only, trimmed. Pure — unit-tested.
+func pasteFirstLine(content string) string {
+	if idx := strings.IndexByte(content, '\n'); idx >= 0 {
+		content = content[:idx]
+	}
+	return strings.TrimSpace(content)
+}
+
 // ── tea.Model ────────────────────────────────────────────
 
 func (m wizardModel) Init() tea.Cmd {
 	if m.phase == wzSteps {
 		return m.startSteps()
-	}
-	if m.phase == wzAccess {
-		return nil
 	}
 	return nil
 }
@@ -201,6 +233,12 @@ func (m wizardModel) Update(
 	case wizardStepDoneMsg:
 		return m.updateSteps(msg)
 
+	case tea.PasteMsg:
+		// Terminal paste — routed to the focused input (the
+		// live-run finding: keypress-only routing silently
+		// dropped pasted keys and passwords).
+		return m.handlePaste(msg)
+
 	case tea.KeyPressMsg:
 		// Quitting is allowed at any instant — an interrupt is
 		// SAFE (the ledger records a step only after it
@@ -220,10 +258,29 @@ func (m wizardModel) Update(
 		case wzHardware:
 			return m.updateHardware(msg)
 		case wzDone:
-			if msg.String() == "enter" && !m.failed {
+			if msg.String() == "enter" && !m.failed &&
+				m.completeErr == "" {
 				return m, tea.Quit
 			}
 		}
+	}
+	return m, nil
+}
+
+func (m wizardModel) handlePaste(
+	msg tea.PasteMsg,
+) (tea.Model, tea.Cmd) {
+	line := pasteFirstLine(msg.Content)
+	switch {
+	case m.phase == wzPaste && m.pasteFocus == 0:
+		m.pasteInput.SetValue(line)
+		m.pasteErr = ""
+	case m.phase == wzPassword && m.pwFocus == 0:
+		m.pwInput.SetValue(line)
+		m.pwErr = ""
+	case m.phase == wzPassword && m.pwFocus == 1:
+		m.pwConfirm.SetValue(line)
+		m.pwErr = ""
 	}
 	return m, nil
 }
@@ -235,7 +292,7 @@ func (m wizardModel) updateAccess(
 ) (tea.Model, tea.Cmd) {
 	last := len(m.keys) // index of the button row
 	switch msg.String() {
-	case "up":
+	case "up", "shift+tab":
 		if m.cursor > 0 {
 			m.cursor--
 		}
@@ -265,6 +322,8 @@ func (m wizardModel) updateAccess(
 		if m.btnIdx == 1 {
 			m.pasteErr = ""
 			m.pasteInput.SetValue("")
+			m.pasteFocus = 0
+			m.pasteBtn = 1
 			m.pasteInput.Focus()
 			m.phase = wzPaste
 			return m, nil
@@ -281,19 +340,25 @@ func (m wizardModel) updateAccess(
 		}
 		if len(chosen) == 0 && !m.dec.Obs.PasswordAuth {
 			m.accErr = "Password login is disabled on this " +
-				"box — select or paste at least one key, or " +
+				"box. Select or paste at least one key, or " +
 				"the " + paths.AdminUser +
 				" user would have no way in over SSH."
 			return m, nil
 		}
 		m.dec.Keys = chosen
-		m.pwFocus = 0
-		m.pwInput.Focus()
-		m.pwConfirm.Blur()
-		m.phase = wzPassword
+		m.enterPasswordScreen()
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *wizardModel) enterPasswordScreen() {
+	m.pwFocus = 0
+	m.pwBtn = 1
+	m.pwErr = ""
+	m.pwInput.Focus()
+	m.pwConfirm.Blur()
+	m.phase = wzPassword
 }
 
 func (m wizardModel) viewAccess(p *wizPane) {
@@ -307,9 +372,8 @@ func (m wizardModel) viewAccess(p *wizPane) {
 	if len(m.keys) == 0 {
 		p.text("No SSH keys were found on this box.")
 	} else {
-		p.text("SSH keys found on this box (space toggles; " +
-			"confirmed keys are copied to " +
-			paths.AdminUser + "):")
+		p.text("SSH keys found on this box. Confirmed keys " +
+			"are copied to " + paths.AdminUser + ":")
 	}
 	p.blank()
 
@@ -330,16 +394,16 @@ func (m wizardModel) viewAccess(p *wizPane) {
 		p.line(" " + sty.Render(line))
 		detail := "      " + k.Type
 		if k.Comment != "" {
-			detail += " — " + k.Comment
+			detail += " (" + k.Comment + ")"
 		}
-		detail += "  (" + m.keySourceNames(k.Fingerprint) + ")"
+		detail += "  [" + m.keySourceNames(k.Fingerprint) + "]"
 		p.dim(detail)
 	}
 	for _, s := range m.sources {
 		if s.Excluded > 0 {
 			p.dim(fmt.Sprintf(
-				"   %d provider control line(s) in %s excluded"+
-					" — not copied", s.Excluded, s.Path))
+				"   %d provider control line(s) in %s excluded,"+
+					" not copied", s.Excluded, s.Path))
 		}
 	}
 	if m.accErr != "" {
@@ -349,6 +413,9 @@ func (m wizardModel) viewAccess(p *wizPane) {
 	p.blank()
 	p.buttons([]string{"Continue", "Paste a key"},
 		m.btnIdx, m.cursor == len(m.keys))
+	p.blank()
+	p.hint("up/down: move   space: toggle key   " +
+		"left/right: choose button   enter: select")
 }
 
 // keySourceNames lists which enumerated files carried this
@@ -375,10 +442,35 @@ func (m wizardModel) updatePaste(
 	msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "escape":
-		m.phase = wzAccess
+	case "up", "shift+tab":
+		if m.pasteFocus == 1 {
+			m.pasteFocus = 0
+			m.pasteInput.Focus()
+		}
 		return m, nil
+	case "down", "tab":
+		if m.pasteFocus == 0 {
+			m.pasteFocus = 1
+			m.pasteInput.Blur()
+		}
+		return m, nil
+	case "left":
+		if m.pasteFocus == 1 && m.pasteBtn > 0 {
+			m.pasteBtn--
+			return m, nil
+		}
+	case "right":
+		if m.pasteFocus == 1 && m.pasteBtn < 1 {
+			m.pasteBtn++
+			return m, nil
+		}
 	case "enter":
+		if m.pasteFocus == 1 && m.pasteBtn == 0 {
+			// Back — nothing kept.
+			m.phase = wzAccess
+			return m, nil
+		}
+		// Add key (from the button, or enter in the input).
 		line := strings.TrimSpace(m.pasteInput.Value())
 		info, err := ParseSSHKey(line)
 		if err != nil {
@@ -398,11 +490,13 @@ func (m wizardModel) updatePaste(
 		m.phase = wzAccess
 		m.cursor = len(m.keys) - 1
 		return m, nil
-	default:
+	}
+	if m.pasteFocus == 0 {
 		var cmd tea.Cmd
 		m.pasteInput, cmd = m.pasteInput.Update(tea.Msg(msg))
 		return m, cmd
 	}
+	return m, nil
 }
 
 func (m wizardModel) viewPaste(p *wizPane) {
@@ -417,7 +511,11 @@ func (m wizardModel) viewPaste(p *wizPane) {
 		p.warn(m.pasteErr)
 	}
 	p.blank()
-	p.dim("enter: add key    esc: back")
+	p.buttons([]string{"Back", "Add key"},
+		m.pasteBtn, m.pasteFocus == 1)
+	p.blank()
+	p.hint("up/down: input or buttons   " +
+		"left/right: choose button   enter: select")
 }
 
 // ── Password screen ──────────────────────────────────────
@@ -438,14 +536,29 @@ func (m wizardModel) updatePassword(
 			m.syncPwFocus()
 		}
 		return m, nil
+	case "left":
+		if m.pwFocus == 2 && m.pwBtn > 0 {
+			m.pwBtn--
+			return m, nil
+		}
+	case "right":
+		if m.pwFocus == 2 && m.pwBtn < 1 {
+			m.pwBtn++
+			return m, nil
+		}
 	case "enter":
 		if m.pwFocus < 2 {
 			m.pwFocus++
 			m.syncPwFocus()
 			return m, nil
 		}
-		// Submit. Non-skippable by construction: the only
-		// button is Continue and it validates.
+		if m.pwBtn == 0 {
+			// Back to the access screen (selections kept).
+			m.phase = wzAccess
+			return m, nil
+		}
+		// Continue. Non-skippable by construction: the only
+		// forward button validates.
 		if m.pwInput.Value() != m.pwConfirm.Value() {
 			m.pwErr = "Passwords do not match."
 			return m, nil
@@ -458,12 +571,15 @@ func (m wizardModel) updatePassword(
 		m.dec.Password = pw
 		m.pwErr = ""
 		if m.needHardware {
+			m.hwFocus = 1
+			m.hwBtn = len(m.hwButtons()) - 1
 			m.phase = wzHardware
 			return m, nil
 		}
 		m.phase = wzSteps
 		return m, m.startSteps()
-	default:
+	}
+	if m.pwFocus < 2 {
 		var cmd tea.Cmd
 		switch m.pwFocus {
 		case 0:
@@ -473,6 +589,7 @@ func (m wizardModel) updatePassword(
 		}
 		return m, cmd
 	}
+	return m, nil
 }
 
 func (m *wizardModel) syncPwFocus() {
@@ -491,7 +608,7 @@ func (m wizardModel) viewPassword(p *wizPane) {
 	p.blank()
 	// State-aware copy from the preflight observation (ruling
 	// xvi, vii refinement): say what this credential IS on this
-	// box — never assert what cannot be verified (ruling-xi
+	// box; never assert what cannot be verified (ruling-xi
 	// discipline). The prompt is NON-SKIPPABLE: post-commit-7
 	// the admin user is the box's only interactive identity,
 	// and without a password a broken SSH setup leaves only
@@ -502,13 +619,15 @@ func (m wizardModel) viewPassword(p *wizPane) {
 			"currently enabled on this box, so this password " +
 			"works over the network; once you have verified " +
 			"key login, you can disable password auth from " +
-			"System → SSH Keys.")
+			"System, SSH Keys.")
 	} else {
 		p.text("Set the recovery password for '" +
 			paths.AdminUser + "'. Password login over SSH is " +
 			"disabled on this box, so this password works " +
-			"ONLY at your provider's console — it is the " +
-			"fallback when SSH is broken.")
+			"ONLY at the machine's own login console: your " +
+			"provider's console page, or a keyboard on the " +
+			"box itself. It is the fallback when SSH is " +
+			"broken.")
 	}
 	p.blank()
 	p.text("Use a password manager: generate it, store it " +
@@ -529,24 +648,64 @@ func (m wizardModel) viewPassword(p *wizPane) {
 		p.warn(m.pwErr)
 	}
 	p.blank()
-	p.buttons([]string{"Continue"}, 0, m.pwFocus == 2)
+	p.buttons([]string{"Back", "Continue"},
+		m.pwBtn, m.pwFocus == 2)
+	p.blank()
+	p.hint("up/down: move   left/right: choose button   " +
+		"enter: select   paste works in both fields")
 }
 
 // ── Hardware screen ──────────────────────────────────────
 
+// hwButtons: Back only exists when the identity flow ran ahead
+// of this screen (otherwise this is the first screen and there
+// is nothing to go back to).
+func (m wizardModel) hwButtons() []string {
+	if m.needIdentity {
+		return []string{"Back", "Start install"}
+	}
+	return []string{"Start install"}
+}
+
 func (m wizardModel) updateHardware(
 	msg tea.KeyPressMsg,
 ) (tea.Model, tea.Cmd) {
+	btns := m.hwButtons()
 	switch msg.String() {
+	case "up", "shift+tab":
+		if m.hwFocus == 1 {
+			m.hwFocus = 0
+		}
+	case "down", "tab":
+		if m.hwFocus == 0 {
+			m.hwFocus = 1
+			m.hwBtn = len(btns) - 1
+		}
 	case "left":
-		if m.dbIdx > 0 {
+		if m.hwFocus == 0 && m.dbIdx > 0 {
 			m.dbIdx--
 		}
+		if m.hwFocus == 1 && m.hwBtn > 0 {
+			m.hwBtn--
+		}
 	case "right":
-		if m.dbIdx < len(dbCacheChoices)-1 {
+		if m.hwFocus == 0 && m.dbIdx < len(dbCacheChoices)-1 {
 			m.dbIdx++
 		}
+		if m.hwFocus == 1 && m.hwBtn < len(btns)-1 {
+			m.hwBtn++
+		}
 	case "enter":
+		if m.hwFocus == 0 {
+			m.hwFocus = 1
+			m.hwBtn = len(btns) - 1
+			return m, nil
+		}
+		if len(btns) == 2 && m.hwBtn == 0 {
+			// Back to the password screen.
+			m.enterPasswordScreen()
+			return m, nil
+		}
 		m.dec.DbCacheMB = dbCacheChoices[m.dbIdx]
 		m.cfg.DbCache = m.dec.DbCacheMB
 		m.phase = wzSteps
@@ -565,25 +724,27 @@ func fitMark(ok bool) string {
 func (m wizardModel) viewHardware(p *wizPane) {
 	p.header("Hardware fit")
 	p.blank()
-	p.text("Detected on this box (recommended: 2 CPU cores, " +
-		"4+ GB RAM, 90+ GB disk):")
+	p.text("What this box has, next to the recommended " +
+		"minimums for a node (2 CPU cores, 4+ GB RAM, " +
+		"90+ GB disk). Short of a minimum is a warning, " +
+		"not a refusal.")
 	p.blank()
 
 	ram := "unknown"
 	if m.hw.RAMMB > 0 {
-		ram = fmt.Sprintf("%.1f GB — %s",
+		ram = fmt.Sprintf("%.1f GB, %s",
 			float64(m.hw.RAMMB)/1024,
 			fitMark(m.hw.RAMMB >= requiredRAMMB))
 	}
 	disk := "unknown"
 	if m.hw.DiskTotalGB > 0 {
-		disk = fmt.Sprintf("%d GB total, %d GB free — %s",
+		disk = fmt.Sprintf("%d GB total, %d GB free, %s",
 			m.hw.DiskTotalGB, m.hw.DiskFreeGB,
 			fitMark(m.hw.DiskTotalGB >= requiredDiskGB))
 	}
-	p.kv("Memory", ram)
+	p.kv("Memory (RAM)", ram)
 	p.kv("Disk", disk)
-	p.kv("CPU", fmt.Sprintf("%d cores — %s", m.hw.Cores,
+	p.kv("CPU", fmt.Sprintf("%d cores, %s", m.hw.Cores,
 		fitMark(m.hw.Cores >= requiredCores)))
 	p.blank()
 
@@ -593,10 +754,17 @@ func (m wizardModel) viewHardware(p *wizPane) {
 		"LND and Tor.")
 	p.blank()
 	choice := fmt.Sprintf("  ◂ %4d MB ▸", dbCacheChoices[m.dbIdx])
-	p.line(" " + theme.Action.Render(choice) + theme.Dim.Render(
+	sty := theme.Value
+	if m.hwFocus == 0 {
+		sty = theme.Action
+	}
+	p.line(" " + sty.Render(choice) + theme.Dim.Render(
 		fmt.Sprintf("   (recommended for this box: %d MB)", rec)))
 	p.blank()
-	p.buttons([]string{"Start install"}, 0, true)
+	p.buttons(m.hwButtons(), m.hwBtn, m.hwFocus == 1)
+	p.blank()
+	p.hint("up/down: cache size or buttons   left/right: " +
+		"adjust or choose   enter: select")
 }
 
 // ── Steps phase ──────────────────────────────────────────
@@ -604,7 +772,6 @@ func (m wizardModel) viewHardware(p *wizPane) {
 func (m wizardModel) updateSteps(
 	msg wizardStepDoneMsg,
 ) (tea.Model, tea.Cmd) {
-	m.stepsStarted = true
 	if msg.index >= len(m.steps) {
 		return m, nil
 	}
@@ -627,7 +794,15 @@ func (m wizardModel) updateSteps(
 		m.steps[next].Status = StepRunning
 		return m, m.runStep(next)
 	}
+	// Last step verified — persist completion NOW, before the
+	// done screen waits for the operator (who may be away for
+	// minutes, or whose connection may drop).
 	m.stepsDone = true
+	if m.onComplete != nil {
+		if err := m.onComplete(); err != nil {
+			m.completeErr = err.Error()
+		}
+	}
 	m.phase = wzDone
 	return m, nil
 }
@@ -668,8 +843,17 @@ func (m wizardModel) viewSteps(p *wizPane) {
 	p.blank()
 	renderStepRows(p, m.steps)
 	p.blank()
-	p.dim("Installing... do not close the terminal. " +
+	p.hint("installing, do not close the terminal " +
 		"(ctrl+c interrupts; a re-run resumes)")
+}
+
+// sshTarget renders the everyday login command with the box's
+// address when it is known.
+func sshTarget() string {
+	if ip := system.PublicIPv4(); ip != "" {
+		return "ssh " + paths.AdminUser + "@" + ip
+	}
+	return "ssh " + paths.AdminUser + "@<your-server-ip>"
 }
 
 func (m wizardModel) viewDone(p *wizPane) {
@@ -678,23 +862,41 @@ func (m wizardModel) viewDone(p *wizPane) {
 		p.blank()
 		renderStepRows(p, m.steps)
 		p.blank()
-		p.warn("The install failed. Nothing needs undoing — " +
+		p.warn("The install failed. Nothing needs undoing: " +
 			"fix the reported problem and run " +
 			"'sudo vpn install' again; it resumes from the " +
 			"first incomplete step.")
 		p.blank()
-		p.dim("ctrl+c: exit")
+		p.hint("ctrl+c: exit")
+		return
+	}
+	if m.completeErr != "" {
+		p.header("Install steps complete, but not recorded")
+		p.blank()
+		p.warn("Every step finished, but writing the " +
+			"completion record failed: " + m.completeErr)
+		p.blank()
+		p.warn("Run 'sudo vpn install' again; it will skip " +
+			"all finished steps and retry the record.")
+		p.blank()
+		p.hint("ctrl+c: exit")
 		return
 	}
 	p.header("Install complete")
 	p.blank()
 	renderStepRows(p, m.steps)
 	p.blank()
-	p.text("Press Enter to open the node console as user '" +
-		paths.AdminUser + "' on this terminal.")
+	p.text("Your everyday way into the node, from any " +
+		"terminal:")
+	p.line(" " + theme.Action.Render("   "+sshTarget()))
 	p.blank()
-	p.dim("First-run note: verify SSH access from a SECOND " +
-		"terminal before closing this one.")
+	p.text("Press Enter to open the node console as user '" +
+		paths.AdminUser + "' on this terminal, or run the " +
+		"command above from a SECOND terminal first to " +
+		"verify your access.")
+	p.blank()
+	p.hint("enter: open the node console   ctrl+c: exit " +
+		"(the install is already recorded)")
 }
 
 // ── View plumbing ────────────────────────────────────────
@@ -716,6 +918,11 @@ func (p *wizPane) dim(s string) {
 		p.line(" " + theme.Dim.Render(l))
 	}
 }
+func (p *wizPane) hint(s string) {
+	for _, l := range wrapText(s, p.width-4) {
+		p.line(" " + theme.Grayed.Render(l))
+	}
+}
 func (p *wizPane) warn(s string) {
 	for _, l := range wrapText(s, p.width-4) {
 		p.line(" " + theme.Warning.Render(l))
@@ -727,7 +934,8 @@ func (p *wizPane) text(s string) {
 	}
 }
 func (p *wizPane) kv(k, v string) {
-	p.line(" " + theme.Label.Render(fmt.Sprintf("  %-8s", k+":")) +
+	p.line(" " + theme.Label.Render(
+		fmt.Sprintf("  %-14s", k+":")) +
 		theme.Value.Render(" "+v))
 }
 func (p *wizPane) input(label, view string, focused bool) {
@@ -805,10 +1013,13 @@ func (r *stepRunner) willRun(
 // runInstallWizard drives the interactive install: wizard
 // screens, then the engine steps, reporting HOW the run ended via
 // RunResult (only RunComplete may reach the InstallComplete
-// write — IA-1-9).
+// write — IA-1-9). onComplete is invoked exactly once, when the
+// last step verifies, BEFORE the done screen blocks on input; a
+// persist failure is surfaced as the run's error.
 func runInstallWizard(
 	cfg *config.AppConfig, steps []InstallStep,
 	dec *InstallDecisions, version string,
+	onComplete func() error,
 ) (RunResult, error) {
 	runner, err := newStepRunner(
 		steps, version, paths.InstallStateFile)
@@ -816,13 +1027,20 @@ func runInstallWizard(
 		return RunResult{}, err
 	}
 	theme.Init(cfg.Theme != "light")
-	m := newWizardModel(cfg, steps, runner, dec, version)
+	m := newWizardModel(cfg, steps, runner, dec, version,
+		onComplete)
 	p := tea.NewProgram(m)
 	result, err := p.Run()
 	if err != nil {
 		return RunResult{}, err
 	}
 	final := result.(wizardModel)
+	if final.completeErr != "" {
+		return RunResult{}, fmt.Errorf(
+			"install steps complete but the completion record "+
+				"failed: %s — run sudo vpn install again to retry",
+			final.completeErr)
+	}
 	return classifyRun(final.steps,
 		final.stepsDone && !final.failed,
 		final.failed, final.current), nil

@@ -145,3 +145,21 @@ func TestGenerateAdminPassword(t *testing.T) {
 		t.Error("two generated passwords identical")
 	}
 }
+
+// ── pasteFirstLine ───────────────────────────────────────
+
+func TestPasteFirstLine(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"secret-password", "secret-password"},
+		{"  padded  ", "padded"},
+		{"line1\nline2\n", "line1"},
+		{"key data comment\n", "key data comment"},
+		{"\n", ""},
+	}
+	for _, tt := range cases {
+		if got := pasteFirstLine(tt.in); got != tt.want {
+			t.Errorf("pasteFirstLine(%q) = %q, want %q",
+				tt.in, got, tt.want)
+		}
+	}
+}
