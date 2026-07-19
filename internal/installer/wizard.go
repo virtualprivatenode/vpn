@@ -110,6 +110,13 @@ type wizardModel struct {
 	// Steps
 	current           int
 	stepsDone, failed bool
+
+	// openConsole records the operator's CHOICE on the done
+	// screen: Enter = open the node console (handoff), ctrl+c
+	// = just exit. The live run caught the two paths behaving
+	// identically — the hint promised an exit that handed off
+	// anyway.
+	openConsole bool
 }
 
 func newWizardModel(
@@ -260,6 +267,7 @@ func (m wizardModel) Update(
 		case wzDone:
 			if msg.String() == "enter" && !m.failed &&
 				m.completeErr == "" {
+				m.openConsole = true
 				return m, tea.Quit
 			}
 		}
@@ -895,8 +903,9 @@ func (m wizardModel) viewDone(p *wizPane) {
 		"command above from a SECOND terminal first to " +
 		"verify your access.")
 	p.blank()
-	p.hint("enter: open the node console   ctrl+c: exit " +
-		"(the install is already recorded)")
+	p.hint("enter: open the node console   ctrl+c: exit to " +
+		"your shell (your install is saved; connect any time " +
+		"with the command above)")
 }
 
 // ── View plumbing ────────────────────────────────────────
@@ -1020,11 +1029,11 @@ func runInstallWizard(
 	cfg *config.AppConfig, steps []InstallStep,
 	dec *InstallDecisions, version string,
 	onComplete func() error,
-) (RunResult, error) {
+) (RunResult, bool, error) {
 	runner, err := newStepRunner(
 		steps, version, paths.InstallStateFile)
 	if err != nil {
-		return RunResult{}, err
+		return RunResult{}, false, err
 	}
 	theme.Init(cfg.Theme != "light")
 	m := newWizardModel(cfg, steps, runner, dec, version,
@@ -1032,16 +1041,16 @@ func runInstallWizard(
 	p := tea.NewProgram(m)
 	result, err := p.Run()
 	if err != nil {
-		return RunResult{}, err
+		return RunResult{}, false, err
 	}
 	final := result.(wizardModel)
 	if final.completeErr != "" {
-		return RunResult{}, fmt.Errorf(
+		return RunResult{}, false, fmt.Errorf(
 			"install steps complete but the completion record "+
 				"failed: %s — run sudo vpn install again to retry",
 			final.completeErr)
 	}
 	return classifyRun(final.steps,
 		final.stepsDone && !final.failed,
-		final.failed, final.current), nil
+		final.failed, final.current), final.openConsole, nil
 }

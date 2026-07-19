@@ -155,8 +155,11 @@ sudo sh -c 'rm -f /usr/local/bin/rlvpn; rm -rf /etc/rlvpn; rm -f /var/log/rlvpn.
 ```
 
 `userdel` will warn that the user is currently logged in — that's
-expected and fine; your session keeps working until you close it. If you
-want to keep the old log for your records, copy `/var/log/rlvpn.log`
+expected and fine (a warning about a missing mail spool is also normal).
+Your session's shell keeps working until you close it, though `sudo`
+from it will not — the removal you just ran took ripsline's admin
+rights with it, which is why it had to be a single command. If you want
+to keep the old log for your records, copy `/var/log/rlvpn.log`
 somewhere first.
 
 Then `exit`. The migration is complete.

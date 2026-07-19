@@ -186,6 +186,7 @@ func RunInstall(opts InstallOptions) error {
 	}
 
 	var res RunResult
+	openConsole := false
 	if opts.Unattended {
 		if err := fillUnattendedDecisions(dec); err != nil {
 			return err
@@ -194,7 +195,7 @@ func RunInstall(opts InstallOptions) error {
 		res, err = RunInstallUnattended(
 			steps, appVersion, paths.InstallStateFile)
 	} else {
-		res, err = runInstallWizard(
+		res, openConsole, err = runInstallWizard(
 			cfg, steps, dec, appVersion, completeInstall)
 	}
 	if err != nil {
@@ -251,11 +252,17 @@ func RunInstall(opts InstallOptions) error {
 		printConnectInstructions()
 		return nil
 	}
-	// In-session identity drop: the wizard flows into the node
-	// console as the admin user on this same terminal (ruling
-	// xvi). Degrades to printed instructions, never to an error
-	// — the install is already complete.
-	HandoffToAdminConsole()
+	// The done screen offered a real choice (live-run fix):
+	// Enter opens the node console here via the identity drop;
+	// ctrl+c means exit, so exit — just leave the connect
+	// command behind. The handoff degrades to printed
+	// instructions, never to an error; the install is already
+	// recorded either way.
+	if openConsole {
+		HandoffToAdminConsole()
+	} else {
+		printConnectInstructions()
+	}
 	return nil
 }
 
