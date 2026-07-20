@@ -169,12 +169,17 @@ func RunInstall(opts InstallOptions) error {
 		if dec.DbCacheMB > 0 {
 			cfg.DbCache = dec.DbCacheMB
 		}
-		// First-run verification banner: armed ONLY when the
-		// identity step actually ran this pass (same gating
-		// shape as the generated-password print) — a resume
-		// or re-run on a finished box must not re-arm a
-		// banner whose evidence was already observed.
-		if dec.PasswordApplied {
+		// First-run verification banner: armed when the ledger
+		// shows this install lifecycle set up the admin user AND
+		// the journal shows no admin login yet. Keyed on the
+		// LEDGER, not on this pass (live-run finding: a run that
+		// failed after the identity step and then resumed to
+		// completion lost the banner, because the completing
+		// pass ledger-skipped identity). The journal check keeps
+		// the original guarantee too: a re-run after a verified
+		// login never re-arms a stale banner.
+		if loadLedger(paths.InstallStateFile).
+			done("identity.access") && !AdminLoginObserved() {
 			cfg.KeyVerificationPending = true
 		}
 		if err := config.Save(cfg); err != nil {

@@ -5,6 +5,7 @@ package installer
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestParseBootstrapProgress(t *testing.T) {
@@ -60,6 +61,45 @@ func TestTorProbeVerdict(t *testing.T) {
 		if got := torProbeVerdict(c.output, c.err); got != c.want {
 			t.Errorf("%s: torProbeVerdict(%q, %v) = %v, want %v",
 				c.name, c.output, c.err, got, c.want)
+		}
+	}
+}
+
+// ── keepWaitingForTor (the stall/ceiling clock rule) ─────
+
+func TestKeepWaitingForTor(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	stall := 90 * time.Second
+	ceiling := 10 * time.Minute
+
+	cases := []struct {
+		name        string
+		sinceStart  time.Duration
+		sinceMove   time.Duration
+		keepWaiting bool
+	}{
+		{"fresh start", 0, 0, true},
+		{"advancing slowly, well under both",
+			5 * time.Minute, 10 * time.Second, true},
+		{"just under the stall window",
+			2 * time.Minute, 89 * time.Second, true},
+		{"stalled exactly at the window",
+			2 * time.Minute, 90 * time.Second, false},
+		{"stalled past the window",
+			2 * time.Minute, 3 * time.Minute, false},
+		{"ceiling reached while still advancing",
+			10 * time.Minute, 5 * time.Second, false},
+		{"past the ceiling",
+			11 * time.Minute, 5 * time.Second, false},
+	}
+	for _, tt := range cases {
+		now := base.Add(tt.sinceStart)
+		lastAdvance := now.Add(-tt.sinceMove)
+		got := keepWaitingForTor(now, base, lastAdvance,
+			stall, ceiling)
+		if got != tt.keepWaiting {
+			t.Errorf("%s: got %v, want %v",
+				tt.name, got, tt.keepWaiting)
 		}
 	}
 }
