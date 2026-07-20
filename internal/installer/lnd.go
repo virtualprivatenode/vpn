@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 func downloadLND(version, workDir string) error {
@@ -227,7 +227,7 @@ func startLND() error {
 func setupAutoUnlock(password string) error {
 	// Write password to a secure temp file, then sudo move it.
 	// os.CreateTemp uses O_EXCL to prevent symlink attacks.
-	tmpFile, err := os.CreateTemp("", "rlvpn-wallet-pw-")
+	tmpFile, err := os.CreateTemp("", "vpn-wallet-pw-")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}

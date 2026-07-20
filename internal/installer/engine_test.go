@@ -349,3 +349,33 @@ func TestRunInstallUnattendedFailureStops(t *testing.T) {
 		t.Error("failed gate recorded as done")
 	}
 }
+
+// ── willRun (wizard screen-skip source) ──────────────────
+
+func TestWillRun(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/ledger.json"
+	steps := []InstallStep{
+		{Key: "identity.access", Name: "a", Fn: func() error { return nil }},
+		{Key: "btc.install", Name: "b", Fn: func() error { return nil }},
+	}
+	led := newLedger()
+	led.markDone("identity.access", "1.0")
+	if err := led.save(path); err != nil {
+		t.Fatal(err)
+	}
+	r, err := newStepRunner(steps, "1.0", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.willRun(steps, "identity.access") {
+		t.Error("recorded step reported as will-run")
+	}
+	if !r.willRun(steps, "btc.install") {
+		t.Error("unrecorded step reported as skip")
+	}
+	// Unknown key: conservative side is "will run" (screen shows).
+	if !r.willRun(steps, "no.such.key") {
+		t.Error("unknown key reported as skip")
+	}
+}

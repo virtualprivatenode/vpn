@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── OnChainHomeScreen ─────────────────────────────────

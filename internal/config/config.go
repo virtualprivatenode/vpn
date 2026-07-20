@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
 // Defaults — used by production code
@@ -40,8 +40,34 @@ type AppConfig struct {
 	SyncthingDevices   []SyncthingDevice `json:"syncthing_devices,omitempty"`
 	Theme              string            `json:"theme,omitempty"`
 
+	// DbCache is bitcoind's dbcache in MB, chosen at the
+	// install hardware-fit step (ruling viii) from detected
+	// RAM. Zero means "never set" — DbCacheMB() falls back
+	// to the historical 512 so configs from older installs
+	// keep their exact behavior.
+	DbCache int `json:"dbcache,omitempty"`
+
+	// SSHPorts holds sshd's OBSERVED listening ports,
+	// recorded at install preflight (ruling xvi(b)). The
+	// firewall allow-rules derive from this — never from a
+	// hardcoded 22, which on a nonstandard-port box was a
+	// delayed silent lockout hazard (deny-all enabled with
+	// only 22 open, next connection refused). Empty means
+	// "never observed" (pre-rename configs):
+	// SSHPortsOrDefault falls back to 22, byte-identical to
+	// the old behavior.
+	SSHPorts []int `json:"ssh_ports,omitempty"`
+
+	// KeyVerificationPending is set at install completion
+	// and cleared when the TUI observes a real sshd login
+	// for the admin user (journal evidence). While set, the
+	// TUI shows the first-run banner asking the operator to
+	// verify access from a SECOND terminal before trusting
+	// the in-session handoff console as their only way in.
+	KeyVerificationPending bool `json:"key_verification_pending,omitempty"`
+
 	// SSHPasswordAuthDisabled mirrors the value
-	// 00-rlvpn-hardening.conf writes for sshd's
+	// 00-vpn-hardening.conf writes for sshd's
 	// PasswordAuthentication directive. False = password
 	// auth enabled (matches debian default and the
 	// bootstrap-written drop-in, which is silent on the
@@ -131,12 +157,60 @@ func Load() (*AppConfig, error) {
 	return DefaultStore().Load()
 }
 
+// RawFieldPresent reports whether the config file on disk
+// contains the given JSON key at the top level. Needed where
+// "absent" and "zero value" must be told apart on omitempty
+// fields — the migration rule (commit-6 addendum 2026-07-17):
+// an install seeds a field from observation ONLY when the
+// operator's carried-over config never answered it; a present
+// value is a prior answer and is never clobbered. A missing or
+// unreadable file simply reports absent.
+func RawFieldPresent(key string) bool {
+	data, err := os.ReadFile(DefaultPath)
+	if err != nil {
+		return false
+	}
+	return rawFieldPresent(data, key)
+}
+
+// rawFieldPresent is the pure half of RawFieldPresent —
+// unit-tested.
+func rawFieldPresent(data []byte, key string) bool {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false
+	}
+	_, ok := m[key]
+	return ok
+}
+
 func Save(cfg *AppConfig) error {
 	return DefaultStore().Save(cfg)
 }
 
 func (c *AppConfig) HasLND() bool {
 	return c.LNDInstalled
+}
+
+// DbCacheMB returns the dbcache value for bitcoin.conf: the
+// hardware-fit choice when one was recorded, else the
+// historical default (512), so configs that predate the
+// hardware-fit step render byte-identical bitcoin.conf.
+func (c *AppConfig) DbCacheMB() int {
+	if c.DbCache > 0 {
+		return c.DbCache
+	}
+	return 512
+}
+
+// SSHPortsOrDefault returns the observed sshd ports for
+// firewall allow-rules, falling back to 22 when no
+// observation was ever recorded (pre-rename configs).
+func (c *AppConfig) SSHPortsOrDefault() []int {
+	if len(c.SSHPorts) > 0 {
+		return c.SSHPorts
+	}
+	return []int{22}
 }
 
 func (c *AppConfig) IsMainnet() bool {

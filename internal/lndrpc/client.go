@@ -30,9 +30,9 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // Client wraps an LND gRPC connection with macaroon authentication.

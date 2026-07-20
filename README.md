@@ -36,7 +36,7 @@ Private by default, simple by design. Your keys, your node.
 
 ### Requirements
 
-- Fresh Debian 13+ Box
+- Fresh Debian 13 Box
 - 2 (v)CPU, 4+ GB RAM, 90+ GB SSD
 
 ### Privacy
@@ -51,35 +51,53 @@ Private by default, simple by design. Your keys, your node.
 
 ### Quick Start
 
-SSH into your Server (Box) and run:
+Download the signed `vpn` binary onto your Server (Box), verify
+it, and run the installer:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash
+cd /tmp
+wget https://github.com/virtualprivatenode/vpn/releases/download/v0.7.0/vpn-0.7.0-amd64.tar.gz
+wget https://github.com/virtualprivatenode/vpn/releases/download/v0.7.0/SHA256SUMS
+wget https://github.com/virtualprivatenode/vpn/releases/download/v0.7.0/SHA256SUMS.asc
+
+wget -O signing-key.asc https://keys.openpgp.org/vks/v1/by-fingerprint/AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE
+gpg --import signing-key.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+
+tar -xzf vpn-0.7.0-amd64.tar.gz
+sudo install -m 755 vpn /usr/local/bin/vpn
+sudo vpn install
 ```
 
-> [!NOTE]
-> Some downloads route through Tor and can occasionally fail on the first attempt. The script is idempotent and safe to rerun. If you hit an error, just run the above command again.
-
-The bootstrap prepares the host: it creates a `ripsline` user, copies
-your SSH key across automatically, installs Tor, downloads and
-GPG-verifies the `rlvpn` binary, and hardens the SSH daemon. When you
-SSH in as `ripsline`, the binary takes over and installs Bitcoin Core
-and LND, every download routed through Tor and verified before
-install. Bitcoin Core begins syncing and the TUI opens to the wallet
-creation flow.
+The signature must say **Good signature** with primary key
+fingerprint `AFA0 EBAC DC9A 4C4A A7B0  154A C97C E10F 170B
+A5FE`, and the checksum line must say `vpn-0.7.0-amd64.tar.gz:
+OK`. If either fails, stop.
 
 For testnet4:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/ripsline/virtual-private-node/main/virtual-private-node.sh | sudo bash -s -- --testnet4
+sudo vpn install --testnet4
 ```
 
-**SSH key discovery.** The bootstrap tries several ways to find an
-existing SSH key to copy to the new `ripsline` user: `$SUDO_USER`'s
-`authorized_keys`, then `logname`, then `who`, then `/root/.ssh/`.
-This works for `curl | sudo bash`, `sudo su -` followed by curl, and
-bare-metal root installs. If no key is found, a random password is
-printed at the end and you can add a key later from the TUI.
+The installer checks the environment first and refuses — with a
+full report, before changing anything — if the box is not one it
+can trust. It then walks you through access setup and hardware
+fit, installs Bitcoin Core and LND with every download after Tor
+routed through Tor and verified before install, and drops you
+straight into the node console. If a step fails or you
+interrupt, just run `sudo vpn install` again — it resumes from
+the first incomplete step.
+
+**Access setup.** The installer creates a `vpn` admin user and
+shows every SSH key it finds on the box — with fingerprints and
+comments, and provider control lines excluded — for you to
+confirm, replace, or extend before they are copied. You also set
+a login password (16 characters minimum) as the console
+fallback; whether password login over SSH stays enabled is
+carried over exactly as the installer OBSERVED it on your box —
+installing never silently changes it.
 
 ### Build from Source
 
@@ -94,20 +112,19 @@ echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
 source ~/.profile
 
 cd ~
-git clone https://github.com/ripsline/virtual-private-node.git
-cd virtual-private-node
+git clone https://github.com/virtualprivatenode/vpn.git
+cd vpn
 go mod tidy
-go build -o rlvpn ./cmd/
-sudo install -m 755 ./rlvpn /usr/local/bin/rlvpn
-sudo bash virtual-private-node.sh
+go build -o vpn ./cmd/
+sudo ./vpn install
 ```
 
-The bootstrap script detects that `rlvpn` is already installed and
-skips the download.
+The installer places the binary at `/usr/local/bin/vpn` as its
+first step.
 
 ### Wallet Creation
 
-On first TUI launch after bootstrap, you'll go straight to the wallet
+On first launch of the node console, you go straight to the wallet
 creation flow:
 
 1. Read the privacy and seed warnings, press Proceed
@@ -127,7 +144,7 @@ design — the only way forward is typing the confirmation phrase.
 
 ### Dashboard
 
-Every SSH login as `ripsline` opens a terminal UI with a sidebar of
+Every SSH login as `vpn` opens a terminal UI with a sidebar of
 five sections plus a dark/light theme toggle:
 
 - **Channels** — open channels with coin control; close and manage channels; view your Node Info (pubkey, URIs, QR codes for sharing); channel history
@@ -227,21 +244,21 @@ For the full setup guide, see
 
 ### Security
 
-- TUI runs as unprivileged user with passwordless sudo for system operations
+- TUI runs as the unprivileged `vpn` admin user (passwordless sudo for system operations — scheduled for removal in favor of a root helper)
 - All connections through Tor (SOCKS5 port 9050)
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
-- UFW firewall: SSH only (+ 9735, 8080 for hybrid P2P, 22000 for Syncthing)
+- UFW firewall: SSH only, on the port(s) sshd actually listens on (+ 9735, 8080 for hybrid P2P, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
-- Root SSH disabled after bootstrap
-- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth on by default (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
+- Root SSH disabled by the installer
+- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth carried over exactly as OBSERVED on your box at install (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
 - Services run as dedicated bitcoin system user
 - GPG signature verification for all software, any bad signature is a hard stop
 - Unattended security upgrades with auto-reboot
-- Base packages upgraded during bootstrap to close CVE windows on stale server images
+- Base packages upgraded during install — behind the firewall, which comes up first — to close CVE windows on stale server images
 - Syncthing backup sync: mutual TLS device approval, web UI only via Tor
 - Bitcoin Core wallet disabled
-- All downloads and apt operations route through Tor after bootstrap
+- All downloads and apt operations route through Tor once Tor is up (verified by a hard gate before any download)
 - Atomic config writes with fsync + rename (prevents corruption on power loss)
 - Secure temp file creation with O_EXCL (prevents symlink attacks)
 - Public IP detection uses kernel routing table (no external network calls)
@@ -250,29 +267,36 @@ For the full setup guide, see
 
 ### Privacy — Network Traffic
 
-The bootstrap script makes two types of network calls:
+Downloading the `vpn` binary and signing key (Quick Start) is
+ordinary clearnet traffic — Tor does not exist on the box yet.
+After that, the installer makes two types of network calls:
 
 **Phase 1 (clearnet, unavoidable):**
 - `apt-get update` — Debian package index refresh
-- `apt-get upgrade` — Debian security updates
-- `apt-get install tor torsocks gnupg sudo wget` — Debian package mirrors
-- NTP time sync enablement — ongoing clock sync queries to the Debian NTP pool (continues after bootstrap)
+- one `apt-get install` — Tor, torsocks, ufw and base tools,
+  from Debian package mirrors
+- `apt-get upgrade` — Debian security updates (runs behind the
+  freshly enabled firewall)
+- NTP time sync enablement — ongoing clock sync queries to the
+  Debian NTP pool (continues after install)
 
-**Phase 2 (all through Tor):**
-- rlvpn binary download from GitHub
-- GPG signing key file download from independent keyserver
+**Phase 2 (all through Tor, hard-gated):**
 - Bitcoin Core and LND downloads
 - Syncthing download (when Syncthing is installed)
 - All subsequent apt operations
 
-After bootstrap, the only ongoing clearnet traffic is NTP clock sync
-(to the Debian NTP pool), Syncthing sync (port 22000) if you install
-it, and LND P2P if you choose hybrid mode. Everything else routes
-through Tor.
+Before the first Phase-2 download, the installer verifies Tor
+routing on Tor's own control port and refuses to continue if it
+cannot confirm it — on every run, including resumes.
+
+After install, the only ongoing clearnet traffic is NTP clock
+sync (to the Debian NTP pool), Syncthing sync (port 22000) if
+you install it, and LND P2P if you choose hybrid mode.
+Everything else routes through Tor.
 
 Verify Tor routing after install:
 ```bash
-grep "Tor" /var/log/rlvpn.log
+grep "Tor" /var/log/vpn.log
 ```
 
 ### Software Verification
@@ -289,17 +313,20 @@ All software is verified with GPG signatures and SHA256 checksums:
   clearsigned by the same key. The installer also writes Syncthing's
   entire configuration itself and refuses to start the daemon if any
   privacy setting does not verify.
-- **rlvpn binary** — signed with a key hosted on an independent
-  keyserver (not GitHub). The bootstrap downloads the key file directly
-  through Tor rather than using keyserver protocols, so compromising
-  one source does not compromise both the binary and the key.
+- **vpn binary** — signed with a key hosted on an independent
+  keyserver (not GitHub). You download and verify it yourself
+  before running it (Quick Start above), and the built-in
+  updater performs the same key and checksum verification for
+  every later release. Hosting the key off GitHub means
+  compromising one source does not compromise both the binary
+  and the key.
 
 Verification failure is a hard stop.
 
 After installation, review the log:
 
 ```bash
-cat /var/log/rlvpn.log
+cat /var/log/vpn.log
 ```
 
 For manual binary verification before installation, see
@@ -312,11 +339,11 @@ For manual binary verification before installation, see
 | /etc/bitcoin/bitcoin.conf | Bitcoin Core configuration |
 | /etc/lnd/lnd.conf | LND configuration |
 | /etc/syncthing/ | Syncthing configuration |
-| /etc/rlvpn/config.json | Install state and credentials |
+| /etc/vpn/config.json | Install state and credentials |
 | /var/lib/bitcoin/ | Blockchain data |
 | /var/lib/lnd/ | LND data and wallet |
 | /var/lib/syncthing/lnd-backup/ | Auto-synced channel.backup |
-| /var/log/rlvpn.log | Application log (install, verification, status) |
+| /var/log/vpn.log | Application log (install, verification, status) |
 
 ## License
 

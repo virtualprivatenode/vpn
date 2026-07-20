@@ -11,8 +11,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 
-	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── On-chain send screen steps ──────────────────────────

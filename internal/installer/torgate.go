@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // Tor runtime constants. These are Tor-owned values, not Go logic
@@ -54,7 +54,18 @@ const (
 	torControlAddr = "127.0.0.1:9051"
 	torCookiePath  = "/run/tor/control.authcookie"
 
-	torBootstrapTimeout = 90 * time.Second
+	// Stall clock and ceiling (operator ruling at the commit-6
+	// live run, replacing the original flat 90s deadline). The
+	// flat deadline dated from when the bootstrap script gave
+	// Tor a warm-up minute plus an SSH round trip before this
+	// gate ever ran; with the script absorbed, the gate fires
+	// seconds after Tor first starts, and a healthy slow box
+	// was failed at 65% while still advancing. Now: fail only
+	// when bootstrap PROGRESS has not moved for the stall
+	// window; the ceiling bounds the step against pathological
+	// crawl (a bounded install step must end).
+	torStallWindow      = 90 * time.Second
+	torBootstrapCeiling = 10 * time.Minute
 	torBootstrapPoll    = 3 * time.Second
 
 	torProbeURL      = "https://check.torproject.org/api/ip"
@@ -68,7 +79,8 @@ func verifyTorRouting() error {
 			"all downloads must route through Tor")
 	}
 
-	if err := waitForTorBootstrap(torBootstrapTimeout); err != nil {
+	if err := waitForTorBootstrap(
+		torStallWindow, torBootstrapCeiling); err != nil {
 		return err
 	}
 	logger.Install("Tor bootstrap 100%% CONFIRMED (via control port)")
@@ -77,11 +89,19 @@ func verifyTorRouting() error {
 }
 
 // waitForTorBootstrap polls Tor's control port until it reports
-// bootstrap PROGRESS=100 or the deadline passes. Poll errors are
-// retried silently until the deadline — immediately after restartTor
-// the control port may not be listening yet.
-func waitForTorBootstrap(timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+// bootstrap PROGRESS=100, failing on STALL (no progress change
+// for the stall window) or on the absolute ceiling. Any change
+// in reported progress resets the stall clock — including a
+// drop, because Tor resets its counter to zero when it restarts
+// mid-bootstrap, and rebootstrapping is activity, not a stall.
+// Poll errors are retried silently within the same clocks —
+// immediately after restartTor the control port may not be
+// listening yet.
+func waitForTorBootstrap(
+	stallWindow, ceiling time.Duration,
+) error {
+	start := time.Now()
+	lastAdvance := start
 	lastProgress := -1
 	var lastErr error
 
@@ -94,25 +114,50 @@ func waitForTorBootstrap(timeout time.Duration) error {
 			if progress != lastProgress {
 				logger.Install("Tor bootstrapping: %d%%", progress)
 				lastProgress = progress
+				lastAdvance = time.Now()
 			}
 		} else {
 			lastErr = err
 		}
 
-		if time.Now().After(deadline) {
+		if !keepWaitingForTor(time.Now(), start, lastAdvance,
+			stallWindow, ceiling) {
 			break
 		}
 		time.Sleep(torBootstrapPoll)
 	}
 
-	detail := fmt.Sprintf("last progress %d%%", lastProgress)
 	if lastProgress < 0 && lastErr != nil {
-		detail = fmt.Sprintf("control port never answered: %v "+
-			"(is ControlPort 9051 enabled in torrc?)", lastErr)
+		return fmt.Errorf("Tor bootstrap check failed within %s "+
+			"(control port never answered: %v — is ControlPort "+
+			"9051 enabled in torrc?) — check: systemctl status "+
+			"tor; journalctl -u tor", stallWindow, lastErr)
 	}
-	return fmt.Errorf("Tor did not finish bootstrapping within %s (%s) — "+
+	if time.Since(start) >= ceiling {
+		return fmt.Errorf("Tor did not finish bootstrapping "+
+			"within %s (last progress %d%%) — check: systemctl "+
+			"status tor; journalctl -u tor", ceiling, lastProgress)
+	}
+	return fmt.Errorf("Tor bootstrap STALLED at %d%% for %s — "+
 		"check: systemctl status tor; journalctl -u tor",
-		timeout, detail)
+		lastProgress, stallWindow)
+}
+
+// keepWaitingForTor is the gate's clock rule as a pure function
+// (unit-tested): keep waiting while the stall window has not
+// elapsed since the last progress change AND the absolute
+// ceiling has not elapsed since the step started.
+func keepWaitingForTor(
+	now, start, lastAdvance time.Time,
+	stallWindow, ceiling time.Duration,
+) bool {
+	if now.Sub(lastAdvance) >= stallWindow {
+		return false
+	}
+	if now.Sub(start) >= ceiling {
+		return false
+	}
+	return true
 }
 
 // queryTorBootstrapProgress performs one control-port round trip:

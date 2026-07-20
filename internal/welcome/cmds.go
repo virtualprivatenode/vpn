@@ -36,11 +36,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/config"
-	"github.com/ripsline/virtual-private-node/internal/installer"
-	"github.com/ripsline/virtual-private-node/internal/lndrpc"
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // ── Polling & version ────────────────────────────────────
@@ -393,7 +393,7 @@ func showMacaroonCmd(cfg *config.AppConfig) tea.Cmd {
 	if mac == "" {
 		return nil
 	}
-	tmpFile, err := os.CreateTemp("", "rlvpn-macaroon-")
+	tmpFile, err := os.CreateTemp("", "vpn-macaroon-")
 	if err != nil {
 		return nil
 	}
@@ -419,7 +419,7 @@ func showInvoiceCmd(invoice string) tea.Cmd {
 	if invoice == "" {
 		return nil
 	}
-	tmpFile, err := os.CreateTemp("", "rlvpn-invoice-")
+	tmpFile, err := os.CreateTemp("", "vpn-invoice-")
 	if err != nil {
 		return nil
 	}
@@ -486,7 +486,7 @@ func showNodeURIsCmd(uris []string) tea.Cmd {
 		}
 		b.WriteString("\n")
 	}
-	tmpFile, err := os.CreateTemp("", "rlvpn-nodeuris-")
+	tmpFile, err := os.CreateTemp("", "vpn-nodeuris-")
 	if err != nil {
 		return nil
 	}

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
 // ── Install ledger ───────────────────────────────────────

@@ -7,8 +7,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ripsline/virtual-private-node/internal/installer"
-	"github.com/ripsline/virtual-private-node/internal/theme"
+	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ── SSHKeyAddScreen ────────────────────────────────────
@@ -260,7 +260,7 @@ func (s *SSHKeyAddScreen) viewInput(w, h int) string {
 	p.blank()
 	p.dim("On your local machine, run in Terminal:")
 	p.blank()
-	p.mono("ssh-keygen -t ed25519 -f ~/.ssh/virtual-private-node-key -C rlvpn")
+	p.mono("ssh-keygen -t ed25519 -f ~/.ssh/virtual-private-node-key -C vpn")
 	p.blank()
 	p.dim("Generate a passphrase with a password")
 	p.dim("manager. You will enter it twice.")

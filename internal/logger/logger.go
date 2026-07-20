@@ -1,8 +1,8 @@
 // internal/logger/logger.go
 
-// Package logger provides structured logging for the rlvpn application.
+// Package logger provides structured logging for the vpn application.
 //
-// Log file: /var/log/rlvpn.log (created during bootstrap, owned by ripsline)
+// Log file: /var/log/vpn.log (created by the installer; owned by the admin user)
 //
 // Log format:
 //
@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-const LogPath = "/var/log/rlvpn.log"
+const LogPath = "/var/log/vpn.log"
 
 var (
 	mu   sync.Mutex

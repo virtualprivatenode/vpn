@@ -8,12 +8,27 @@ package installer
 // checks run and every failure is reported at once, so the operator
 // fixes everything in one round trip.
 //
-// Placement: called at the top of Run(), before the install TUI
-// opens, at the seam the old checkOS() occupied (preflight absorbs
-// it). A refused box is untouched — no user created, no config
-// written, no service restarted. The commit-6 root install re-homes
-// this call under the `vpn install` dispatch; notes for that session
-// are on the individual checks below.
+// Placement: called at the top of RunInstall(), under root dispatch
+// (`sudo vpn install`), before the wizard opens. A refused box is
+// untouched — no user created, no config written, no service
+// restarted.
+//
+// Re-homed under root dispatch (ruling xvi(c)):
+//   - the commit-4 `sudo -n` scaffolding check is DELETED — install
+//     no longer depends on any sudo rule (it IS root), and commit 7
+//     deletes NOPASSWD entirely;
+//   - the torsocks assertion RE-SEQUENCED out of preflight: the
+//     engine installs tor/torsocks itself now, so asserting it here
+//     would refuse every fresh box. The post-Tor-install,
+//     pre-first-download assertion lives in the torgate step
+//     (torgate.go LookPaths torsocks before gating; retires with
+//     the Go-native Tor client, standalone queue #6);
+//   - the sudoers scan reads /etc/sudoers.d directly — root needs
+//     no `sudo find` workaround, and the failed-as-skipped
+//     plumbing that coupled it to the deleted sudo check is gone;
+//   - NEW: read-only sshd port/auth observation (observe.go),
+//     REFUSE on failure — the firewall rules and the drop-in seed
+//     derive from it, and there is deliberately no guessing path.
 
 import (
 	"context"
@@ -21,13 +36,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/ripsline/virtual-private-node/internal/logger"
-	"github.com/ripsline/virtual-private-node/internal/paths"
-	"github.com/ripsline/virtual-private-node/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // PreflightResult is one check's outcome. Err == nil means pass.
@@ -39,19 +53,21 @@ type PreflightResult struct {
 // Check names double as report labels — short, present-tense facts.
 const (
 	checkNameDebian    = "Debian version is exactly 13"
-	checkNameSudo      = "passwordless sudo works"
-	checkNameTorsocks  = "torsocks is installed"
 	checkNameIOLogging = "sudo I/O logging is disabled"
 	checkNameDpkg      = "package system is healthy (dpkg --audit)"
 	checkNameUfw       = "ufw is installable"
+	checkNameSSHState  = "ssh daemon state is observable"
 )
 
 // RunPreflight runs every check, prints a full report to stderr on
 // any failure (and mirrors the failures to the log file, so the log
 // trail never just stops), and returns a summary error that aborts
-// the install before its first step.
-func RunPreflight() error {
-	results := runPreflightChecks()
+// the install before its first step. On success it returns the sshd
+// observation for the wizard copy, the firewall rules, and the
+// config seed — observed once, consumed everywhere (the SSH
+// hardening step re-observes seconds before its own write).
+func RunPreflight() (SSHObservation, error) {
+	results, obs := runPreflightChecks()
 
 	failed := 0
 	for _, r := range results {
@@ -62,7 +78,7 @@ func RunPreflight() error {
 	if failed == 0 {
 		logger.Install("Preflight passed (%d/%d checks)",
 			len(results), len(results))
-		return nil
+		return obs, nil
 	}
 
 	fmt.Fprint(os.Stderr, "\n"+FormatPreflightReport(results))
@@ -71,41 +87,25 @@ func RunPreflight() error {
 			logger.Install("Preflight FAIL: %s: %v", r.Name, r.Err)
 		}
 	}
-	return fmt.Errorf(
+	return obs, fmt.Errorf(
 		"preflight: %d of %d checks failed — nothing was changed",
 		failed, len(results))
 }
 
-// runPreflightChecks executes the checks in dependency order. The
-// sudoers scan needs working sudo to read root-owned files, so it is
-// reported as a failure (not silently passed) when the sudo check
-// already failed — fail-safe direction: cannot verify means refuse.
-func runPreflightChecks() []PreflightResult {
+// runPreflightChecks executes the checks in order. All five run
+// unconditionally — root dispatch removed the sudo dependency that
+// used to force failed-as-skipped coupling between checks.
+func runPreflightChecks() ([]PreflightResult, SSHObservation) {
 	results := []PreflightResult{
 		{checkNameDebian, checkDebian13()},
+		{checkNameIOLogging, checkSudoersIOLogging()},
+		{checkNameDpkg, checkDpkgAudit()},
+		{checkNameUfw, checkUfwInstallable()},
 	}
-
-	sudoErr := checkPasswordlessSudo()
-	results = append(results, PreflightResult{checkNameSudo, sudoErr})
+	obs, obsErr := ObserveSSHState()
 	results = append(results,
-		PreflightResult{checkNameTorsocks, checkTorsocks()})
-
-	var ioLogErr error
-	if sudoErr != nil {
-		ioLogErr = errors.New(
-			"skipped — cannot read the sudo configuration " +
-				"while passwordless sudo is not working")
-	} else {
-		ioLogErr = checkSudoersIOLogging()
-	}
-	results = append(results,
-		PreflightResult{checkNameIOLogging, ioLogErr})
-
-	results = append(results,
-		PreflightResult{checkNameDpkg, checkDpkgAudit()})
-	results = append(results,
-		PreflightResult{checkNameUfw, checkUfwInstallable()})
-	return results
+		PreflightResult{checkNameSSHState, obsErr})
+	return results, obs
 }
 
 // ── Check 1: OS ──────────────────────────────────────────
@@ -154,54 +154,20 @@ func checkOSRelease(content string) error {
 	return nil
 }
 
-// ── Check 2: sudo ────────────────────────────────────────
-
-// checkPasswordlessSudo asserts the bootstrap's NOPASSWD rule is
-// actually usable: `sudo -n true` fails instead of prompting when a
-// password would be required. Without this, a half-bootstrapped box
-// dies mid-install with the sudo error buried in whichever step ran
-// first.
-//
-// SCAFFOLDING for the pre-commit-6 world: once `vpn install` runs
-// as root (commit 6) there is no sudo rule to depend on during
-// install, and commit 7 deletes NOPASSWD entirely. The commit-6
-// session deletes this check.
-func checkPasswordlessSudo() error {
-	if _, err := system.RunContext(
-		15*time.Second, "sudo", "-n", "true"); err != nil {
-		return fmt.Errorf(
-			"passwordless sudo is not working (%v) — re-run the "+
-				"bootstrap script or restore /etc/sudoers.d/%s",
-			err, paths.AdminUser)
-	}
-	return nil
-}
-
-// ── Check 3: torsocks ────────────────────────────────────
-
-// checkTorsocks asserts torsocks is on PATH. The bootstrap script
-// installed it before this binary ever ran, so its absence means a
-// tampered or unfinished bootstrap. All downloads route through it
-// (the torgate step re-checks at its own point in the sequence).
-// Retired when the Go-native Tor client lands (standalone queue #6).
-func checkTorsocks() error {
-	if _, err := exec.LookPath("torsocks"); err != nil {
-		return errors.New(
-			"torsocks not found — all downloads must route " +
-				"through Tor; re-run the bootstrap script")
-	}
-	return nil
-}
-
-// ── Check 4: sudo I/O logging (IA-3-H) ───────────────────
+// ── Check 2: sudo I/O logging (IA-3-H) ───────────────────
 
 // checkSudoersIOLogging asserts no sudoers file enables sudo's
-// input/output recording. With log_input set, the moment this app
+// input/output recording. With log_input set, the moment the TUI
 // pipes the admin password to `sudo chpasswd`, sudo would tee the
 // plaintext to /var/log/sudo-io — a passive credential sink. Scope:
 // /etc/sudoers plus every file sudo's @includedir would parse in
 // /etc/sudoers.d. Residual (documented, accepted): a nonstandard
 // @includedir pointing elsewhere is not followed.
+//
+// The install itself runs as root and never trips this — the check
+// protects the ADMIN-USER era that starts at handoff (and it dies
+// with the TUI's sudo use at commit 7, when the root helper takes
+// over).
 func checkSudoersIOLogging() error {
 	files := []string{paths.SudoersFile}
 	dropIns, err := listSudoersDropIns()
@@ -211,7 +177,7 @@ func checkSudoersIOLogging() error {
 	files = append(files, dropIns...)
 
 	for _, f := range files {
-		data, err := system.SudoReadFile(f)
+		data, err := os.ReadFile(f)
 		if err != nil {
 			return fmt.Errorf("cannot read %s: %w", f, err)
 		}
@@ -228,45 +194,32 @@ func checkSudoersIOLogging() error {
 }
 
 // listSudoersDropIns enumerates the files sudo's @includedir would
-// parse. The directory is enumerated THROUGH sudo: /etc/sudoers.d
-// itself is not world-listable on Debian 13 ([LIVE], commit-4 run —
-// an unprivileged os.ReadDir here got permission denied, which
-// would have refused every clean box). find emits regular files
-// only, so a stray subdirectory can never reach the file reads. A
-// missing directory means nothing to scan; any other stat failure
-// refuses (stat needs no permission on the directory itself).
+// parse. Running as root, the directory is read directly — the
+// commit-4 `sudo find` workaround (needed because /etc/sudoers.d
+// is 750 root:root on Debian 13 [LIVE] and the check then ran
+// unprivileged) is gone. A missing directory means nothing to
+// scan; any other failure refuses. Subdirectories are skipped —
+// sudo's includedir reads regular files only.
 func listSudoersDropIns() ([]string, error) {
-	if _, err := os.Stat(paths.SudoersDir); err != nil {
+	entries, err := os.ReadDir(paths.SudoersDir)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf(
-			"cannot stat %s: %w", paths.SudoersDir, err)
-	}
-	out, err := system.SudoRunOutput("find", paths.SudoersDir,
-		"-maxdepth", "1", "-type", "f")
-	if err != nil {
-		return nil, fmt.Errorf(
 			"cannot list %s: %w", paths.SudoersDir, err)
 	}
-	return filterSudoersDropIns(out), nil
-}
-
-// filterSudoersDropIns applies sudo's includedir filename rule to
-// find output (one absolute path per line). Pure — unit-tested.
-func filterSudoersDropIns(findOutput string) []string {
 	var files []string
-	for _, line := range strings.Split(findOutput, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, e := range entries {
+		if e.IsDir() {
 			continue
 		}
-		if !sudoersFileIncluded(filepath.Base(line)) {
+		if !sudoersFileIncluded(e.Name()) {
 			continue
 		}
-		files = append(files, line)
+		files = append(files, paths.SudoersDir+"/"+e.Name())
 	}
-	return files
+	return files, nil
 }
 
 // sudoersFileIncluded mirrors sudo's @includedir rule: files whose
@@ -328,7 +281,7 @@ func sudoersEnablesIOLogging(content string) (string, bool) {
 	return "", false
 }
 
-// ── Check 5: dpkg ────────────────────────────────────────
+// ── Check 3: dpkg ────────────────────────────────────────
 
 // checkDpkgAudit asserts the package database has no packages stuck
 // in broken states — a wedged dpkg would otherwise kill the install
@@ -350,23 +303,23 @@ func dpkgAuditVerdict(output string, err error) error {
 		first := strings.SplitN(s, "\n", 2)[0]
 		return fmt.Errorf(
 			"dpkg reports packages in a broken state (%s ...) — "+
-				"fix with: sudo dpkg --configure -a && "+
-				"sudo apt-get -f install", first)
+				"fix with: dpkg --configure -a && "+
+				"apt-get -f install", first)
 	}
 	return nil
 }
 
-// ── Check 6: ufw ─────────────────────────────────────────
+// ── Check 4: ufw ─────────────────────────────────────────
 
 // checkUfwInstallable asserts apt's on-disk package index can
-// deliver ufw when the engine's firewall step apt-installs it
-// mid-sequence. Offline; installs nothing; passes instantly when
-// ufw is already present (re-runs).
+// deliver ufw when the engine's base-package step apt-installs it.
+// Offline; installs nothing; passes instantly when ufw is already
+// present (re-runs, migrated boxes).
 //
-// Today this is nearly redundant — the bootstrap script proved apt
-// working minutes earlier — but it becomes LOAD-BEARING at commit 6
-// when the binary absorbs the script and nothing has pre-proven
-// apt. It lives here so commit 6 inherits it for free.
+// LOAD-BEARING since the script absorption (commit 6): nothing
+// pre-proves apt anymore — the binary's own base-package step is
+// the first apt operation run for us on this box, and the firewall
+// step immediately after it depends on ufw having arrived.
 func checkUfwInstallable() error {
 	if _, err := exec.LookPath("ufw"); err == nil {
 		return nil
@@ -380,7 +333,7 @@ func checkUfwInstallable() error {
 
 // runAptCachePolicy runs `apt-cache policy <pkg>` with LC_ALL=C so
 // the Candidate line is stable across locales. Local exec (not the
-// system wrappers) purely for the env override; no sudo involved.
+// system wrappers) purely for the env override.
 func runAptCachePolicy(
 	pkg string, timeout time.Duration,
 ) (string, error) {
@@ -408,12 +361,12 @@ func ufwCandidateVerdict(output string) error {
 			}
 			return errors.New(
 				"apt has no installable ufw candidate — package " +
-					"lists may be broken; run: sudo apt-get update")
+					"lists may be broken; run: apt-get update")
 		}
 	}
 	return errors.New(
 		"no Candidate line in apt-cache policy output — apt " +
-			"package lists may be missing; run: sudo apt-get update")
+			"package lists may be missing; run: apt-get update")
 }
 
 // ── Report formatting ────────────────────────────────────
