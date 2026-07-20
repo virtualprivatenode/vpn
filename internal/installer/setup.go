@@ -241,16 +241,49 @@ func RunInstall(opts InstallOptions) error {
 		if err := completeInstall(); err != nil {
 			return err
 		}
+		if needsPasswordReapply(dec.GeneratedPassword,
+			dec.PasswordApplied, passwordPending()) {
+			// Fail-then-resume (live-run finding): an earlier
+			// unattended pass applied a generated password and
+			// died before the end-of-run print, so nobody has
+			// ever seen a working credential — and this pass
+			// ledger-skipped the identity step. Re-apply THIS
+			// pass's generated password now, so the line printed
+			// below is one that works.
+			if err := SetUserPassword(
+				paths.AdminUser, dec.Password); err != nil {
+				return fmt.Errorf(
+					"re-apply admin password: %w", err)
+			}
+			dec.PasswordApplied = true
+			logger.Install("admin password re-applied at " +
+				"completion — an earlier pass applied one that " +
+				"was never displayed")
+		}
 	}
 
 	if dec.GeneratedPassword != "" && dec.PasswordApplied {
 		// Unattended fallback only (ruling vii), and only when
-		// the identity step actually applied it this pass (a
-		// ledger-skip means an older password stands). Printed
-		// once, never logged.
+		// this pass actually applied it (a ledger-skip with no
+		// pending marker means an older, already-shown password
+		// stands). Printed once, never logged.
 		fmt.Printf("\n  Login password for %q (SAVE IT — it will "+
 			"not be shown again):\n\n    %s\n",
 			paths.AdminUser, dec.GeneratedPassword)
+		ClearPasswordPendingMarker()
+	}
+
+	if !opts.Unattended && passwordPending() {
+		// Mixed-mode resume: an earlier unattended pass applied a
+		// generated password that was never displayed, and this
+		// interactive completion had no password screen to
+		// replace it (the identity step was ledger-skipped).
+		// Nothing here can recover it — say so and name the
+		// remedy. The marker stays until the operator acts.
+		fmt.Printf("\n  NOTE: an earlier unattended run set a "+
+			"login password for %q that was never displayed.\n"+
+			"  Set a new one from the node console: System → "+
+			"SSH Keys → Change Password.\n", paths.AdminUser)
 	}
 
 	if opts.Unattended {

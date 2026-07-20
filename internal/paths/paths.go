@@ -20,6 +20,17 @@ const (
 	// install without touching config's story.
 	InstallStateFile = "/etc/vpn/install-state.json"
 
+	// PasswordPendingMarker exists while an unattended install
+	// has applied a generated admin password that was never
+	// displayed (the identity step applies early; the print
+	// happens only at the end of a completed run — a failure in
+	// between would otherwise strand a credential nobody has
+	// seen). Written by the identity step on the unattended
+	// path; cleared when the password is finally printed, or
+	// when the operator sets a password of their own from the
+	// node console. Holds no secret — its presence is the fact.
+	PasswordPendingMarker = "/etc/vpn/password-pending"
+
 	BitcoinConf = "/etc/bitcoin/bitcoin.conf"
 	BitcoinDir  = "/etc/bitcoin"
 

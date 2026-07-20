@@ -247,6 +247,18 @@ func applyIdentityAccess(dec *InstallDecisions) error {
 	}
 	dec.PasswordApplied = true
 
+	if dec.GeneratedPassword != "" {
+		// Unattended path: the password just applied is machine
+		// generated and will not be printed until the end of the
+		// run. Record that gap durably — if this run dies before
+		// the print, the resuming pass must know a credential is
+		// still owed (see passwordpending.go).
+		if err := markPasswordPending(); err != nil {
+			return fmt.Errorf(
+				"record password-pending marker: %w", err)
+		}
+	}
+
 	return writeAdminAutoLaunch()
 }
 
