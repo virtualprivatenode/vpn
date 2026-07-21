@@ -42,4 +42,20 @@ func TestParseArgs(t *testing.T) {
 			t.Errorf("%s: got (%v,%v), want version", v, cmd, err)
 		}
 	}
+
+	cmd, opts, err = parseArgs([]string{
+		"install", "--unattended", "--allow-console-only"})
+	if err != nil || cmd != cmdInstall || !opts.AllowConsoleOnly {
+		t.Errorf("allow-console-only: got (%v,%+v,%v)",
+			cmd, opts, err)
+	}
+
+	cmd, _, err = parseArgs([]string{"helperd"})
+	if err != nil || cmd != cmdHelperd {
+		t.Errorf("helperd: got (%v,%v)", cmd, err)
+	}
+	if _, _, err := parseArgs(
+		[]string{"helperd", "--flag"}); err == nil {
+		t.Error("helperd with arguments accepted")
+	}
 }

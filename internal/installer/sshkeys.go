@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/virtualprivatenode/vpn/internal/paths"
@@ -93,13 +94,18 @@ func ValidateSSHKey(line string) error {
 // ListAuthorizedKeys reads and parses all keys from the
 // admin user's authorized_keys file. Returns an empty
 // slice (not an error) if the file does not exist.
+//
+// No privilege is involved anywhere in this file: the
+// authorized_keys file belongs to the admin user, so the TUI
+// (running as that user) reads and writes it directly, and
+// the root-run installer can too. The one root-only piece of
+// the key story — the effective password-auth answer that
+// guards last-key removal — comes from
+// EffectiveSSHPasswordAuth (sshd.go).
 func ListAuthorizedKeys() ([]SSHKeyInfo, error) {
-	data, err := system.SudoReadFile(
-		paths.AuthorizedKeysFile)
+	data, err := os.ReadFile(paths.AuthorizedKeysFile)
 	if err != nil {
-		if os.IsNotExist(err) ||
-			strings.Contains(err.Error(),
-				"No such file") {
+		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf(
@@ -151,8 +157,7 @@ func AppendAuthorizedKey(line string) error {
 
 	// Read raw file to preserve comments and formatting.
 	var content string
-	data, err := system.SudoReadFile(
-		paths.AuthorizedKeysFile)
+	data, err := os.ReadFile(paths.AuthorizedKeysFile)
 	if err == nil {
 		content = string(data)
 	}
@@ -164,16 +169,47 @@ func AppendAuthorizedKey(line string) error {
 	}
 	content += line + "\n"
 
-	if err := system.SudoWriteFile(
-		paths.AuthorizedKeysFile,
-		[]byte(content), 0600); err != nil {
-		return fmt.Errorf(
-			"write authorized_keys: %w", err)
-	}
+	return writeAuthorizedKeys([]byte(content))
+}
 
-	return system.SudoRun("chown",
-		paths.AdminUser+":"+paths.AdminUser,
-		paths.AuthorizedKeysFile)
+// writeAuthorizedKeys writes the admin user's authorized_keys
+// atomically: same-dir temp, chmod 0600, rename. When running
+// as root (install-time), ownership is handed to the admin
+// user afterwards; as the admin user the file is simply ours.
+func writeAuthorizedKeys(content []byte) error {
+	dir := filepath.Dir(paths.AuthorizedKeysFile)
+	tmp, err := os.CreateTemp(dir, ".authorized_keys.tmp-")
+	if err != nil {
+		return fmt.Errorf("write authorized_keys: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write authorized_keys: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write authorized_keys: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write authorized_keys: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write authorized_keys: %w", err)
+	}
+	if err := os.Rename(tmpPath,
+		paths.AuthorizedKeysFile); err != nil {
+		return fmt.Errorf("write authorized_keys: %w", err)
+	}
+	if os.Geteuid() == 0 {
+		return system.SudoRun("chown",
+			paths.AdminUser+":"+paths.AdminUser,
+			paths.AuthorizedKeysFile)
+	}
+	return nil
 }
 
 // RemoveAuthorizedKey removes the key matching the given
@@ -191,8 +227,7 @@ func AppendAuthorizedKey(line string) error {
 // query runs only when the last key is being removed, so
 // ordinary removals cost no extra privileged call.
 func RemoveAuthorizedKey(fingerprint string) error {
-	data, err := system.SudoReadFile(
-		paths.AuthorizedKeysFile)
+	data, err := os.ReadFile(paths.AuthorizedKeysFile)
 	if err != nil {
 		return fmt.Errorf(
 			"read authorized_keys: %w", err)
@@ -253,14 +288,5 @@ func RemoveAuthorizedKey(fingerprint string) error {
 
 	content := strings.Join(kept, "\n")
 
-	if err := system.SudoWriteFile(
-		paths.AuthorizedKeysFile,
-		[]byte(content), 0600); err != nil {
-		return fmt.Errorf(
-			"write authorized_keys: %w", err)
-	}
-
-	return system.SudoRun("chown",
-		paths.AdminUser+":"+paths.AdminUser,
-		paths.AuthorizedKeysFile)
+	return writeAuthorizedKeys([]byte(content))
 }

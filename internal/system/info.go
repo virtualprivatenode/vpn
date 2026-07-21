@@ -60,8 +60,17 @@ func Memory() MemInfo {
 	}
 }
 
+// DirSize measures a directory tree with du. Root only: the
+// data directories it is used on belong to service users. The
+// unprivileged status screen gets the LND size through the
+// helper's dir-size operation (which calls this as root) and
+// the Bitcoin size from bitcoind's own RPC — it never calls
+// this directly.
 func DirSize(path string) string {
-	out, err := exec.Command("sudo", "du", "-sh", path).CombinedOutput()
+	if os.Geteuid() != 0 {
+		return "N/A"
+	}
+	out, err := exec.Command("du", "-sh", path).CombinedOutput()
 	if err != nil {
 		return "N/A"
 	}

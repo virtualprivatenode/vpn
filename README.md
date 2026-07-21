@@ -244,7 +244,7 @@ For the full setup guide, see
 
 ### Security
 
-- TUI runs as the unprivileged `vpn` admin user (passwordless sudo for system operations — scheduled for removal in favor of a root helper)
+- TUI runs as the unprivileged `vpn` admin user, which has **no sudo rights at all**. Privileged operations (service control, updates, config changes) go through a socket-activated root helper that serves a fixed menu of typed operations — no arbitrary commands, no arbitrary file reads — verifies the identity of every connecting process, and logs every operation to the system journal, which the admin user can read but not rewrite
 - All connections through Tor (SOCKS5 port 9050)
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
@@ -340,6 +340,7 @@ For manual binary verification before installation, see
 | /etc/lnd/lnd.conf | LND configuration |
 | /etc/syncthing/ | Syncthing configuration |
 | /etc/vpn/config.json | Install state and credentials |
+| /var/lib/vpn/state/ | Node facts staged for the console (onion addresses, staged credentials) |
 | /var/lib/bitcoin/ | Blockchain data |
 | /var/lib/lnd/ | LND data and wallet |
 | /var/lib/syncthing/lnd-backup/ | Auto-synced channel.backup |

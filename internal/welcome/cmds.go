@@ -37,10 +37,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // ── Polling & version ────────────────────────────────────
@@ -507,6 +507,10 @@ func showNodeURIsCmd(uris []string) tea.Cmd {
 
 // ── System actions ───────────────────────────────────────
 
+// runSvcActionCmd requests a service start/stop/restart from
+// the root helper. The helper validates the unit and action
+// against closed sets and verifies the unit's state afterward;
+// this side just reports the outcome.
 func runSvcActionCmd(action, svc string) tea.Cmd {
 	var verb string
 	switch action {
@@ -520,35 +524,25 @@ func runSvcActionCmd(action, svc string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		system.SudoRun("systemctl", verb, svc)
+		if err := helper.Call(helper.VerbServiceAction,
+			helper.ServiceActionParams{
+				Unit: svc, Action: verb,
+			}, nil); err != nil {
+			logger.Install("%s %s: %v", verb, svc, err)
+		}
 		return svcActionDoneMsg{}
 	}
 }
 
+// runUpdatePackagesCmd requests the helper's package-update
+// operation (apt refresh + upgrade, non-interactive, with a
+// dpkg consistency check after). The helper streams step
+// progress; this button's UX is a single busy state, so the
+// call simply blocks until the terminator.
 func runUpdatePackagesCmd() tea.Cmd {
-	// Non-interactive environment so beginner users
-	// never see mid-upgrade prompts:
-	//   - DEBIAN_FRONTEND=noninteractive suppresses
-	//     debconf dialogs entirely
-	//   - NEEDRESTART_MODE=a tells needrestart (default
-	//     on Debian 13) to auto-restart services instead
-	//     of showing its blue ncurses picker
-	//   - --force-confdef + --force-confold keeps the
-	//     existing config file on any conffile conflict,
-	//     skipping the pink dpkg prompt
-	// This matches the bootstrap script's Phase 1
-	// upgrade command exactly.
 	return func() tea.Msg {
 		logger.Install("Update packages started")
-		err := system.SudoRun("bash", "-c",
-			"DEBIAN_FRONTEND=noninteractive "+
-				"NEEDRESTART_MODE=a "+
-				"apt-get update -qq && "+
-				"DEBIAN_FRONTEND=noninteractive "+
-				"NEEDRESTART_MODE=a "+
-				"apt-get upgrade -y -qq "+
-				"-o Dpkg::Options::=--force-confdef "+
-				"-o Dpkg::Options::=--force-confold")
+		err := helper.Call(helper.VerbPackageUpdate, nil, nil)
 		if err != nil {
 			logger.Install("Update packages failed: %v", err)
 		} else {
@@ -559,8 +553,13 @@ func runUpdatePackagesCmd() tea.Cmd {
 }
 
 func runRebootCmd() tea.Cmd {
-	c := exec.Command("sudo", "reboot")
-	return tea.ExecProcess(c, func(err error) tea.Msg {
+	return func() tea.Msg {
+		// The helper answers, then reboots — the connection
+		// outliving the box is not expected, so any error here
+		// is only logged.
+		if err := helper.Call(helper.VerbReboot, nil, nil); err != nil {
+			logger.Install("reboot: %v", err)
+		}
 		return svcActionDoneMsg{}
-	})
+	}
 }

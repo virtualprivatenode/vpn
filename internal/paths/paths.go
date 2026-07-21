@@ -34,6 +34,39 @@ const (
 	BitcoinConf = "/etc/bitcoin/bitcoin.conf"
 	BitcoinDir  = "/etc/bitcoin"
 
+	// StateDir is the staging board: root-written files that
+	// carry privileged facts (onion hostnames, staged
+	// credentials) to the unprivileged admin user. The
+	// directory is root:vpn 0750; each file root:vpn 0640.
+	// Root (the installer and the helper) writes; the admin
+	// user reads. Every file is re-written by whatever
+	// operation changes the fact it carries — a reader that
+	// finds a file missing or unreadable reports the feature
+	// unavailable and logs why, never guesses.
+	//
+	// The board lives under /var/lib/vpn — NOT under /etc/vpn
+	// — deliberately: /etc/vpn is owned by the admin user (the
+	// TUI writes config.json there), and a directory owner can
+	// replace a subdirectory with a symlink. Root-side board
+	// writes under an admin-owned parent would hand a
+	// compromised admin account a "make root chown an
+	// arbitrary directory" primitive. Every ancestor of the
+	// board is root-owned, so that class cannot arise.
+	VarLibVPN = "/var/lib/vpn"
+	StateDir  = VarLibVPN + "/state"
+
+	// Staging board files. One fact per file.
+	StateBitcoindRPCPass = StateDir + "/bitcoind-rpc.pass"
+	StateLNDTLSCert      = StateDir + "/lnd-tls.cert"
+	StateLNDMacaroon     = StateDir + "/lnd-admin.macaroon"
+	StateOnionBitcoinP2P = StateDir + "/onion-bitcoin-p2p"
+	StateOnionLNDGRPC    = StateDir + "/onion-lnd-grpc"
+	StateOnionLNDREST    = StateDir + "/onion-lnd-rest"
+	StateOnionSyncthing  = StateDir + "/onion-syncthing"
+	StateSyncthingAPIKey = StateDir + "/syncthing-api-key"
+	StateSyncthingDevID  = StateDir + "/syncthing-device-id"
+	StateSSHPasswordAuth = StateDir + "/ssh-password-auth"
+
 	LNDConf = "/etc/lnd/lnd.conf"
 	LNDDir  = "/etc/lnd"
 
@@ -93,6 +126,16 @@ const (
 	SyncthingService  = "/etc/systemd/system/syncthing.service"
 	BackupWatchPath   = "/etc/systemd/system/lnd-backup-watch.path"
 	BackupCopyService = "/etc/systemd/system/lnd-backup-copy.service"
+
+	// The root helper's socket-activated units. The socket
+	// node's ownership and mode (root:vpn 0660, created by
+	// systemd before the helper ever runs) ARE the
+	// authentication for privileged operations; the service
+	// is started by traffic and exits when idle.
+	HelperSocket         = "/run/vpn-helperd.sock"
+	HelperSocketUnit     = "/etc/systemd/system/vpn-helperd.socket"
+	HelperServiceUnit    = "/etc/systemd/system/vpn-helperd.service"
+	HelperSocketUnitName = "vpn-helperd.socket"
 )
 
 // ── Logs ─────────────────────────────────────────────────
@@ -152,9 +195,12 @@ const (
 	AdminBashProfile   = AdminHome + "/.bash_profile"
 	AuthorizedKeysFile = AdminHome + "/.ssh/authorized_keys"
 
-	// AdminSudoers is the NOPASSWD rule the installer writes
-	// for the admin user. Commit 7 (root helper) deletes it —
-	// nothing replaces it (ruling iii: zero sudoers residue).
+	// AdminSudoers is where older builds granted the admin
+	// user NOPASSWD sudo. The install now DELETES this file
+	// and writes no replacement: the admin user has no sudo
+	// rights at all. Privileged operations go through the
+	// root helper's socket instead (vpn helperd), which
+	// serves a fixed menu of typed operations — not a shell.
 	AdminSudoers = "/etc/sudoers.d/" + AdminUser
 
 	// BinaryPath is where the installer places the running

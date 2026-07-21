@@ -75,6 +75,13 @@ func RunPreflight() (SSHObservation, error) {
 			failed++
 		}
 	}
+	// Warnings never refuse; they are printed and logged so the
+	// operator can judge them.
+	for _, w := range preflightWarnings() {
+		fmt.Fprintf(os.Stderr, "\n  WARNING: %s\n", w)
+		logger.Install("Preflight WARNING: %s", w)
+	}
+
 	if failed == 0 {
 		logger.Install("Preflight passed (%d/%d checks)",
 			len(results), len(results))
@@ -106,6 +113,24 @@ func runPreflightChecks() ([]PreflightResult, SSHObservation) {
 	results = append(results,
 		PreflightResult{checkNameSSHState, obsErr})
 	return results, obs
+}
+
+// preflightWarnings collects conditions worth telling the
+// operator about that are not grounds for refusal.
+func preflightWarnings() []string {
+	var ws []string
+	// A world-readable /etc/sudoers.d discloses the box's sudo
+	// POLICY to any local user (Debian 13 ships it 750). It
+	// holds no credentials, and this node grants no sudo rules
+	// anyway — a disclosure note, never a refusal.
+	if fi, err := os.Stat(paths.SudoersDir); err == nil &&
+		fi.Mode().Perm()&0o004 != 0 {
+		ws = append(ws, fmt.Sprintf(
+			"%s is world-readable (%o) — local users can read "+
+				"sudo policy; Debian ships it 0750",
+			paths.SudoersDir, fi.Mode().Perm()))
+	}
+	return ws
 }
 
 // ── Check 1: OS ──────────────────────────────────────────
@@ -157,17 +182,18 @@ func checkOSRelease(content string) error {
 // ── Check 2: sudo I/O logging (IA-3-H) ───────────────────
 
 // checkSudoersIOLogging asserts no sudoers file enables sudo's
-// input/output recording. With log_input set, the moment the TUI
-// pipes the admin password to `sudo chpasswd`, sudo would tee the
-// plaintext to /var/log/sudo-io — a passive credential sink. Scope:
-// /etc/sudoers plus every file sudo's @includedir would parse in
-// /etc/sudoers.d. Residual (documented, accepted): a nonstandard
-// @includedir pointing elsewhere is not followed.
+// input/output recording. Scope: /etc/sudoers plus every file
+// sudo's @includedir would parse in /etc/sudoers.d. Residual
+// (documented, accepted): a nonstandard @includedir pointing
+// elsewhere is not followed.
 //
-// The install itself runs as root and never trips this — the check
-// protects the ADMIN-USER era that starts at handoff (and it dies
-// with the TUI's sudo use at commit 7, when the root helper takes
-// over).
+// This app itself no longer runs anything through sudo (the
+// admin user has no sudo rights; privileged operations go
+// through the root helper), so nothing of OURS can be captured
+// by sudo I/O recording anymore. The check stays because a box
+// where someone silently records terminal input is a box this
+// installer should not set a node up on — the assertion is
+// about the environment's hygiene, cheap to keep.
 func checkSudoersIOLogging() error {
 	files := []string{paths.SudoersFile}
 	dropIns, err := listSudoersDropIns()

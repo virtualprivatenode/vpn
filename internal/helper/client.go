@@ -1,0 +1,231 @@
+// internal/helper/client.go
+
+package helper
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"time"
+
+	"github.com/virtualprivatenode/vpn/internal/paths"
+)
+
+// ── Helper client ────────────────────────────────────────
+//
+// One privileged operation = one connection: dial the helper's
+// socket, write one request line, half-close, then read
+// progress events until the ok/error terminator. The socket's
+// ownership (root:vpn 0660) is what authorizes the connection;
+// there is no password and no token — being the admin user IS
+// the credential, and the helper re-checks the peer's uid on
+// every connection.
+//
+// The helper serializes execution: while it runs one operation,
+// a second connection waits its turn in the kernel's queue.
+// Deadlines are enforced on the root side per operation; the
+// client just reads until the connection ends.
+
+const dialTimeout = 5 * time.Second
+
+// maxEventBytes bounds one response line. Events are small; the
+// bound exists so a defect can't balloon client memory.
+const maxEventBytes = 1 << 20
+
+// helperDown wraps a transport-level failure in operator-facing
+// language: what to check, in order.
+func helperDown(op string, err error) error {
+	return fmt.Errorf(
+		"%s: cannot reach the node's helper service (%v) — "+
+			"check: systemctl status vpn-helperd.socket, then "+
+			"journalctl -u vpn-helperd", op, err)
+}
+
+// Session is one in-flight helper request. Callers either
+// drain it with Wait (simple verbs) or step through it with
+// WaitStep + Wait (streaming verbs feeding a step renderer).
+type Session struct {
+	conn    *net.UnixConn
+	scanner *bufio.Scanner
+	verb    string
+
+	end    *Event // terminator, once seen
+	nextIx int    // next step index expected by WaitStep
+	stepOK map[int]bool
+	err    error // sticky transport/protocol error
+}
+
+// Start dials the helper and sends the request. It returns
+// immediately after the request is written; the operation runs
+// (and possibly queues) on the root side.
+func Start(verb string, params any) (*Session, error) {
+	d := net.Dialer{Timeout: dialTimeout}
+	c, err := d.Dial("unix", paths.HelperSocket)
+	if err != nil {
+		return nil, helperDown(verb, err)
+	}
+	conn, ok := c.(*net.UnixConn)
+	if !ok { // cannot happen for a unix dial; belt and braces
+		c.Close()
+		return nil, helperDown(verb,
+			errors.New("not a unix socket connection"))
+	}
+
+	req := Request{Verb: verb}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("%s: encode params: %w", verb, err)
+		}
+		req.Params = raw
+	}
+	line, err := json.Marshal(req)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%s: encode request: %w", verb, err)
+	}
+	if err := conn.SetWriteDeadline(
+		time.Now().Add(dialTimeout)); err == nil {
+		defer conn.SetWriteDeadline(time.Time{})
+	}
+	if _, err := conn.Write(append(line, '\n')); err != nil {
+		conn.Close()
+		return nil, helperDown(verb, err)
+	}
+	// Half-close our sending side: the helper reads a clean EOF
+	// after the request line even if a future client forgets
+	// the trailing newline.
+	if err := conn.CloseWrite(); err != nil {
+		conn.Close()
+		return nil, helperDown(verb, err)
+	}
+
+	sc := bufio.NewScanner(conn)
+	sc.Buffer(make([]byte, 0, 64*1024), maxEventBytes)
+	return &Session{
+		conn:    conn,
+		scanner: sc,
+		verb:    verb,
+		stepOK:  map[int]bool{},
+	}, nil
+}
+
+// readEvent reads the next response line. Returns nil at
+// end-of-stream (which is only legitimate after a terminator).
+func (s *Session) readEvent() (*Event, error) {
+	if !s.scanner.Scan() {
+		if err := s.scanner.Err(); err != nil {
+			return nil, helperDown(s.verb, err)
+		}
+		return nil, nil // EOF
+	}
+	var ev Event
+	if err := json.Unmarshal(s.scanner.Bytes(), &ev); err != nil {
+		return nil, fmt.Errorf(
+			"%s: malformed helper response: %w", s.verb, err)
+	}
+	return &ev, nil
+}
+
+// advance consumes events until the wanted step index has
+// completed or the stream terminates.
+func (s *Session) advance(untilStep int) error {
+	if s.err != nil {
+		return s.err
+	}
+	for {
+		if untilStep >= 0 && s.stepOK[untilStep] {
+			return nil
+		}
+		if s.end != nil {
+			return s.endErr(untilStep)
+		}
+		ev, err := s.readEvent()
+		if err != nil {
+			s.err = err
+			return err
+		}
+		if ev == nil {
+			// Stream ended without a terminator: the helper died
+			// mid-operation or its deadline expired.
+			s.err = helperDown(s.verb, errors.New(
+				"connection closed before the operation finished"))
+			return s.err
+		}
+		switch ev.Event {
+		case "step":
+			if ev.Err != "" {
+				s.err = fmt.Errorf("%s", ev.Err)
+				return s.err
+			}
+			s.stepOK[ev.Index] = true
+		case "end":
+			s.end = ev
+			if untilStep < 0 {
+				return s.endErr(untilStep)
+			}
+		default:
+			// Unknown event kinds are ignored: additive protocol
+			// growth must not break older clients.
+		}
+	}
+}
+
+// endErr folds the terminator into an error (or nil).
+func (s *Session) endErr(untilStep int) error {
+	if s.end.OK {
+		if untilStep >= 0 && !s.stepOK[untilStep] {
+			// Terminated OK without reporting the step the caller
+			// is waiting on — a protocol drift bug.
+			s.err = fmt.Errorf(
+				"%s: helper finished without reporting step %d",
+				s.verb, untilStep+1)
+			return s.err
+		}
+		return nil
+	}
+	s.err = errors.New(s.end.Error)
+	return s.err
+}
+
+// WaitStep blocks until step i (0-based) completes on the root
+// side, a step fails, or the stream ends in an error.
+func (s *Session) WaitStep(i int) error {
+	return s.advance(i)
+}
+
+// Wait blocks until the terminator, decoding its result payload
+// into result (which may be nil), and closes the connection.
+func (s *Session) Wait(result any) error {
+	defer s.conn.Close()
+	if err := s.advance(-1); err != nil {
+		return err
+	}
+	if result != nil && len(s.end.Result) > 0 {
+		if err := json.Unmarshal(s.end.Result, result); err != nil {
+			return fmt.Errorf(
+				"%s: decode helper result: %w", s.verb, err)
+		}
+	}
+	return nil
+}
+
+// Close abandons the session. The root side finishes the
+// operation it started regardless — abandoning a mutation
+// halfway is exactly the inconsistent state the helper exists
+// to prevent — but this client stops listening.
+func (s *Session) Close() { s.conn.Close() }
+
+// Call performs a whole verb in one blocking call: start, drain
+// any progress events, decode the terminator. For streaming
+// verbs it simply ignores per-step progress.
+func Call(verb string, params, result any) error {
+	s, err := Start(verb, params)
+	if err != nil {
+		return err
+	}
+	return s.Wait(result)
+}

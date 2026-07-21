@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/system"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -283,12 +283,21 @@ func (s *P2PUpgradeScreen) startInstall() (
 ) {
 	cfg := s.ctx.Cfg
 
-	// Set hybrid before building steps so LND config
-	// and firewall include clearnet listeners.
+	// Set hybrid so this session's screens reflect the mode
+	// being applied; the on-disk save happens only on success.
 	cfg.P2PMode = "hybrid"
 
-	steps := installer.P2PUpgradeSteps(
-		cfg, s.publicIP)
+	// The mode switch (LND config, firewall, LND restart, and
+	// re-staging the regenerated TLS certificate) runs on the
+	// root side of the helper boundary as one operation. The
+	// helper derives the box's public address itself — the IP
+	// this screen showed the operator is display, not an input
+	// it will accept.
+	steps := buildHelperSteps(
+		helper.VerbSetP2PMode,
+		helper.SetP2PModeParams{Mode: "hybrid"},
+		helper.SetP2PModeStepNames(),
+		nil)
 
 	s.progress = NewInstallProgressScreen(
 		s.ctx, steps,

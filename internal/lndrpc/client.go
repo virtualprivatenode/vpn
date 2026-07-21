@@ -2,10 +2,11 @@
 
 // Package lndrpc provides a gRPC client for LND.
 //
-// The client reads the admin macaroon once at startup via sudo
-// (using a temp file that's immediately deleted) and holds it
-// in memory for the duration of the process. The macaroon is
-// injected into every gRPC call as metadata.
+// The client reads the TLS certificate and admin macaroon from
+// the staging board — root-staged copies the admin user reads
+// directly, no privileged operation on the read path — and
+// holds the macaroon in memory for the duration of the process.
+// The macaroon is injected into every gRPC call as metadata.
 //
 // Connection uses TLS to localhost. The macaroon never crosses
 // the network. When the TUI process exits, the macaroon is gone
@@ -30,9 +31,9 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // Client wraps an LND gRPC connection with macaroon authentication.
@@ -64,8 +65,9 @@ func (c *Client) connect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Read TLS cert
-	certData, err := system.SudoReadFile(paths.LNDTLSCert)
+	// Read the staged TLS cert copy (fail-noisy: a missing
+	// staged fact names itself and points at the journal).
+	certData, err := helper.ReadBoard(paths.StateLNDTLSCert)
 	if err != nil {
 		return fmt.Errorf("read TLS cert: %w", err)
 	}
@@ -77,9 +79,9 @@ func (c *Client) connect() error {
 
 	tlsCreds := credentials.NewClientTLSFromCert(certPool, "")
 
-	// Read macaroon
-	macaroonPath := paths.LNDMacaroon(c.networkDir())
-	macBytes, err := system.SudoReadFile(macaroonPath)
+	// Read the staged admin macaroon copy (staged at wallet
+	// creation; re-staged whenever an operation invalidates it).
+	macBytes, err := helper.ReadBoard(paths.StateLNDMacaroon)
 	if err != nil {
 		return fmt.Errorf("read macaroon: %w", err)
 	}
@@ -152,15 +154,6 @@ func (c *Client) macaroonCtx() context.Context {
 // callCtx returns a context with macaroon and a timeout.
 func (c *Client) callCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(c.macaroonCtx(), timeout)
-}
-
-// networkDir returns the macaroon network directory name.
-// LND uses "mainnet" not "mainnet" in the path for mainnet.
-func (c *Client) networkDir() string {
-	if c.network == "" {
-		return "mainnet"
-	}
-	return c.network
 }
 
 // rpc returns the Lightning client, or nil if not connected.

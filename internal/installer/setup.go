@@ -25,8 +25,9 @@ const (
 
 var appVersion = "dev"
 
-func SetVersion(v string)   { appVersion = v }
-func LndVersionStr() string { return lndVersion }
+func SetVersion(v string)         { appVersion = v }
+func LndVersionStr() string       { return lndVersion }
+func SyncthingVersionStr() string { return syncthingVersion }
 
 // ── Main install flow ────────────────────────────────────
 //
@@ -57,6 +58,15 @@ type InstallOptions struct {
 	// WITHOUT InstallComplete, without handoff, without the
 	// verification banner — first-boot steps are still owed.
 	UntilBake bool
+	// AllowConsoleOnly permits an unattended install to
+	// complete with NO SSH way in: no enumerable keys AND
+	// password auth observed off means the printed password
+	// works only at the provider console. Without this flag
+	// such a run REFUSES — completing it would strand the box
+	// by automation. The flag names the consequence so the
+	// consent is auditable wherever the command line is
+	// recorded.
+	AllowConsoleOnly bool
 }
 
 // RunInstall is the `sudo vpn install` entry point.
@@ -76,6 +86,18 @@ func RunInstall(opts InstallOptions) error {
 	// showing its dialog mid-upgrade.
 	os.Setenv("DEBIAN_FRONTEND", "noninteractive")
 	os.Setenv("NEEDRESTART_MODE", "a")
+
+	// One install at a time: an exclusive lock on the ledger,
+	// held for the whole run (released by process exit on any
+	// death). A second concurrent run refuses immediately.
+	if err := os.MkdirAll(paths.ConfigDir, 0750); err != nil {
+		return fmt.Errorf("create %s: %w", paths.ConfigDir, err)
+	}
+	runLock, err := acquireRunLock(paths.InstallStateFile)
+	if err != nil {
+		return err
+	}
+	defer runLock.Close()
 
 	// Preflight (principle 3): assert the environment before the
 	// first mutation; refuses with a full report on any failure.
@@ -137,13 +159,10 @@ func RunInstall(opts InstallOptions) error {
 	cfg.LNDInstalled = true
 	cfg.Components = "bitcoin+lnd"
 
-	// The ledger lives in the config dir; the dir must exist
-	// before the first step completes. Root-owned during the
-	// install; ownership of the dir and config.json passes to
-	// the admin user at completion (migration requirement 2).
-	if err := os.MkdirAll(paths.ConfigDir, 0750); err != nil {
-		return fmt.Errorf("create %s: %w", paths.ConfigDir, err)
-	}
+	// (The config dir was created above, before the run lock —
+	// the ledger lives in it. Root-owned during the install;
+	// ownership of the dir and config.json passes to the admin
+	// user at completion, migration requirement 2.)
 
 	dec := &InstallDecisions{Obs: obs}
 	steps := buildInstallSteps(cfg, dec)
@@ -193,7 +212,8 @@ func RunInstall(opts InstallOptions) error {
 	var res RunResult
 	openConsole := false
 	if opts.Unattended {
-		if err := fillUnattendedDecisions(dec); err != nil {
+		if err := fillUnattendedDecisions(
+			dec, opts.AllowConsoleOnly); err != nil {
 			return err
 		}
 		fmt.Printf("\n  Virtual Private Node — unattended install\n\n")
@@ -331,8 +351,30 @@ func finalizeOwnership() {
 // instead of guessing — and the password is randomly generated
 // (ruling vii: random survives ONLY here) and printed at the
 // end. dbcache takes the hardware recommendation.
-func fillUnattendedDecisions(dec *InstallDecisions) error {
+//
+// Zero-key strand guard: the interactive wizard refuses zero
+// selected keys when observed password auth is off; this is the
+// unattended equivalent. A box with no enumerable keys AND
+// password auth off would finish with no SSH way in at all —
+// the printed password works only at the provider console. That
+// outcome must be asked for by name (--allow-console-only),
+// never reached by default: a warning scrolling past in an
+// unattended run is not consent.
+func fillUnattendedDecisions(
+	dec *InstallDecisions, allowConsoleOnly bool,
+) error {
 	dec.Keys = DedupeKeys(EnumerateKeySources())
+	if strandsBox(len(dec.Keys), dec.Obs.PasswordAuth,
+		allowConsoleOnly) {
+		return errors.New(
+			"refusing: no SSH keys found anywhere on this box " +
+				"and password login is disabled in sshd — " +
+				"completing would leave no SSH way in (the " +
+				"generated password works only at a console). " +
+				"Add a key, enable password auth, or re-run " +
+				"with --allow-console-only if console-only " +
+				"access is really what you want")
+	}
 	gen, err := generateAdminPassword()
 	if err != nil {
 		return err
@@ -345,6 +387,15 @@ func fillUnattendedDecisions(dec *InstallDecisions) error {
 	dec.GeneratedPassword = gen
 	dec.DbCacheMB = RecommendDbCache(DetectHardware().RAMMB)
 	return nil
+}
+
+// strandsBox is the zero-key strand condition: no keys to
+// write, password auth off, and no explicit console-only
+// consent. Pure — unit-tested.
+func strandsBox(
+	keyCount int, passwordAuth, allowConsoleOnly bool,
+) bool {
+	return keyCount == 0 && !passwordAuth && !allowConsoleOnly
 }
 
 // ── Absorbed bootstrap steps (script Phase 1) ────────────
@@ -597,6 +648,24 @@ func buildInstallSteps(
 			Fn: func() error {
 				return installSSHHardening(cfg)
 			}},
+		// The runtime privilege boundary. Three steps, all
+		// first-boot (they need the admin user and group to
+		// exist): journal read access for the admin user, the
+		// root helper's socket-activated units, and the staging
+		// board snapshot. After these — and with
+		// identity.access granting no sudo — the end state
+		// holds: the admin user has no root privilege at all,
+		// and every privileged operation it can request is one
+		// of the helper's fixed, typed, journal-audited verbs.
+		{Key: "journal.access", Phase: PhaseFirstBoot,
+			Name: "Granting journal read access",
+			Fn:   setupJournalAccess},
+		{Key: "helper.enable", Phase: PhaseFirstBoot,
+			Name: "Enabling the root helper socket",
+			Fn:   installHelperUnits},
+		{Key: "state.stage", Phase: PhaseFirstBoot,
+			Name: "Staging node facts for the console",
+			Fn:   StageBoardAll},
 		// Formerly a post-TUI special case that warned but
 		// completed anyway (IA-1-16). As a real step it
 		// inherits the ledger, the completion gate, failure
@@ -868,6 +937,21 @@ func readFileOrDefault(path, def string) string {
 	return string(data)
 }
 
+// setupShellEnvironment writes the admin user's cli wrappers.
+// Both run with NO privilege: they are the recovery path a
+// zero-sudo box leans on when the console itself misbehaves,
+// so they must work exactly as the admin user.
+//
+//   - bitcoin-cli authenticates with the node's own RPC
+//     credential: the staged password is fed on stdin
+//     (-stdinrpcpass), never on the command line, where it
+//     would be visible in /proc/*/cmdline. The wrapper cannot
+//     read bitcoin.conf (root-owned) and does not need to —
+//     connection details are passed explicitly.
+//   - lncli reads the staged certificate and macaroon copies.
+//     The wallet-create ceremony passes its own flags
+//     (cert-only — no macaroon exists yet); this wrapper is
+//     for the day-to-day case.
 func setupShellEnvironment(cfg *config.AppConfig) error {
 	bashrc := paths.AdminBashrc
 	data, _ := os.ReadFile(bashrc)
@@ -884,14 +968,20 @@ func setupShellEnvironment(cfg *config.AppConfig) error {
 		}
 		content += fmt.Sprintf(`
 # -- Virtual Private Node --
+# RPC password comes from the staged credential file on stdin;
+# commands that themselves read stdin should be run with
+# explicit flags instead of this wrapper.
 bitcoin-cli() {
-    sudo -u bitcoin /usr/local/bin/bitcoin-cli \
-        -datadir=/var/lib/bitcoin \
-        -conf=/etc/bitcoin/bitcoin.conf \%s
-        "$@"
+    /usr/local/bin/bitcoin-cli \
+        -rpcconnect=127.0.0.1 \
+        -rpcport=%d \
+        -rpcuser=%s \
+        -stdinrpcpass \%s
+        "$@" < %s
 }
 export -f bitcoin-cli
-`, btcNetFlag)
+`, net.RPCPort, BitcoindRPCUser, btcNetFlag,
+			paths.StateBitcoindRPCPass)
 	}
 
 	// lncli wrapper — always set up now that LND is part of
@@ -906,14 +996,14 @@ export -f bitcoin-cli
 		}
 		content += fmt.Sprintf(`
 lncli() {
-    sudo -u bitcoin /usr/local/bin/lncli \
-        --lnddir=/var/lib/lnd \%s
-        --macaroonpath=/var/lib/lnd/data/chain/bitcoin/%s/admin.macaroon \
-        --tlscertpath=/var/lib/lnd/tls.cert \
+    /usr/local/bin/lncli \
+        --rpcserver=localhost:10009 \%s
+        --macaroonpath=%s \
+        --tlscertpath=%s \
         "$@"
 }
 export -f lncli
-`, lndNetFlag, net.LNCLINetwork)
+`, lndNetFlag, paths.StateLNDMacaroon, paths.StateLNDTLSCert)
 	}
 
 	if content == "" {

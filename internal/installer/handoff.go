@@ -128,7 +128,10 @@ func printConnectInstructions() {
 // unreadable, -g unsupported) report false: the banner stays,
 // which only nags, never locks out.
 func AdminLoginObserved() bool {
-	out, err := system.SudoRunOutput("journalctl",
+	// No privilege on either calling side: root reads the
+	// journal freely, and the admin user reads it through
+	// systemd-journal group membership (granted at install).
+	out, err := system.RunOutput("journalctl",
 		"-u", "ssh", "--no-pager", "-o", "cat",
 		"-g", "Accepted")
 	if err != nil {

@@ -23,35 +23,48 @@ func Run(name string, args ...string) error {
 	return nil
 }
 
-// maybeSudo prepends sudo to a command line unless the process
-// already runs as root. `vpn install` runs under root dispatch
-// (commit 6), where a sudo prefix would be pointless AND would
-// make the install depend on sudo being installed before the
-// base-package step has run; the TUI runs as the unprivileged
-// admin user, where the sudo prefix is load-bearing (until the
-// commit-7 root helper replaces this seam entirely).
-func maybeSudo(name string, args []string) (string, []string) {
+// requireRoot guards every privileged wrapper below. These
+// wrappers run commands DIRECTLY, with the privilege the process
+// already has — there is no sudo on this box to borrow (the
+// admin user has no sudo rights at all). Two process shapes are
+// allowed to call them: `sudo vpn install` (root by dispatch)
+// and `vpn helperd` (root via its systemd unit). Any other
+// caller is a programming error: an unprivileged code path that
+// should have gone through the helper client instead. Failing
+// loudly here — instead of quietly prefixing sudo and hoping —
+// is deliberate: it makes "no generic root escape from the TUI"
+// a property the binary enforces, not a convention.
+func requireRoot(name string) error {
 	if os.Geteuid() == 0 {
-		return name, args
+		return nil
 	}
-	return "sudo", append([]string{name}, args...)
+	return fmt.Errorf(
+		"%s requires root: this operation must go through "+
+			"the node's root helper (vpn helperd), not run "+
+			"directly — this is a bug worth reporting", name)
 }
 
-// SudoRun executes a command with root privilege: via sudo when
-// unprivileged, directly when already root.
+// SudoRun executes a command that needs root. The name is
+// historical (kept so 100+ call sites read unchanged): it no
+// longer ever invokes sudo — it requires the process itself to
+// be root and refuses otherwise.
 func SudoRun(name string, args ...string) error {
-	n, a := maybeSudo(name, args)
-	return Run(n, a...)
+	if err := requireRoot(name); err != nil {
+		return err
+	}
+	return Run(name, args...)
 }
 
-// SudoRunStdin executes a command with root privilege, feeding
-// stdin from the given string. The payload never appears in argv
+// SudoRunStdin executes a root-requiring command, feeding stdin
+// from the given string. The payload never appears in argv
 // (which would leak via /proc/*/cmdline). Returns trimmed
 // combined output alongside any error, for caller-side message
 // formatting.
 func SudoRunStdin(stdin, name string, args ...string) (string, error) {
-	n, a := maybeSudo(name, args)
-	cmd := exec.Command(n, a...)
+	if err := requireRoot(name); err != nil {
+		return "", err
+	}
+	cmd := exec.Command(name, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
@@ -68,11 +81,13 @@ func RunOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunOutput executes a command with root privilege and
-// returns stdout.
+// SudoRunOutput executes a root-requiring command and returns
+// stdout.
 func SudoRunOutput(name string, args ...string) (string, error) {
-	n, a := maybeSudo(name, args)
-	return RunOutput(n, a...)
+	if err := requireRoot(name); err != nil {
+		return "", err
+	}
+	return RunOutput(name, args...)
 }
 
 // RunContext executes a command with a timeout.
@@ -88,11 +103,13 @@ func RunContext(timeout time.Duration, name string, args ...string) (string, err
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunContext executes a command with root privilege and a
+// SudoRunContext executes a root-requiring command with a
 // timeout.
 func SudoRunContext(timeout time.Duration, name string, args ...string) (string, error) {
-	n, a := maybeSudo(name, args)
-	return RunContext(timeout, n, a...)
+	if err := requireRoot(name); err != nil {
+		return "", err
+	}
+	return RunContext(timeout, name, args...)
 }
 
 // RunCombinedOutput executes a command and returns combined stdout+stderr.
@@ -106,11 +123,13 @@ func RunCombinedOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunCombinedOutput executes a command with root privilege
-// and returns combined stdout+stderr.
+// SudoRunCombinedOutput executes a root-requiring command and
+// returns combined stdout+stderr.
 func SudoRunCombinedOutput(name string, args ...string) (string, error) {
-	n, a := maybeSudo(name, args)
-	return RunCombinedOutput(n, a...)
+	if err := requireRoot(name); err != nil {
+		return "", err
+	}
+	return RunCombinedOutput(name, args...)
 }
 
 // RunSilent executes a command and discards all output.
@@ -121,11 +140,13 @@ func RunSilent(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// SudoRunSilent executes a command with root privilege and
-// discards all output.
+// SudoRunSilent executes a root-requiring command and discards
+// all output.
 func SudoRunSilent(name string, args ...string) error {
-	n, a := maybeSudo(name, args)
-	return RunSilent(n, a...)
+	if err := requireRoot(name); err != nil {
+		return err
+	}
+	return RunSilent(name, args...)
 }
 
 // SudoWriteFile atomically writes content to a root-owned path
@@ -211,36 +232,15 @@ func torWrapper() string {
 	return ""
 }
 
-// SudoReadFile reads a file that requires root access. As root
-// it reads directly (the error preserves os.IsNotExist for
-// callers that treat a missing file as empty); unprivileged it
-// stages a copy via sudo. Uses os.CreateTemp for secure temp
-// file creation.
+// SudoReadFile reads a root-readable file. It preserves
+// os.IsNotExist in the error for callers that treat a missing
+// file as empty. Like every wrapper above, it requires the
+// process to already be root: the unprivileged read path for
+// privileged facts is the staging board (/etc/vpn/state), not a
+// privileged copy staged on demand.
 func SudoReadFile(path string) ([]byte, error) {
 	if os.Geteuid() == 0 {
 		return os.ReadFile(path)
 	}
-	tmpFile, err := os.CreateTemp("", "vpn-read-")
-	if err != nil {
-		return nil, fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
-
-	if err := SudoRun("cp", path, tmpPath); err != nil {
-		return nil, fmt.Errorf("sudo cp %s: %w", path, err)
-	}
-	if err := SudoRun("chmod", "0600", tmpPath); err != nil {
-		return nil, fmt.Errorf("chmod tmp: %w", err)
-	}
-	if err := SudoRun("chown",
-		fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), tmpPath); err != nil {
-		return nil, fmt.Errorf("chown tmp: %w", err)
-	}
-	data, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return nil, fmt.Errorf("read tmp: %w", err)
-	}
-	return data, nil
+	return nil, requireRoot("read " + path)
 }

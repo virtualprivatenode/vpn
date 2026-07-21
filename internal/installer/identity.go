@@ -188,12 +188,18 @@ type InstallDecisions struct {
 }
 
 // applyIdentityAccess is the identity.access step: create the
-// admin user, grant NOPASSWD sudo (commit 7 deletes this — the
-// TUI still runs on sudo until the root helper lands), write the
-// confirmed keys, set the login password, and configure the
-// SSH-login auto-launch. Idempotent — safe to re-run after an
-// interrupt (adduser is guarded, writes overwrite, chpasswd
-// resets to the same password).
+// admin user, write the confirmed keys, set the login
+// password, and configure the SSH-login auto-launch.
+// Idempotent — safe to re-run after an interrupt (adduser is
+// guarded, writes overwrite, chpasswd resets to the same
+// password).
+//
+// What this step deliberately does NOT do: grant sudo. The
+// admin user has no sudo rights at all — privileged operations
+// go through the root helper's socket, and any sudoers rule
+// from an earlier build of this software is REMOVED here.
+// The journal-read group and the helper's units are set up by
+// their own steps (helper.enable, journal.access).
 func applyIdentityAccess(dec *InstallDecisions) error {
 	if _, err := user.Lookup(paths.AdminUser); err != nil {
 		if err := system.SudoRun("adduser",
@@ -204,10 +210,15 @@ func applyIdentityAccess(dec *InstallDecisions) error {
 		}
 	}
 
-	sudoers := paths.AdminUser + " ALL=(ALL) NOPASSWD:ALL\n"
-	if err := system.SudoWriteFile(
-		paths.AdminSudoers, []byte(sudoers), 0440); err != nil {
-		return fmt.Errorf("write sudoers rule: %w", err)
+	// Remove any NOPASSWD grant an earlier build wrote. (No
+	// released binary shipped one under this user's name, but
+	// the removal is one idempotent call and makes the zero-
+	// sudo end state unconditional.)
+	if err := os.Remove(paths.AdminSudoers); err != nil &&
+		!os.IsNotExist(err) {
+		return fmt.Errorf(
+			"remove old sudoers rule %s: %w",
+			paths.AdminSudoers, err)
 	}
 
 	if len(dec.Keys) > 0 {

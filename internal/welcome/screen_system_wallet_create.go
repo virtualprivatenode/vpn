@@ -7,7 +7,9 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -77,6 +79,10 @@ type walletExecDoneMsg struct{ err error }
 // this tab in place into an AutoUnlockScreen. See
 // update.go for the handler.
 type walletCreatedMsg struct{}
+
+// walletStageFailedMsg reports that the wallet exists but the
+// helper could not stage its credentials for this console.
+type walletStageFailedMsg struct{ err error }
 
 type WalletCreateScreen struct {
 	ctx  *ScreenContext
@@ -211,12 +217,27 @@ func (s *WalletCreateScreen) HandleMsg(
 				"wallet creation failed: %v", m.err)
 			return s, nil
 		}
-		// Success. Model handles walletCreatedMsg by
-		// creating the lndClient and transforming this
-		// tab into the auto-unlock screen.
+		// Success. Wallet creation just minted this node's
+		// admin macaroon — have the helper stage copies for
+		// this console BEFORE the Model builds the gRPC
+		// client that reads them.
 		return s, func() tea.Msg {
+			if err := helper.Call(
+				helper.VerbStageLNDCredentials,
+				nil, nil); err != nil {
+				return walletStageFailedMsg{err: err}
+			}
 			return walletCreatedMsg{}
 		}
+
+	case walletStageFailedMsg:
+		s.step = walletErr
+		s.resultErr = fmt.Errorf(
+			"the wallet was created, but its credentials "+
+				"could not be staged for this console: %v — "+
+				"the console cannot reach the wallet until "+
+				"that is resolved", m.err)
+		return s, nil
 	}
 	return s, nil
 }
@@ -294,8 +315,9 @@ echo
 echo "  Your seed phrase will appear in this terminal."
 echo "  Make sure nobody is looking over your shoulder."
 echo
-sudo -u bitcoin lncli ` +
-		`--lnddir=/var/lib/lnd ` +
+/usr/local/bin/lncli ` +
+		`--rpcserver=localhost:10009 ` +
+		`--tlscertpath=` + paths.StateLNDTLSCert + ` ` +
 		`--network=` + net.LNCLINetwork + ` create && {
   trap '' INT
   echo

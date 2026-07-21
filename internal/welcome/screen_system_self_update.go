@@ -4,7 +4,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -110,8 +110,16 @@ func (s *SelfUpdateScreen) HandleKey(
 func (s *SelfUpdateScreen) startInstall() (
 	Screen, tea.Cmd,
 ) {
-	steps := installer.SelfUpdateSteps(
-		s.ctx.LatestVersion)
+	// The whole update — download, GPG and checksum
+	// verification, binary install — runs on the ROOT side of
+	// the helper boundary as one operation; these steps only
+	// mirror its progress. The helper independently enforces
+	// the same-major gate this screen renders.
+	steps := buildHelperSteps(
+		helper.VerbSelfUpdate,
+		helper.SelfUpdateParams{Version: s.ctx.LatestVersion},
+		helper.SelfUpdateStepNames(s.ctx.LatestVersion),
+		nil)
 
 	s.progress = NewInstallProgressScreen(
 		s.ctx, steps, s.onDone, nil)

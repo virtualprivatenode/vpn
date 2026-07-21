@@ -3,11 +3,13 @@ package welcome
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/bitcoin"
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/system"
 
 	tea "charm.land/bubbletea/v2"
@@ -33,13 +35,22 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			info := bitcoin.GetBlockchainInfo()
+			info := bitcoin.GetBlockchainInfo(
+				cfg.NetworkConfig().RPCPort)
 			mu.Lock()
 			s.btcResponding = info.Responding
 			s.btcBlocks = info.Blocks
 			s.btcHeaders = info.Headers
 			s.btcProgress = info.Progress
 			s.btcSynced = info.Synced
+			// bitcoind reports its own data footprint
+			// (size_on_disk) — no privileged measurement of
+			// the data dir is needed for this card.
+			if info.Responding {
+				s.btcSize = bitcoin.FormatSize(info.SizeOnDisk)
+			} else {
+				s.btcSize = "N/A"
+			}
 			mu.Unlock()
 		}()
 
@@ -48,10 +59,9 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			defer wg.Done()
 			disk := system.Disk("/")
 			mem := system.Memory()
-			btcSize := system.DirSize(paths.BitcoinDataDir)
 			var lndSize string
 			if cfg.HasLND() {
-				lndSize = system.DirSize(paths.LNDDataDir)
+				lndSize = cachedLNDSize()
 			}
 			mu.Lock()
 			s.diskTotal = disk.Total
@@ -60,7 +70,6 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 			s.ramTotal = mem.Total
 			s.ramUsed = mem.Used
 			s.ramPct = mem.Percent
-			s.btcSize = btcSize
 			s.lndSize = lndSize
 			mu.Unlock()
 		}()
@@ -182,4 +191,38 @@ func fetchStatus(cfg *config.AppConfig, lndClient *lndrpc.Client) tea.Cmd {
 
 		return s
 	}
+}
+
+// ── LND data-dir size (helper-measured, cached) ─────────
+//
+// The LND data dir belongs to the service user, so its size is
+// measured by the root helper (dir-size operation). Directory
+// sizes change slowly and the status poll is frequent, so the
+// answer — including a failed answer — is cached for five
+// minutes: the display stays fresh enough while the helper
+// isn't woken on every poll tick.
+
+var (
+	lndSizeMu  sync.Mutex
+	lndSizeVal string
+	lndSizeAt  time.Time
+)
+
+func cachedLNDSize() string {
+	lndSizeMu.Lock()
+	defer lndSizeMu.Unlock()
+	if !lndSizeAt.IsZero() &&
+		time.Since(lndSizeAt) < 5*time.Minute {
+		return lndSizeVal
+	}
+	var res helper.DirSizeResult
+	if err := helper.Call(helper.VerbDirSize,
+		helper.DirSizeParams{Which: "lnd"}, &res); err != nil {
+		logger.Status("lnd dir size: %v", err)
+		lndSizeVal = "N/A"
+	} else {
+		lndSizeVal = res.Size
+	}
+	lndSizeAt = time.Now()
+	return lndSizeVal
 }

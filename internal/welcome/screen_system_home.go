@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/bitcoin"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -167,7 +168,7 @@ func (s *SystemHomeScreen) HandleKey(
 		if s.focusZone == sysHomeZoneServices {
 			svc := s.svcName(s.svcCursor)
 			c := exec.Command("bash", "-c",
-				"clear && sudo journalctl -u "+svc+
+				"clear && journalctl -u "+svc+
 					" -n 100 --no-pager"+
 					" && echo && echo "+
 					"'  Press Enter to return...'"+
@@ -327,10 +328,18 @@ func (s *SystemHomeScreen) View(
 	headerLines = append(headerLines,
 		centerPad(theme.Action.Render(verText), w))
 
-	hasUpdate := s.hasUpdate()
-	if hasUpdate {
+	if s.hasUpdate() {
 		updateText := "Update available: v" +
 			s.ctx.LatestVersion
+		if !s.updateInstallable() {
+			// Cross-major (or unparseable) release: announced,
+			// never one-click installed — the release notes come
+			// first. The helper refuses it independently; this
+			// is the rendering half of the same gate.
+			updateText = "Major release v" +
+				s.ctx.LatestVersion +
+				" available — see the release notes"
+		}
 		headerLines = append(headerLines,
 			centerPad(
 				lipgloss.NewStyle().
@@ -702,9 +711,20 @@ func (s *SystemHomeScreen) hasUpdate() bool {
 		s.ctx.LatestVersion != s.ctx.Version
 }
 
+// updateInstallable reports whether the available update may be
+// installed from here: same major version only. A cross-major
+// release is a read-the-release-notes event; the Update Node
+// action does not exist for it (and the root helper refuses it
+// independently — this check is rendering, not the gate).
+func (s *SystemHomeScreen) updateInstallable() bool {
+	same, err := helper.SameMajor(
+		s.ctx.Version, s.ctx.LatestVersion)
+	return err == nil && same
+}
+
 func (s *SystemHomeScreen) buttonActions() []sysBtn {
 	actions := []sysBtn{sysBtnUpdatePkg, sysBtnSSHKeys}
-	if s.hasUpdate() {
+	if s.hasUpdate() && s.updateInstallable() {
 		actions = append(actions, sysBtnUpdateNode)
 	}
 	if s.ctx.Status != nil &&

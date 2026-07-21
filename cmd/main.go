@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/helperd"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/welcome"
@@ -31,6 +32,15 @@ func main() {
 	case cmdInstall:
 		if err := installer.RunInstall(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "\n  Failed: %v\n", err)
+			os.Exit(1)
+		}
+	case cmdHelperd:
+		// The root helper. Started by systemd when traffic
+		// arrives on its socket — never by hand; it verifies
+		// both conditions itself and explains if they don't
+		// hold.
+		if err := helperd.Serve(version); err != nil {
+			fmt.Fprintf(os.Stderr, "vpn helperd: %v\n", err)
 			os.Exit(1)
 		}
 	case cmdVersion:
@@ -83,6 +93,7 @@ type command int
 const (
 	cmdConsole command = iota
 	cmdInstall
+	cmdHelperd
 	cmdVersion
 	cmdHelp
 )
@@ -106,12 +117,20 @@ func parseArgs(
 				opts.Unattended = true
 			case "--until=bake":
 				opts.UntilBake = true
+			case "--allow-console-only":
+				opts.AllowConsoleOnly = true
 			default:
 				return 0, opts, fmt.Errorf(
 					"unknown install flag %q", a)
 			}
 		}
 		return cmdInstall, opts, nil
+	case "helperd":
+		if len(args) > 1 {
+			return 0, opts, fmt.Errorf(
+				"helperd takes no arguments")
+		}
+		return cmdHelperd, opts, nil
 	case "version", "--version", "-v":
 		return cmdVersion, opts, nil
 	case "help", "--help", "-h":
@@ -131,6 +150,12 @@ Usage:
       --testnet4     use testnet4 instead of mainnet
       --unattended   no prompts (keys auto-copied from the box,
                      login password generated and printed once)
+      --allow-console-only
+                     let an unattended install finish even when
+                     it would leave no SSH way in (no keys found
+                     and password login disabled)
+  vpn helperd        the node's root helper (started by systemd
+                     through its socket, not by hand)
   vpn version        print the version
 `
 }

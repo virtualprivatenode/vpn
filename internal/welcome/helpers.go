@@ -2,66 +2,65 @@ package welcome
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
+	"github.com/virtualprivatenode/vpn/internal/bitcoin"
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
+// onionBoardFile maps a Tor hidden-service hostname path to
+// its staged copy on the board — the unprivileged read path
+// for onion addresses (the originals are readable only by
+// root and the tor user).
+var onionBoardFile = map[string]string{
+	paths.TorBitcoinP2P + "/hostname": paths.StateOnionBitcoinP2P,
+	paths.TorLNDGRPC + "/hostname":    paths.StateOnionLNDGRPC,
+	paths.TorLNDRESTHostname:          paths.StateOnionLNDREST,
+	paths.TorSyncthingHostname:        paths.StateOnionSyncthing,
+}
+
 func readOnion(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		output, err := system.SudoRunOutput("cat", path)
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(output)
+	board, ok := onionBoardFile[path]
+	if !ok {
+		logger.Status("readOnion: no staged copy mapped for %s", path)
+		return ""
 	}
-	return strings.TrimSpace(string(data))
+	v, err := helper.ReadBoardString(board)
+	if err != nil {
+		// Fail-noisy: the screen renders the address as
+		// unavailable; the log names the missing fact.
+		logger.Status("%v", err)
+		return ""
+	}
+	return v
 }
 
 func readMacaroonHex(cfg *config.AppConfig) string {
-	network := cfg.Network
-	if cfg.IsMainnet() {
-		network = "mainnet"
-	}
-	path := paths.LNDMacaroon(network)
-
-	data, err := os.ReadFile(path)
+	data, err := helper.ReadBoard(paths.StateLNDMacaroon)
 	if err != nil {
-		data, err = system.SudoReadFile(path)
-		if err != nil {
-			logger.Status("Warning: failed to read macaroon: %v", err)
-			return ""
-		}
+		logger.Status("Warning: failed to read macaroon: %v", err)
+		return ""
 	}
 	return hex.EncodeToString(data)
 }
 
 // ── Fee estimation via bitcoin-cli ───────────────────────
 
-type smartFeeResponse struct {
-	FeeRate float64  `json:"feerate"`
-	Errors  []string `json:"errors"`
-	Blocks  int      `json:"blocks"`
-}
-
 func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
 	targets := [4]int{1, 3, 6, 25}
 	labels := [4]string{"~1 blk", "~3 blk", "~6 blk", "~25 blk"}
 	var tiers [4]feeTier
 
-	cliName := "bitcoin-cli"
+	rpcPort := cfg.NetworkConfig().RPCPort
 
 	for i, target := range targets {
 		tiers[i] = feeTier{
@@ -69,37 +68,13 @@ func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
 			Label:  labels[i],
 		}
 
-		output, err := system.RunContext(
-			5*time.Second,
-			"sudo", "-u", "bitcoin",
-			cliName,
-			fmt.Sprintf("-datadir=%s", paths.BitcoinDataDir),
-			fmt.Sprintf("-conf=%s", paths.BitcoinConf),
-			"estimatesmartfee",
-			fmt.Sprintf("%d", target),
-		)
+		// Direct RPC with the node's own staged credential —
+		// no privileged call anywhere on the fee path.
+		satPerVB, err := bitcoin.EstimateSmartFee(rpcPort, target)
 		if err != nil {
 			continue
 		}
-
-		var resp smartFeeResponse
-		if err := json.Unmarshal(
-			[]byte(strings.TrimSpace(output)),
-			&resp,
-		); err != nil {
-			continue
-		}
-
-		if resp.FeeRate > 0 && len(resp.Errors) == 0 {
-			// bitcoin-cli returns BTC/kB
-			// Convert to sat/vB:
-			// BTC/kB × 100,000,000 / 1000 = sat/vB
-			satPerVB := resp.FeeRate * 100000
-			if satPerVB < 1 {
-				satPerVB = 1
-			}
-			tiers[i].SatPerVB = satPerVB
-		}
+		tiers[i].SatPerVB = satPerVB
 	}
 
 	// Check if we got at least one valid tier

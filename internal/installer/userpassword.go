@@ -5,8 +5,10 @@ package installer
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
@@ -61,16 +63,18 @@ func (LoginPassword) String() string { return "[redacted]" }
 // GoString implements fmt.GoStringer so %#v is covered too.
 func (LoginPassword) GoString() string { return "[redacted]" }
 
-// SetUserPassword changes the given user's login password
-// via chpasswd (root-privileged through the system seam).
-// The password is piped to chpasswd's stdin so it never
-// appears in argv (which would leak via /proc/*/cmdline or
-// `ps`).
+// SetUserPassword changes the given user's login password.
+// As root it pipes to chpasswd's stdin directly (the password
+// never appears in argv, which would leak via /proc/*/cmdline
+// or `ps`); from the unprivileged TUI it requests the helper's
+// typed set-user-password operation, which re-validates with
+// this same package's constructor and runs the identical
+// chpasswd path root-side.
 //
-// The password arrives as a LoginPassword, so validation
-// has already happened at construction; the zero-value
-// check below closes the one remaining hole (a zero
-// LoginPassword was never validated).
+// The password arrives as a LoginPassword, so validation has
+// already happened at construction; the zero-value check below
+// closes the one remaining hole (a zero LoginPassword was
+// never validated).
 func SetUserPassword(
 	username string, password LoginPassword,
 ) error {
@@ -84,6 +88,14 @@ func SetUserPassword(
 		return errors.New(
 			"password was not validated " +
 				"(zero LoginPassword)")
+	}
+
+	if os.Geteuid() != 0 {
+		return helper.Call(helper.VerbSetUserPassword,
+			helper.SetUserPasswordParams{
+				User:     username,
+				Password: password.v,
+			}, nil)
 	}
 
 	out, err := system.SudoRunStdin(
