@@ -178,6 +178,13 @@ func AppendAuthorizedKey(line string) error {
 // user afterwards; as the admin user the file is simply ours.
 func writeAuthorizedKeys(content []byte) error {
 	dir := filepath.Dir(paths.AuthorizedKeysFile)
+	// ~/.ssh may not exist yet: a password-only install copies no
+	// keys and never creates it, so the first key added from the
+	// console has to create the directory (0700, owned by whoever
+	// runs this: the admin user from the TUI, root at install).
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
 	tmp, err := os.CreateTemp(dir, ".authorized_keys.tmp-")
 	if err != nil {
 		return fmt.Errorf("write authorized_keys: %w", err)

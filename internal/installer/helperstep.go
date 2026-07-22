@@ -78,12 +78,18 @@ Restart=no
 # identifier. The admin user can read it (systemd-journal
 # group) but cannot alter it.
 SyslogIdentifier=vpn-helperd
-# Confinement that composes with a root helper that must write
-# /etc and /var and run apt: private /tmp and no access into
-# home directories. Broader sandboxing (ProtectSystem=) would
+# Confinement for a root helper that must write /etc and /var
+# and run apt: private /tmp, and home mounted read-only. Note:
+# ProtectHome=read-only, NOT =yes, is load-bearing. The
+# password-auth lockout guard (the rebuild-ssh-config verb)
+# reads the admin user's authorized_keys under /home to refuse
+# stranding the box; hiding home (=yes) makes it read an empty
+# /home and wrongly refuse every disable. Read-only still stops
+# the helper from writing home, and the node's secrets live in
+# /var/lib, not home. Broader sandboxing (ProtectSystem=) would
 # break the helper's actual job.
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=read-only
 `
 
 // installHelperUnits is the helper.enable step: write both
