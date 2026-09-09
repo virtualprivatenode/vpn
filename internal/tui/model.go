@@ -366,10 +366,11 @@ func NewModel(
 		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
-		Cfg:       cfg,
-		State:     state,
-		LndClient: client,
-		Version:   version,
+		HelperWorkflows: app.NewHelperWorkflows(installer.SyncthingVersionStr()),
+		Cfg:             cfg,
+		State:           state,
+		LndClient:       client,
+		Version:         version,
 	}
 	m.ocCtx = &OnChainContext{}
 	m.sectionScreens[secChannels] =
@@ -422,12 +423,17 @@ func Show(
 ) {
 	state := observeRuntimeState(cfg)
 	m := NewModel(cfg, prefs, state, version)
+	// Bubble Tea does not cancel or join commands on exit. The workflow owner
+	// releases helper readers even when Run fails or provides no final model.
+	defer func() {
+		m.screenCtx.HelperWorkflows.Close()
+		if m.screenCtx.LndClient != nil {
+			m.screenCtx.LndClient.Close()
+		}
+	}()
 	p := tea.NewProgram(m)
-	result, _ := p.Run()
-	final := result.(Model)
-
-	if final.lndClient != nil {
-		final.lndClient.Close()
+	if _, err := p.Run(); err != nil {
+		logger.TUI("terminal session: %v", err)
 	}
 }
 

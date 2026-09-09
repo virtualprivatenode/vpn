@@ -65,7 +65,7 @@ func New() *Client {
 func (c *Client) connect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.dial(true)
+	return c.dial(context.Background(), true)
 }
 
 // dial establishes the connection; the caller holds c.mu.
@@ -86,7 +86,10 @@ func (c *Client) connect() error {
 // failures with nothing to heal (LND down, wallet locked) cost
 // at most one re-stage per interval — and dials again ONCE
 // with the refreshed board copies.
-func (c *Client) dial(allowHeal bool) error {
+func (c *Client) dial(parent context.Context, allowHeal bool) error {
+	if err := parent.Err(); err != nil {
+		return err
+	}
 	// Read the staged TLS cert copy (fail-noisy: a missing
 	// staged fact names itself and points at the journal).
 	certData, err := helper.ReadBoard(paths.StateLNDTLSCert)
@@ -143,7 +146,7 @@ func (c *Client) dial(allowHeal bool) error {
 	// through macaroonCtx: dial runs under the write lock and
 	// macaroonCtx takes the read lock.
 	md := metadata.New(map[string]string{"macaroon": c.macaroonHex})
-	probeCtx := metadata.NewOutgoingContext(context.Background(), md)
+	probeCtx := metadata.NewOutgoingContext(parent, md)
 	ctx, cancel := context.WithTimeout(probeCtx, 30*time.Second)
 	defer cancel()
 
@@ -152,7 +155,12 @@ func (c *Client) dial(allowHeal bool) error {
 		logger.Status("LND gRPC connected and ready")
 		return nil
 	}
-	if allowHeal && requestCredentialRestage() {
+	if parent.Err() != nil {
+		conn.Close()
+		c.conn, c.lightning, c.state = nil, nil, nil
+		return parent.Err()
+	}
+	if allowHeal && requestCredentialRestage(parent) {
 		logger.Status("LND gRPC test call failed (%v) — staged "+
 			"credentials re-staged in case they were stale, "+
 			"reconnecting once", err)
@@ -160,7 +168,12 @@ func (c *Client) dial(allowHeal bool) error {
 		c.conn = nil
 		c.lightning = nil
 		c.state = nil
-		return c.dial(false)
+		return c.dial(parent, false)
+	}
+	if parent.Err() != nil {
+		conn.Close()
+		c.conn, c.lightning, c.state = nil, nil, nil
+		return parent.Err()
 	}
 	logger.Status("LND gRPC connected, waiting for RPC ready: %v", err)
 	return nil
@@ -202,15 +215,21 @@ func credRestageWorthwhile() bool {
 // re-stage actually happened (rate limit passed and the helper
 // succeeded), so the caller only re-dials when the board copies
 // could have changed.
-func requestCredentialRestage() bool {
+func requestCredentialRestage(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	credRestageMu.Lock()
 	defer credRestageMu.Unlock()
 	if !restageDue(credRestageAt, time.Now()) {
 		return false
 	}
 	credRestageAt = time.Now()
-	if err := helper.Call(
-		helper.VerbStageLNDCredentials, nil, nil); err != nil {
+	session, err := helper.StartContext(ctx, helper.VerbStageLNDCredentials, nil)
+	if err == nil {
+		err = session.Wait(nil)
+	}
+	if err != nil {
 		logger.Status("stage-lnd-credentials: %v", err)
 		return false
 	}
@@ -220,16 +239,22 @@ func requestCredentialRestage() bool {
 // Reconnect attempts to re-establish the gRPC connection.
 // Called when an RPC fails, indicating LND may have restarted.
 func (c *Client) Reconnect() {
+	c.ReconnectContext(context.Background())
+}
+
+// ReconnectContext observes the caller's lifetime for the connection probe and
+// credential restaging. A cancelled caller cannot schedule a later reconnect.
+func (c *Client) ReconnectContext(ctx context.Context) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	c.conn = nil
-	c.lightning = nil
-	c.state = nil
-	c.mu.Unlock()
-
-	if err := c.connect(); err != nil {
+	c.conn, c.lightning, c.state = nil, nil, nil
+	if err := c.dial(ctx, true); err != nil {
 		logger.Status("LND gRPC reconnect failed: %v", err)
 	}
 }

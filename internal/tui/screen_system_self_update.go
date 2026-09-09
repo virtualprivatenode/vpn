@@ -4,19 +4,11 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── SelfUpdateScreen ──────────────────────────────────
-// Flow: confirm → install progress → done.
-// Opens as a tab from SystemHomeScreen when the user
-// presses Enter on the Update Node button.
-//
-// Simplest install flow — no config save, no rollback.
-// Steps are idempotent (download + verify). The binary
-// isn't replaced until the final step. Update takes
-// effect on next SSH login.
+// SelfUpdateScreen confirms a release and renders the helper workflow. Release
+// verification and binary replacement remain privileged helper operations.
 
 type selfUpdateStep int
 
@@ -110,19 +102,10 @@ func (s *SelfUpdateScreen) HandleKey(
 func (s *SelfUpdateScreen) startInstall() (
 	Screen, tea.Cmd,
 ) {
-	// The whole update — download, GPG and checksum
-	// verification, binary install — runs on the ROOT side of
-	// the helper boundary as one operation; these steps only
-	// mirror its progress. The helper independently enforces
-	// the same-major gate this screen renders.
-	steps := buildHelperSteps(
-		helper.VerbSelfUpdate,
-		helper.SelfUpdateParams{Version: s.ctx.LatestVersion},
-		helper.SelfUpdateStepNames(s.ctx.LatestVersion),
-		nil)
+	operation := s.ctx.HelperWorkflows.UpdateSelf(s.ctx.LatestVersion)
 
 	s.progress = NewInstallProgressScreen(
-		s.ctx, steps, s.onDone, nil)
+		s.ctx, operation, s.onDone, nil)
 	s.step = selfUpdateProgress
 	return s, s.progress.Init()
 }

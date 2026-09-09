@@ -6,75 +6,75 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── InstallProgressScreen ──────────────────────────────
-// Reusable Screen that runs a list of install steps
-// sequentially and renders progress in the content pane.
-// Replaces the standalone RunInstallTUI program for all
-// post-install flows (Syncthing, P2P upgrade,
-// self-update).
-//
-// Usage:
-//   steps := []installer.InstallStep{...}
-//   screen := NewInstallProgressScreen(ctx, steps, onDone)
-//
-// The onDone callback fires after all steps succeed. It
-// returns a tea.Cmd that typically saves config and emits
-// refreshStatusMsg. On failure, onDone is NOT called.
-
-type installStepDoneMsg struct {
-	index int
-	err   error
+// helperProgressMsg identifies one operation and its ordered application event.
+type helperProgressMsg struct {
+	operation *app.HelperOperation
+	event     app.HelperProgress
 }
 
+type closeHelperProgressMsg struct{ screen *InstallProgressScreen }
+
+type progressStep struct {
+	Name   string
+	Status int
+	Err    error
+}
+
+const (
+	_ = iota
+	progressRunning
+	progressDone
+	progressFailed
+)
+
+// InstallProgressScreen renders one application-owned helper operation. Only
+// the event loop mutates its presentation state and publishes configuration.
 type InstallProgressScreen struct {
-	ctx    *ScreenContext
-	steps  []installer.InstallStep
-	onDone func() tea.Cmd // called after all steps succeed
-	onFail func() tea.Cmd // called on step failure (rollback)
-
-	current int
-	done    bool
-	failed  bool
+	ctx             *ScreenContext
+	operation       *app.HelperOperation
+	steps           []progressStep
+	onDone          func() tea.Cmd
+	onFail          func() tea.Cmd
+	current         int
+	started         bool
+	done            bool
+	failed          bool
+	helperSucceeded bool
 }
 
-func NewInstallProgressScreen(
-	ctx *ScreenContext,
-	steps []installer.InstallStep,
-	onDone func() tea.Cmd,
-	onFail func() tea.Cmd,
-) *InstallProgressScreen {
-	return &InstallProgressScreen{
-		ctx:    ctx,
-		steps:  steps,
-		onDone: onDone,
-		onFail: onFail,
+func NewInstallProgressScreen(ctx *ScreenContext, operation *app.HelperOperation, onDone, onFail func() tea.Cmd) *InstallProgressScreen {
+	names := operation.Steps()
+	steps := make([]progressStep, len(names))
+	for i, name := range names {
+		steps[i].Name = name
 	}
+	return &InstallProgressScreen{ctx: ctx, operation: operation, steps: steps, onDone: onDone, onFail: onFail}
 }
-
-// ── Screen interface ────────────────────────────────────
 
 func (s *InstallProgressScreen) Init() tea.Cmd {
-	if len(s.steps) == 0 {
-		s.done = true
+	if s.started {
 		return nil
 	}
-	s.steps[0].Status = installer.StepRunning
-	return s.runStep(0)
+	s.started = true
+	if len(s.steps) > 0 {
+		s.steps[0].Status = progressRunning
+	}
+	return s.waitProgress()
 }
 
-func (s *InstallProgressScreen) runStep(i int) tea.Cmd {
+func (s *InstallProgressScreen) waitProgress() tea.Cmd {
+	operation := s.operation
 	return func() tea.Msg {
-		if i >= len(s.steps) {
-			return installStepDoneMsg{index: i}
+		event, ok := <-operation.Events()
+		if !ok {
+			return nil
 		}
-		return installStepDoneMsg{
-			index: i, err: s.steps[i].Fn(),
-		}
+		return helperProgressMsg{operation: operation, event: event}
 	}
 }
 
@@ -86,7 +86,7 @@ func (s *InstallProgressScreen) HandleKey(
 		case "ctrl+c":
 			return s, tea.Quit
 		case "enter":
-			return s, emitCloseTab
+			return s, func() tea.Msg { return closeHelperProgressMsg{screen: s} }
 		case "left":
 			return s, emitFocusSidebar
 		case "up", "shift+tab":
@@ -101,41 +101,51 @@ func (s *InstallProgressScreen) HandleKey(
 	return s, nil
 }
 
-func (s *InstallProgressScreen) HandleMsg(
-	msg tea.Msg,
-) (Screen, tea.Cmd) {
-	switch msg := msg.(type) {
-	case installStepDoneMsg:
-		if msg.index >= len(s.steps) {
+func (s *InstallProgressScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
+	m, ok := msg.(helperProgressMsg)
+	if !ok || m.operation != s.operation || !s.started || s.done || m.event.Index != s.current {
+		return s, nil
+	}
+	if result := m.event.Result; result != nil {
+		if result.Err == nil && (s.current != len(s.steps) || !result.HelperSucceeded) {
 			return s, nil
 		}
-		if msg.err != nil {
-			s.steps[msg.index].Status = installer.StepFailed
-			s.steps[msg.index].Err = msg.err
-			s.failed = true
-			s.done = true
-			logger.Install("step %d/%d failed: %s: %v",
-				msg.index+1, len(s.steps),
-				s.steps[msg.index].Name, msg.err)
+		s.done = true
+		s.failed = result.Err != nil
+		s.helperSucceeded = result.HelperSucceeded
+		if result.Config != nil {
+			// Publish only the setting this operation owns. A delayed reload must not
+			// overwrite another workflow's newer setting, such as auto-unlock.
+			switch s.operation.Kind() {
+			case app.SyncthingInstall:
+				s.ctx.Cfg.SyncthingEnabled = result.Config.SyncthingEnabled
+			case app.P2PUpgrade:
+				s.ctx.Cfg.P2PMode = result.Config.P2PMode
+			}
+		}
+		if s.failed {
+			if s.current < len(s.steps) {
+				s.steps[s.current].Status = progressFailed
+				s.steps[s.current].Err = result.Err
+			}
+			logger.Install("helper workflow: %v", result.Err)
 			if s.onFail != nil {
 				return s, s.onFail()
 			}
-			return s, nil
-		}
-		s.steps[msg.index].Status = installer.StepDone
-		next := msg.index + 1
-		if next < len(s.steps) {
-			s.current = next
-			s.steps[next].Status = installer.StepRunning
-			return s, s.runStep(next)
-		}
-		// All steps complete
-		s.done = true
-		if s.onDone != nil {
+		} else if s.onDone != nil {
 			return s, s.onDone()
 		}
+		return s, nil
 	}
-	return s, nil
+	if s.current >= len(s.steps) {
+		return s, nil
+	}
+	s.steps[s.current].Status = progressDone
+	s.current++
+	if s.current < len(s.steps) {
+		s.steps[s.current].Status = progressRunning
+	}
+	return s, s.waitProgress()
 }
 
 // ── View ────────────────────────────────────────────────
@@ -149,13 +159,13 @@ func (s *InstallProgressScreen) View(
 		var ind string
 		var sty = theme.Dim
 		switch step.Status {
-		case installer.StepDone:
+		case progressDone:
 			ind = "[done]"
 			sty = theme.Good
-		case installer.StepRunning:
+		case progressRunning:
 			ind = "[....]"
 			sty = theme.Value
-		case installer.StepFailed:
+		case progressFailed:
 			ind = "[FAIL]"
 			sty = theme.Warn
 		default:
@@ -166,7 +176,7 @@ func (s *InstallProgressScreen) View(
 			"%s [%d/%d] %s",
 			ind, i+1, len(s.steps), step.Name)))
 
-		if step.Status == installer.StepFailed &&
+		if step.Status == progressFailed &&
 			step.Err != nil {
 			p.warnWrap(fmt.Sprintf(
 				"    Error: %v", step.Err))
@@ -181,8 +191,11 @@ func (s *InstallProgressScreen) View(
 			[]string{"Done"}, 0,
 			s.ctx.ContentFocused, h)
 	} else if s.failed {
-		p.line(" " + theme.Warn.Render(
-			"Installation failed."))
+		if s.helperSucceeded {
+			p.warnWrap("The helper completed the change, but local configuration could not be refreshed.")
+		} else {
+			p.warnWrap("The workflow did not complete successfully. Changes may have been applied; check the node before trying again.")
+		}
 		return p.renderWithBottomButtons(
 			[]string{"Done"}, 0,
 			s.ctx.ContentFocused, h)
