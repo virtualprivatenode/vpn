@@ -35,6 +35,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
@@ -42,8 +43,8 @@ import (
 type KeySource struct {
 	User     string // owning login ("root", "debian", "ripsline", …)
 	Path     string
-	Keys     []SSHKeyInfo
-	Excluded int // key-bearing lines excluded (options/decoy lines)
+	Keys     []sshkeys.Key
+	Excluded int // malformed or unsupported key-bearing lines, including options
 }
 
 // EnumerateKeySources scans every candidate authorized_keys
@@ -94,23 +95,23 @@ func EnumerateKeySources() []KeySource {
 // unit-tested.
 //
 // An excluded line is one that carries key material but does not
-// parse as a bare "type base64 [comment]" line — i.e. it has an
-// options prefix. The canonical wild instance is the cloud-init
-// forced-command decoy (`no-port-forwarding,...,command="echo
+// parse as a supported bare "type base64 [comment]" line, including
+// malformed keys and lines with options. The cloud-init
+// forced-command decoy is a common example (`no-port-forwarding,...,command="echo
 // 'Please login as ...'" ssh-rsa AAAA...`): copying it verbatim
 // would grant its key access under OUR user with the provider's
 // message semantics stripped of context (the IA-3-E decoy trap).
 // Counting exclusions — instead of dropping them silently — keeps
 // the screen honest about what was on the box.
-func classifyAuthorizedKeys(content string) ([]SSHKeyInfo, int) {
-	var keys []SSHKeyInfo
+func classifyAuthorizedKeys(content string) ([]sshkeys.Key, int) {
+	var keys []sshkeys.Key
 	excluded := 0
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		info, err := ParseSSHKey(line)
+		info, err := sshkeys.Parse(line)
 		if err == nil {
 			keys = append(keys, info)
 			continue
@@ -123,13 +124,12 @@ func classifyAuthorizedKeys(content string) ([]SSHKeyInfo, int) {
 }
 
 // lineCarriesKeyMaterial reports whether an unparseable
-// authorized_keys line still contains an SSH key (an options
-// prefix ahead of a known key type) as opposed to plain junk.
+// authorized_keys line names a recognized key type, including malformed
+// bare keys and option-prefixed keys, as opposed to plain junk.
 // Pure — unit-tested.
 func lineCarriesKeyMaterial(line string) bool {
-	for t := range validKeyTypes {
-		idx := strings.Index(line, t+" ")
-		if idx > 0 {
+	for _, field := range strings.Fields(line) {
+		if sshkeys.RecognizedType(field) {
 			return true
 		}
 	}
@@ -139,9 +139,9 @@ func lineCarriesKeyMaterial(line string) bool {
 // DedupeKeys flattens sources into a fingerprint-unique key list,
 // preserving first-seen order (root first, then /home in ReadDir
 // order). Pure — unit-tested.
-func DedupeKeys(sources []KeySource) []SSHKeyInfo {
+func DedupeKeys(sources []KeySource) []sshkeys.Key {
 	seen := map[string]bool{}
-	var out []SSHKeyInfo
+	var out []sshkeys.Key
 	for _, s := range sources {
 		for _, k := range s.Keys {
 			if seen[k.Fingerprint] {
@@ -163,7 +163,7 @@ type InstallDecisions struct {
 	// Keys are written to the admin user's authorized_keys.
 	// Empty means password-only access (operator's explicit
 	// choice, or nothing found under --unattended).
-	Keys []SSHKeyInfo
+	Keys []sshkeys.Key
 	// Password is the admin login password (validated at
 	// construction; 16-char minimum from commit 3).
 	Password LoginPassword
@@ -201,6 +201,11 @@ type InstallDecisions struct {
 // The journal-read group and the helper's units are set up by
 // their own steps (helper.enable, journal.access).
 func applyIdentityAccess(dec *InstallDecisions) error {
+	for _, key := range dec.Keys {
+		if _, err := sshkeys.Parse(key.RawLine); err != nil {
+			return fmt.Errorf("invalid confirmed SSH key: %w", err)
+		}
+	}
 	if _, err := user.Lookup(paths.AdminUser); err != nil {
 		if err := system.SudoRun("adduser",
 			"--disabled-password",

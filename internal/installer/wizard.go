@@ -36,6 +36,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/system"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -80,7 +81,7 @@ type wizardModel struct {
 
 	// Access screen
 	sources  []KeySource
-	keys     []SSHKeyInfo
+	keys     []sshkeys.Key
 	selected []bool
 	cursor   int // 0..len(keys)-1 = key rows; len(keys) = button row
 	btnIdx   int // 0 = Continue, 1 = Paste a key
@@ -343,7 +344,7 @@ func (m wizardModel) updateAccess(
 		// outcome (no keys AND password auth observed off —
 		// the drop-in will carry that "off" forward, so the
 		// admin user would have no network way in at all).
-		var chosen []SSHKeyInfo
+		var chosen []sshkeys.Key
 		for i, k := range m.keys {
 			if m.selected[i] {
 				chosen = append(chosen, k)
@@ -483,7 +484,7 @@ func (m wizardModel) updatePaste(
 		}
 		// Add key (from the button, or enter in the input).
 		line := strings.TrimSpace(m.pasteInput.Value())
-		info, err := ParseSSHKey(line)
+		info, err := sshkeys.Parse(line)
 		if err != nil {
 			m.pasteErr = "Not a valid public key line: " +
 				err.Error()

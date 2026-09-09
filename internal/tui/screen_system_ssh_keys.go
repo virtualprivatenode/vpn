@@ -7,7 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -15,12 +15,6 @@ import (
 // Pure list/management screen. Add and per-key detail
 // are opened as their own tabs (tabSSHKeyAdd,
 // tabSSHKeyDetail). Mirrors the Syncthing manage pattern.
-//
-// authorized_keys is small and lives on local disk, so we
-// read it synchronously in the constructor — no async
-// load, no first-paint bounce. Refreshes after Add/Remove
-// arrive via sshKeysListMsg from the child screens.
-
 // ── Focus zones ────────────────────────────────────────
 
 const (
@@ -30,52 +24,61 @@ const (
 
 // ── Messages ───────────────────────────────────────────
 
-// sshKeysListMsg is a refresh signal emitted by child
-// screens (Add, Detail) after a successful mutation.
-// The initial list is read synchronously in the
-// constructor — this msg is only for re-syncing after
-// the file has changed.
+// Read and mutation results belong to a screen instance and request number.
 type sshKeysListMsg struct {
-	keys []installer.SSHKeyInfo
-	err  error
+	owner   *SSHKeysScreen
+	request uint64
+	keys    []app.SSHKey
+	err     error
+}
+type sshKeyAddMsg struct {
+	owner   *SSHKeyAddScreen
+	attempt uint64
+	err     error
+}
+type sshKeyRemoveMsg struct {
+	owner   *SSHKeyDetailScreen
+	attempt uint64
+	err     error
+}
+type refreshSSHKeysMsg struct{}
+type closeSSHScreenMsg struct{ screen Screen }
+
+func refreshSSHKeysCmd() tea.Msg { return refreshSSHKeysMsg{} }
+func closeSSHScreenCmd(screen Screen) tea.Cmd {
+	return func() tea.Msg { return closeSSHScreenMsg{screen: screen} }
 }
 
-type sshKeyAddMsg struct{ err error }
-
-type sshKeyRemoveMsg struct{ err error }
-
-// ── Commands ───────────────────────────────────────────
-
-func listSSHKeysCmd() tea.Cmd {
+func (s *SSHKeysScreen) refresh() tea.Cmd {
+	s.request++
+	request, access := s.request, s.ctx.sshAccess()
 	return func() tea.Msg {
-		keys, err := installer.ListAuthorizedKeys()
-		return sshKeysListMsg{keys: keys, err: err}
+		keys, err := access.ListKeys()
+		return sshKeysListMsg{owner: s, request: request, keys: keys, err: err}
 	}
 }
 
-func addSSHKeyCmd(line string) tea.Cmd {
-	return func() tea.Msg {
-		return sshKeyAddMsg{
-			err: installer.AppendAuthorizedKey(line)}
-	}
+func (s *SSHKeyAddScreen) addCommand(line string) tea.Cmd {
+	s.attempt++
+	attempt, access := s.attempt, s.ctx.sshAccess()
+	return func() tea.Msg { return sshKeyAddMsg{owner: s, attempt: attempt, err: access.AddKey(line)} }
 }
-
-func removeSSHKeyCmd(fingerprint string) tea.Cmd {
-	return func() tea.Msg {
-		return sshKeyRemoveMsg{
-			err: installer.RemoveAuthorizedKey(
-				fingerprint)}
-	}
+func (s *SSHKeyDetailScreen) removeCommand() tea.Cmd {
+	s.attempt++
+	attempt, fingerprint, access := s.attempt, s.keyInfo.Fingerprint, s.ctx.sshAccess()
+	return func() tea.Msg { return sshKeyRemoveMsg{owner: s, attempt: attempt, err: access.RemoveKey(fingerprint)} }
 }
 
 // ── Screen ─────────────────────────────────────────────
 
 type SSHKeysScreen struct {
-	ctx *ScreenContext
+	ctx     *ScreenContext
+	request uint64
 
-	keys      []installer.SSHKeyInfo
+	keys      []app.SSHKey
 	keyCursor int
 	loadErr   error
+	loaded    bool
 	focusZone int
 	btnIdx    int
 }
@@ -83,16 +86,11 @@ type SSHKeysScreen struct {
 func NewSSHKeysScreen(
 	ctx *ScreenContext,
 ) *SSHKeysScreen {
-	keys, err := installer.ListAuthorizedKeys()
-	return &SSHKeysScreen{
-		ctx:     ctx,
-		keys:    keys,
-		loadErr: err,
-	}
+	return &SSHKeysScreen{ctx: ctx}
 }
 
 func (s *SSHKeysScreen) Init() tea.Cmd {
-	return tea.Batch(listSSHKeysCmd(), fetchSSHPasswordAuthCmd())
+	return tea.Batch(s.refresh(), fetchSSHPasswordAuthCmd())
 }
 
 func (s *SSHKeysScreen) HandleKey(
@@ -186,13 +184,33 @@ func (s *SSHKeysScreen) HandleMsg(
 	switch msg := msg.(type) {
 	case tabActivatedMsg:
 		return s, tea.Batch(
-			listSSHKeysCmd(), fetchSSHPasswordAuthCmd())
+			s.refresh(), fetchSSHPasswordAuthCmd())
 	case sshKeysListMsg:
-		// Refresh from child-screen success. Don't
-		// touch focusZone — the user's cursor stays
-		// where they left it.
-		s.keys = msg.keys
+		if msg.owner != s || msg.request != s.request {
+			return s, nil
+		}
+		selected := ""
+		if s.keyCursor >= 0 && s.keyCursor < len(s.keys) {
+			selected = s.keys[s.keyCursor].Fingerprint
+		}
+		s.loaded = true
 		s.loadErr = msg.err
+		if msg.err != nil {
+			return s, nil
+		}
+		s.keys = msg.keys
+		s.keyCursor = 0
+		found := false
+		for i, key := range s.keys {
+			if key.Fingerprint == selected {
+				s.keyCursor = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.focusZone = sshZoneButtons
+		}
 		s.clampCursor()
 		return s, nil
 	}
@@ -255,7 +273,7 @@ func (s *SSHKeysScreen) openChangePasswordTab() (
 }
 
 func (s *SSHKeysScreen) openDetailTab() (Screen, tea.Cmd) {
-	if s.keyCursor >= len(s.keys) {
+	if s.loadErr != nil || s.keyCursor < 0 || s.keyCursor >= len(s.keys) {
 		return s, nil
 	}
 	k := s.keys[s.keyCursor]
@@ -267,13 +285,12 @@ func (s *SSHKeysScreen) openDetailTab() (Screen, tea.Cmd) {
 		label = label[:17] + "..."
 	}
 	screen := NewSSHKeyDetailScreen(
-		s.ctx, k, len(s.keys))
-	idx := s.keyCursor + 1
+		s.ctx, k)
 	return s, func() tea.Msg {
 		return openTabMsg{
 			Kind:   tabSSHKeyDetail,
 			Label:  label,
-			Index:  idx,
+			Key:    k.Fingerprint,
 			Screen: screen,
 			Parent: tabSSHKeys,
 		}
@@ -325,7 +342,9 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 	cursorLine := 0
 	var midLines []string
 
-	if s.loadErr != nil {
+	if !s.loaded {
+		midLines = append(midLines, " "+theme.Dim.Render("Loading authorized keys..."))
+	} else if s.loadErr != nil {
 		midLines = append(midLines,
 			" "+theme.Warning.Render(
 				s.loadErr.Error()))
@@ -449,4 +468,28 @@ func (s *SSHKeysScreen) clampCursor() {
 		s.focusZone = sshZoneButtons
 		s.btnIdx = 0
 	}
+}
+
+func sshAccessBusy(screen Screen) bool {
+	switch s := screen.(type) {
+	case *SSHKeyAddScreen:
+		return s.step == sshAddStepWorking
+	case *SSHKeyDetailScreen:
+		return s.step == sshKeyDetailStepWorking
+	case *SSHPasswordAuthScreen:
+		return s.step == sshPwAuthStepWorking
+	}
+	return false
+}
+
+// SSH results reach only their originating screen, including across sections.
+func (m Model) routeSSHResult(owner Screen, msg tea.Msg) (tea.Model, tea.Cmd) {
+	for i, tab := range m.tabs {
+		if tab.Screen == owner {
+			screen, cmd := tab.Screen.HandleMsg(msg)
+			m.tabs[i].Screen = screen
+			return m, cmd
+		}
+	}
+	return m, nil
 }

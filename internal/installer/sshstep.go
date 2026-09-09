@@ -20,13 +20,9 @@ package installer
 // guess.
 
 import (
-	"fmt"
-	"os"
-	"strings"
+	"github.com/virtualprivatenode/vpn/internal/host"
 
 	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // installSSHHardening is the ssh.harden step.
@@ -49,38 +45,7 @@ func installSSHHardening() error {
 		}
 	}
 
-	// Capture the current project file so validation failure can restore it.
-	prevNew, prevNewExists, err := readDropIn(paths.SSHDDropIn)
-	if err != nil {
-		return fmt.Errorf("read current sshd drop-in: %w", err)
-	}
-	// 2. Write the current drop-in.
-	content := buildHardeningDropIn(passwordAuth)
-	if err := system.SudoWriteFile(
-		paths.SSHDDropIn, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write sshd drop-in: %w", err)
-	}
-
-	// 3. Validate the merged config before any restart.
-	if out, err := system.SudoRunCombinedOutput(
-		"sshd", "-t"); err != nil {
-		detail := strings.TrimSpace(out)
-		restoreErr := restoreDropIn(prevNew, prevNewExists)
-		if restoreErr != nil {
-			return fmt.Errorf(
-				"sshd rejected the new config (%s) and restoring "+
-					"the previous drop-ins also failed (%v) — sshd "+
-					"was NOT restarted and keeps running its current "+
-					"config; inspect %s before restarting sshd",
-				detail, restoreErr, paths.SSHDDropIn)
-		}
-		return fmt.Errorf(
-			"sshd rejected the new config, previous drop-ins "+
-				"restored, sshd not restarted: %s", detail)
-	}
-
-	// 4. Restart.
-	if err := restartSSHD(); err != nil {
+	if err := host.ApplySSHHardening(passwordAuth); err != nil {
 		return err
 	}
 	if passwordAuth == "" {
@@ -93,27 +58,4 @@ func installSSHHardening() error {
 			passwordAuth)
 	}
 	return nil
-}
-
-// readDropIn reads a drop-in, distinguishing absent (fine) from
-// unreadable (abort — an unreadable prior state could not be
-// restored after a failed validation).
-func readDropIn(path string) ([]byte, bool, error) {
-	data, err := system.SudoReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) ||
-			strings.Contains(err.Error(), "No such file") {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	return data, true, nil
-}
-
-// restoreDropIn puts the current project drop-in back to its captured state.
-func restoreDropIn(prevNew []byte, newExisted bool) error {
-	if newExisted {
-		return system.SudoWriteFile(paths.SSHDDropIn, prevNew, 0644)
-	}
-	return system.SudoRun("rm", "-f", paths.SSHDDropIn)
 }

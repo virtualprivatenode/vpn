@@ -49,14 +49,16 @@ type Screen interface {
 // chain — zero refresh plumbing.
 
 type ScreenContext struct {
-	Cfg            *config.AppConfig
-	State          *RuntimeState
-	LndClient      *lndrpc.Client
-	Status         *statusMsg
-	HasTabs        bool   // varies by section; Model sets before calling View/HelpBindings
-	ContentFocused bool   // true when content pane has focus (not tab bar, not sidebar)
-	Version        string // set once at construction
-	LatestVersion  string // updated by latestVersionMsg handler
+	SSHAccess       *app.SSHAccess
+	sshAuthRevision uint64
+	Cfg             *config.AppConfig
+	State           *RuntimeState
+	LndClient       *lndrpc.Client
+	Status          *statusMsg
+	HasTabs         bool   // varies by section; Model sets before calling View/HelpBindings
+	ContentFocused  bool   // true when content pane has focus (not tab bar, not sidebar)
+	Version         string // set once at construction
+	LatestVersion   string // updated by latestVersionMsg handler
 }
 
 // RuntimeState contains facts whose authority is the live system rather than
@@ -177,4 +179,11 @@ func emitFocusParent() tea.Msg {
 
 func emitRefreshStatus() tea.Msg {
 	return refreshStatusMsg{}
+}
+
+func (c *ScreenContext) sshAccess() *app.SSHAccess {
+	if c.SSHAccess != nil {
+		return c.SSHAccess
+	}
+	return app.NewSSHAccess()
 }

@@ -7,7 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -31,6 +31,7 @@ const (
 )
 
 type SSHKeyAddScreen struct {
+	attempt   uint64
 	ctx       *ScreenContext
 	step      sshAddStep
 	keyInput  textinput.Model
@@ -79,6 +80,9 @@ func (s *SSHKeyAddScreen) HandleMsg(
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sshKeyAddMsg:
+		if msg.owner != s || msg.attempt != s.attempt || s.step != sshAddStepWorking {
+			return s, nil
+		}
 		s.step = sshAddStepResult
 		if msg.err != nil {
 			s.resultErr = msg.err.Error()
@@ -87,15 +91,16 @@ func (s *SSHKeyAddScreen) HandleMsg(
 			s.resultMsg = "Key added successfully"
 			s.resultErr = ""
 		}
-		return s, nil
+		return s, refreshSSHKeysCmd
 
 	case tea.PasteMsg:
 		if s.step == sshAddStepInput &&
 			s.focusZone == sshAddZoneInput {
 			line := strings.TrimSpace(msg.Content)
-			if idx := strings.IndexByte(
-				line, '\n'); idx >= 0 {
-				line = line[:idx]
+			if strings.ContainsAny(line, "\r\n") {
+				s.keyInput.SetValue("")
+				s.addErr = "Paste one public key at a time"
+				return s, nil
 			}
 			s.keyInput.SetValue(line)
 		}
@@ -216,7 +221,7 @@ func (s *SSHKeyAddScreen) handleInputKey(
 		if s.focusZone == sshAddZoneButtons {
 			switch s.btnIdx {
 			case 0: // Cancel
-				return s, emitCloseTab
+				return s, closeSSHScreenCmd(s)
 			case 1: // Add
 				return s.submit()
 			}
@@ -245,13 +250,13 @@ func (s *SSHKeyAddScreen) submit() (Screen, tea.Cmd) {
 		s.addErr = "Paste a public key"
 		return s, nil
 	}
-	if err := installer.ValidateSSHKey(value); err != nil {
+	if _, err := app.ParseSSHKey(value); err != nil {
 		s.addErr = "Invalid SSH key: " + err.Error()
 		return s, nil
 	}
 	s.addErr = ""
 	s.step = sshAddStepWorking
-	return s, addSSHKeyCmd(value)
+	return s, s.addCommand(value)
 }
 
 func (s *SSHKeyAddScreen) viewInput(w, h int) string {
@@ -332,8 +337,8 @@ func (s *SSHKeyAddScreen) handleResultKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "enter":
-		// Close this tab and refresh the parent list.
-		return s, tea.Batch(emitCloseTab, listSSHKeysCmd())
+		// The parent list was refreshed when the operation completed.
+		return s, closeSSHScreenCmd(s)
 	case "left":
 		return s, emitFocusSidebar
 	case "up", "shift+tab":

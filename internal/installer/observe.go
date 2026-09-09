@@ -30,7 +30,7 @@ package installer
 // creates it later in this same install), and the question
 // asked here is the box-global one ("is password auth on,
 // today, before we changed anything"), not the per-user
-// question the TUI's EffectiveSSHPasswordAuth answers after
+// question host.EffectiveSSHPasswordAuth answers after
 // install. Same [LIVE]-verified `sshd -T -C` invocation shape
 // as commit 2 (openssh-server 1:10.0p1-7+deb13u4).
 

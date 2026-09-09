@@ -450,7 +450,7 @@ func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 		state.KeyVerificationPending = verification.Pending
 		state.KeyVerificationKnown = true
 	}
-	if enabled, err := installer.EffectiveSSHPasswordAuth(); err != nil {
+	if enabled, err := app.NewSSHAccess().PasswordAuth(); err != nil {
 		logger.TUI("read live SSH password authentication: %v", err)
 	} else {
 		state.SSHPasswordAuthDisabled = !enabled

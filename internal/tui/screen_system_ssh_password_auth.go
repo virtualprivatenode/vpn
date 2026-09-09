@@ -1,12 +1,9 @@
 package tui
 
 import (
-	"fmt"
-
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -17,7 +14,7 @@ import (
 // action screens.
 //
 // Disabling is destructive (potential lockout) and refused
-// at the installer level if no SSH keys are configured.
+// by the root helper if no supported SSH keys are configured.
 // Enabling is always allowed.
 
 type sshPwAuthStep int
@@ -30,47 +27,44 @@ const (
 )
 
 type sshPwAuthDoneMsg struct {
+	owner    *SSHPasswordAuthScreen
+	attempt  uint64
 	disabled bool // the value we just applied
 	err      error
 }
 
 type sshPwAuthStateMsg struct {
+	owner    *ScreenContext
+	revision uint64
 	disabled bool
 	err      error
 }
 
-func setSSHPasswordAuthCmd(
-	disabled bool,
-) tea.Cmd {
+func (s *SSHPasswordAuthScreen) setCommand() tea.Cmd {
+	s.attempt++
+	s.ctx.sshAuthRevision++
+	s.ctx.State.SSHPasswordAuthKnown = false
+	attempt, disabled, access := s.attempt, s.targetDisabled, s.ctx.sshAccess()
 	return func() tea.Msg {
-		err := installer.SetSSHPasswordAuth(disabled)
-		if err == nil {
-			enabled, readErr := installer.EffectiveSSHPasswordAuth()
-			if readErr != nil {
-				err = fmt.Errorf("verify effective SSH password authentication: %w", readErr)
-			} else if disabled == enabled {
-				err = fmt.Errorf("effective SSH password authentication did not change")
-			}
-		}
-		return sshPwAuthDoneMsg{
-			disabled: disabled, err: err}
+		return sshPwAuthDoneMsg{owner: s, attempt: attempt, disabled: disabled, err: access.SetPasswordAuth(disabled)}
 	}
 }
 
+type refreshSSHAuthMsg struct{}
+
 func fetchSSHPasswordAuthCmd() tea.Cmd {
-	return func() tea.Msg {
-		enabled, err := installer.EffectiveSSHPasswordAuth()
-		return sshPwAuthStateMsg{disabled: !enabled, err: err}
-	}
+	return func() tea.Msg { return refreshSSHAuthMsg{} }
 }
 
 type SSHPasswordAuthScreen struct {
-	ctx        *ScreenContext
-	step       sshPwAuthStep
-	viewBtnIdx int // 0 = Cancel, 1 = toggle action
-	confirmIdx int // 0 = Go Back, 1 = Apply
-	resultErr  string
-	resultMsg  string
+	attempt        uint64
+	targetDisabled bool
+	ctx            *ScreenContext
+	step           sshPwAuthStep
+	viewBtnIdx     int // 0 = Cancel, 1 = toggle action
+	confirmIdx     int // 0 = Go Back, 1 = Apply
+	resultErr      string
+	resultMsg      string
 }
 
 func NewSSHPasswordAuthScreen(
@@ -109,15 +103,15 @@ func (s *SSHPasswordAuthScreen) HandleMsg(
 	switch msg := msg.(type) {
 	case tabActivatedMsg:
 		return s, fetchSSHPasswordAuthCmd()
-	case sshPwAuthStateMsg:
-		if msg.err != nil {
-			s.ctx.State.SSHPasswordAuthKnown = false
+	case sshPwAuthDoneMsg:
+		if msg.owner != s || msg.attempt != s.attempt || s.step != sshPwAuthStepWorking {
 			return s, nil
 		}
-		s.ctx.State.SSHPasswordAuthDisabled = msg.disabled
-		s.ctx.State.SSHPasswordAuthKnown = true
-		return s, nil
-	case sshPwAuthDoneMsg:
+		s.ctx.sshAuthRevision++
+		s.ctx.State.SSHPasswordAuthKnown = msg.err == nil
+		if msg.err == nil {
+			s.ctx.State.SSHPasswordAuthDisabled = msg.disabled
+		}
 		s.step = sshPwAuthStepResult
 		if msg.err != nil {
 			s.resultErr = msg.err.Error()
@@ -204,11 +198,12 @@ func (s *SSHPasswordAuthScreen) handleViewKey(
 		return s, emitFocusParent
 	case "enter":
 		if s.viewBtnIdx == 0 {
-			return s, emitCloseTab
+			return s, closeSSHScreenCmd(s)
 		}
 		if !s.ctx.State.SSHPasswordAuthKnown {
 			return s, fetchSSHPasswordAuthCmd()
 		}
+		s.targetDisabled = !s.ctx.State.SSHPasswordAuthDisabled
 		s.step = sshPwAuthStepConfirm
 		s.confirmIdx = 0
 		return s, nil
@@ -304,14 +299,9 @@ func (s *SSHPasswordAuthScreen) handleConfirmKey(
 		case 0: // Go Back
 			s.step = sshPwAuthStepView
 			return s, nil
-		case 1: // Apply
-			if !s.ctx.State.SSHPasswordAuthKnown {
-				return s, fetchSSHPasswordAuthCmd()
-			}
+		case 1: // Apply the exact choice shown at confirmation.
 			s.step = sshPwAuthStepWorking
-			// Toggle: target is the opposite of current.
-			target := !s.ctx.State.SSHPasswordAuthDisabled
-			return s, setSSHPasswordAuthCmd(target)
+			return s, s.setCommand()
 		}
 	}
 	return s, nil
@@ -322,8 +312,7 @@ func (s *SSHPasswordAuthScreen) viewConfirm(
 ) string {
 	p := newPane(w)
 
-	disabled := s.ctx.State.SSHPasswordAuthDisabled
-	disabling := !disabled // we're toggling away from current
+	disabling := s.targetDisabled
 
 	if disabling {
 		p.title(theme.Warning, "Disable password auth?")
@@ -347,7 +336,7 @@ func (s *SSHPasswordAuthScreen) viewConfirm(
 	}
 
 	applyLabel := "Disable"
-	if disabled {
+	if !disabling {
 		applyLabel = "Enable"
 	}
 	return p.renderWithBottomButtons(
@@ -378,7 +367,7 @@ func (s *SSHPasswordAuthScreen) handleResultKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "enter":
-		return s, emitCloseTab
+		return s, closeSSHScreenCmd(s)
 	case "left":
 		return s, emitFocusSidebar
 	case "up", "shift+tab":

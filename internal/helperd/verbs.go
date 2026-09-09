@@ -13,6 +13,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -328,13 +329,9 @@ func verbReadNodeAddresses(_ *verbCtx, _ json.RawMessage) (any, error) {
 }
 
 func verbReadSSHAuth(_ *verbCtx, _ json.RawMessage) (any, error) {
-	// Root branch of EffectiveSSHPasswordAuth: sshd -T with a
-	// simulated connection for the admin user — the first-
-	// match-wins election across sshd_config and every
-	// drop-in, not any single file's vote. An error (broken
-	// sshd setup) fails the verb; callers refuse the risky
-	// action rather than guessing.
-	enabled, err := installer.EffectiveSSHPasswordAuth()
+	// Sample the operator configuration at localhost. Errors remain unknown;
+	// source-specific Match rules may differ on a real connection.
+	enabled, err := host.EffectiveSSHPasswordAuth()
 	if err != nil {
 		return nil, err
 	}
@@ -381,10 +378,9 @@ func verbRebuildSSHConfig(_ *verbCtx, params json.RawMessage) (any, error) {
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	// The zero-auth lockout guard and the validate-and-restore
-	// sequence live inside RebuildSSHHardeningConfig — at the
-	// write boundary, so every caller inherits them.
-	if err := installer.RebuildSSHHardeningConfig(
+	// The fresh key guard, validate/restore sequence, and effective-state
+	// verification live at the privileged write boundary.
+	if err := host.RebuildSSHHardeningConfig(
 		p.PasswordAuthDisabled); err != nil {
 		return nil, err
 	}

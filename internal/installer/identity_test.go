@@ -5,17 +5,19 @@ package installer
 import (
 	"strings"
 	"testing"
+
+	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
 
 const (
-	testKeyA = "ssh-ed25519 QUFBQUFBQUFBQQ== alice@laptop"
-	testKeyB = "ssh-rsa QkJCQkJCQkJCQg== bob@desktop"
+	testKeyA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB alice@laptop"
+	testKeyB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC bob@desktop"
 	// The wild cloud-init decoy shape: an options prefix with a
 	// forced command ahead of real key material.
 	testDecoy = `no-port-forwarding,no-agent-forwarding,` +
 		`command="echo 'Please login as the user \"admin\" ` +
 		`rather than the user \"root\".'" ` +
-		`ssh-ed25519 QUFBQUFBQUFBQQ== provisioning`
+		`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB provisioning`
 )
 
 // ── classifyAuthorizedKeys ───────────────────────────────
@@ -63,31 +65,14 @@ func TestClassifyAuthorizedKeysSkipsNoise(t *testing.T) {
 	}
 }
 
-// ── lineCarriesKeyMaterial ───────────────────────────────
-
-func TestLineCarriesKeyMaterial(t *testing.T) {
-	if !lineCarriesKeyMaterial(testDecoy) {
-		t.Error("decoy line: got false, want true")
-	}
-	if lineCarriesKeyMaterial("complete garbage line") {
-		t.Error("garbage line: got true, want false")
-	}
-	// A bare valid key line starts WITH the type (index 0) —
-	// this helper only classifies unparseable lines, which by
-	// construction have a prefix before the type.
-	if lineCarriesKeyMaterial(testKeyA) {
-		t.Error("bare key line: got true, want false")
-	}
-}
-
 // ── DedupeKeys ───────────────────────────────────────────
 
 func TestDedupeKeys(t *testing.T) {
-	a, _ := ParseSSHKey(testKeyA)
-	b, _ := ParseSSHKey(testKeyB)
+	a, _ := sshkeys.Parse(testKeyA)
+	b, _ := sshkeys.Parse(testKeyB)
 	sources := []KeySource{
-		{User: "root", Keys: []SSHKeyInfo{a, b}},
-		{User: "debian", Keys: []SSHKeyInfo{a}}, // duplicate
+		{User: "root", Keys: []sshkeys.Key{a, b}},
+		{User: "debian", Keys: []sshkeys.Key{a}}, // duplicate
 	}
 	out := DedupeKeys(sources)
 	if len(out) != 2 {
@@ -161,5 +146,12 @@ func TestPasteFirstLine(t *testing.T) {
 			t.Errorf("pasteFirstLine(%q) = %q, want %q",
 				tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestClassifyAuthorizedKeysReportsMalformedKeys(t *testing.T) {
+	keys, excluded := classifyAuthorizedKeys("ssh-ed25519 YQ== malformed\nssh-dss YQ== obsolete\n" + testKeyA + "\n")
+	if len(keys) != 1 || excluded != 2 {
+		t.Fatalf("got %d keys and %d exclusions", len(keys), excluded)
 	}
 }

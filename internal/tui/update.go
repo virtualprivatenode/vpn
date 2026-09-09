@@ -148,6 +148,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	// ── L16 screen-to-Model messages ────────────────
+	case closeSSHScreenMsg:
+		if msg.screen == nil || sshAccessBusy(msg.screen) {
+			return m, nil
+		}
+		return m.closeScreenTab(msg.screen)
 	case closeTabMsg:
 		return m.closeTab(m.activeTab)
 	case closeOnChainSendMsg:
@@ -233,6 +238,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshStatusMsg:
 		return m, fetchStatus(m.cfg, m.state, m.lndClient)
 	case openTabMsg:
+		if msg.Kind == tabSSHKeyDetail {
+			detail, ok := msg.Screen.(*SSHKeyDetailScreen)
+			if !ok || msg.Key == "" || detail.keyInfo.Fingerprint != msg.Key || m.nav.ActiveSection() != secSystem {
+				return m, nil
+			}
+			for i, tab := range m.effectiveTabs() {
+				if tab.Kind == tabSSHKeyDetail && tab.Key == msg.Key {
+					m.activeTab = i
+					m.rememberTabPosition()
+					m.focusContent()
+					return m, m.activateTab()
+				}
+			}
+		}
+
 		if msg.Kind == tabChannel {
 			detail, ok := msg.Screen.(*ChannelDetailScreen)
 			if !ok || msg.Key == "" || detail.channel.ChannelPoint != msg.Key || m.nav.ActiveSection() != secChannels {
@@ -248,7 +268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Dedup by kind + index if Index is set
-		if msg.Kind != tabChannel && msg.Index != 0 {
+		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Index != 0 {
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
 				if t.Kind == msg.Kind &&
@@ -266,7 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Dedup flow tabs by kind + section
-		if msg.Kind != tabChannel && msg.Index == 0 {
+		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Index == 0 {
 			sec := m.nav.ActiveSection()
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
@@ -274,7 +294,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen)) {
+					if msg.Replace && (onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&
@@ -477,24 +497,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.dispatchToTab(tabAutoUnlock, msg)
 	case autoUnlockDisableDoneMsg:
 		return m.dispatchToTab(tabAutoUnlock, msg)
+	case refreshSSHKeysMsg:
+		var cmds []tea.Cmd
+		for _, tab := range m.tabs {
+			if screen, ok := tab.Screen.(*SSHKeysScreen); ok {
+				cmds = append(cmds, screen.refresh())
+			}
+		}
+		return m, tea.Batch(cmds...)
 	case sshKeysListMsg:
-		return m.dispatchToTab(tabSSHKeys, msg)
+		return m.routeSSHResult(msg.owner, msg)
 	case sshKeyAddMsg:
-		return m.dispatchToTab(tabSSHKeyAdd, msg)
+		return m.routeSSHResult(msg.owner, msg)
 	case sshKeyRemoveMsg:
-		return m.dispatchToTab(tabSSHKeyDetail, msg)
+		return m.routeSSHResult(msg.owner, msg)
 	case sshPwAuthDoneMsg:
+		return m.routeSSHResult(msg.owner, msg)
+	case refreshSSHAuthMsg:
+		for _, tab := range m.tabs {
+			if screen, ok := tab.Screen.(*SSHPasswordAuthScreen); ok && sshAccessBusy(screen) {
+				return m, nil
+			}
+		}
+		m.screenCtx.sshAuthRevision++
+		revision, ctx, access := m.screenCtx.sshAuthRevision, m.screenCtx, m.screenCtx.sshAccess()
+		return m, func() tea.Msg {
+			enabled, err := access.PasswordAuth()
+			return sshPwAuthStateMsg{owner: ctx, revision: revision, disabled: !enabled, err: err}
+		}
+	case sshPwAuthStateMsg:
+		if msg.owner != m.screenCtx || msg.revision != m.screenCtx.sshAuthRevision {
+			return m, nil
+		}
+		m.state.SSHPasswordAuthKnown = msg.err == nil
 		if msg.err == nil {
 			m.state.SSHPasswordAuthDisabled = msg.disabled
-			m.state.SSHPasswordAuthKnown = true
-		}
-		return m.dispatchToTab(tabSSHPasswordAuth, msg)
-	case sshPwAuthStateMsg:
-		if msg.err != nil {
-			m.state.SSHPasswordAuthKnown = false
-		} else {
-			m.state.SSHPasswordAuthDisabled = msg.disabled
-			m.state.SSHPasswordAuthKnown = true
 		}
 		return m, nil
 	case changePwDoneMsg:
@@ -916,7 +953,7 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	if onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) {
+	if onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) {
 		return m, nil
 	}
 
@@ -1155,4 +1192,17 @@ func (m Model) dispatchToFirstTab(
 		}
 	}
 	return m, nil
+}
+
+// Parent close or replacement must not discard a submitted SSH operation.
+func (m Model) sshTabBusy(tab openTab) bool {
+	if sshAccessBusy(tab.Screen) {
+		return true
+	}
+	for _, child := range m.tabs {
+		if child.Section == tab.Section && child.Parent == tab.Kind && sshAccessBusy(child.Screen) {
+			return true
+		}
+	}
+	return false
 }
