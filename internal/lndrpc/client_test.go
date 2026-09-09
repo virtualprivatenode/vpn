@@ -3,6 +3,8 @@
 package lndrpc
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,24 +24,6 @@ func TestWalletStateNames(t *testing.T) {
 		if got := walletStateName(state); got != want {
 			t.Errorf("walletStateName(%s) = %s, want %s", state, got, want)
 		}
-	}
-}
-
-func TestNodeInfoFields(t *testing.T) {
-	info := &NodeInfo{
-		Pubkey: "02abc123", Alias: "mynode", Channels: 5,
-		Peers: 10, BlockHeight: 850000, SyncedChain: true,
-		SyncedGraph: true, Version: "0.21.2-beta",
-	}
-	if info.Channels != 5 {
-		t.Errorf("Channels: got %d", info.Channels)
-	}
-}
-
-func TestWalletBalanceFields(t *testing.T) {
-	bal := &WalletBalance{TotalBalance: "1000000"}
-	if bal.TotalBalance != "1000000" {
-		t.Errorf("TotalBalance: got %q", bal.TotalBalance)
 	}
 }
 
@@ -275,5 +259,26 @@ func TestRestageDue(t *testing.T) {
 	}
 	if !restageDue(now.Add(-time.Hour), now) {
 		t.Error("not due long after the interval")
+	}
+}
+
+func TestCancelledReconnectDoesNotReadCredentialsOrRestage(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	client := &Client{}
+	if err := client.dial(ctx, true); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled dial reached filesystem or RPC work: %v", err)
+	}
+	credRestageMu.Lock()
+	before := credRestageAt
+	credRestageMu.Unlock()
+	if requestCredentialRestage(ctx) {
+		t.Fatal("cancelled reconnect requested credential mutation")
+	}
+	credRestageMu.Lock()
+	after := credRestageAt
+	credRestageMu.Unlock()
+	if !after.Equal(before) {
+		t.Fatal("cancelled reconnect consumed the restage allowance")
 	}
 }

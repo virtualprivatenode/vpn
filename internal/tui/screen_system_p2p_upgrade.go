@@ -7,7 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/system"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -280,40 +280,20 @@ func (s *P2PUpgradeScreen) HandleKey(
 func (s *P2PUpgradeScreen) startInstall() (
 	Screen, tea.Cmd,
 ) {
-	// The mode switch (LND config, firewall, LND restart, and
-	// re-staging the regenerated TLS certificate) runs on the
-	// root side of the helper boundary as one operation. The
-	// helper derives the box's public address itself — the IP
-	// this screen showed the operator is display, not an input
-	// it will accept.
-	steps := buildHelperSteps(
-		helper.VerbUpgradeP2PToHybrid,
-		nil,
-		helper.UpgradeP2PToHybridStepNames(),
-		nil)
-	steps = appendConfigReloadStep(steps, s.ctx.Cfg)
+	var client app.P2PConnection
+	if s.ctx.LndClient != nil {
+		client = s.ctx.LndClient
+	}
+	operation := s.ctx.HelperWorkflows.UpgradeP2P(client)
 
 	s.progress = NewInstallProgressScreen(
-		s.ctx, steps,
+		s.ctx, operation,
 		s.onInstallDone, s.onInstallFail)
 	s.step = p2pProgress
 	return s, s.progress.Init()
 }
 
-func (s *P2PUpgradeScreen) onInstallDone() tea.Cmd {
-	return func() tea.Msg {
-		// The P2P upgrade deletes and regenerates LND's
-		// TLS cert. Our existing gRPC connection is now
-		// stale — explicitly reconnect so the next
-		// status poll succeeds immediately rather than
-		// failing once and reconnecting on the cycle
-		// after that.
-		if s.ctx.LndClient != nil {
-			s.ctx.LndClient.Reconnect()
-		}
-		return refreshStatusMsg{}
-	}
-}
+func (s *P2PUpgradeScreen) onInstallDone() tea.Cmd { return emitRefreshStatus }
 
 func (s *P2PUpgradeScreen) onInstallFail() tea.Cmd {
 	return func() tea.Msg {

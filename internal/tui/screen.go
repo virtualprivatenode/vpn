@@ -49,6 +49,7 @@ type Screen interface {
 // chain — zero refresh plumbing.
 
 type ScreenContext struct {
+	HelperWorkflows *app.HelperWorkflows
 	SSHAccess       *app.SSHAccess
 	sshAuthRevision uint64
 	Cfg             *config.AppConfig

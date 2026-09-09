@@ -291,8 +291,9 @@ func fetchOnChainTxCmd(
 func fetchFeeTiersCmd(
 	cfg *config.AppConfig,
 ) tea.Cmd {
+	snapshot := *cfg
 	return func() tea.Msg {
-		return fetchFeeTiers(cfg)
+		return fetchFeeTiers(&snapshot)
 	}
 }
 

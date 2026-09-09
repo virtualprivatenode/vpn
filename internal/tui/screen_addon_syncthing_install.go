@@ -4,8 +4,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -107,21 +105,10 @@ func (s *SyncthingInstallScreen) HandleKey(
 func (s *SyncthingInstallScreen) startInstall() (
 	Screen, tea.Cmd,
 ) {
-	// The install itself —
-	// download, verification, service, Tor rebuild, staging —
-	// runs on the root side of the helper boundary as one
-	// operation. The generated web-UI password is staged for
-	// the TUI and is never returned in the helper response.
-
-	steps := buildHelperSteps(
-		helper.VerbSyncthingInstall, nil,
-		helper.SyncthingInstallStepNames(
-			installer.SyncthingVersionStr()),
-		nil)
-	steps = appendConfigReloadStep(steps, s.ctx.Cfg)
+	operation := s.ctx.HelperWorkflows.InstallSyncthing()
 
 	s.progress = NewInstallProgressScreen(
-		s.ctx, steps, s.onInstallDone, s.onInstallFail)
+		s.ctx, operation, s.onInstallDone, s.onInstallFail)
 	s.step = syncInstallProgress
 	return s, s.progress.Init()
 }

@@ -18,6 +18,8 @@ import (
 func fetchStatus(
 	cfg *config.AppConfig, state *RuntimeState, lndClient *lndrpc.Client,
 ) tea.Cmd {
+	snapshot := *cfg
+	cfg = &snapshot
 	walletExists := state != nil && state.WalletKnown && state.WalletExists
 	return func() tea.Msg {
 		s := statusMsg{services: make(map[string]bool)}

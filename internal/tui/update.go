@@ -294,7 +294,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t)) {
+					if msg.Replace && (onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&
@@ -485,14 +485,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
-	case installStepDoneMsg:
-		// Route to whichever install flow tab is open.
-		// Only one install runs at a time, so first
-		// match wins.
-		return m.dispatchToFirstTab([]tabKind{
-			tabSyncthingInstall,
-			tabP2PUpgrade, tabSelfUpdate,
-		}, msg)
+	case helperProgressMsg:
+		for _, tab := range m.tabs {
+			if progress := helperProgress(tab.Screen); progress != nil && progress.operation == msg.operation {
+				_, cmd := progress.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
+	case closeHelperProgressMsg:
+		if msg.screen == nil || !msg.screen.done {
+			return m, nil
+		}
+		for _, tab := range m.tabs {
+			if helperProgress(tab.Screen) == msg.screen {
+				return m.closeScreenTab(tab.Screen)
+			}
+		}
+		return m, nil
 	case autoUnlockSetupDoneMsg:
 		return m.dispatchToTab(tabAutoUnlock, msg)
 	case autoUnlockDisableDoneMsg:
@@ -953,7 +963,7 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	if onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) {
+	if onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) {
 		return m, nil
 	}
 
@@ -1170,26 +1180,6 @@ func (m Model) dispatchToTab(
 ) (Model, tea.Cmd) {
 	if rm, cmd, ok := m.routeToScreen(kind, msg); ok {
 		return rm, cmd
-	}
-	return m, nil
-}
-
-// dispatchToFirstTab routes msg to the first tab whose
-// kind appears in kinds. Returns (m, nil) if none match.
-//
-// Used when a single async message class can arrive for
-// any of several mutually-exclusive tabs (e.g.
-// installStepDoneMsg can come from a Syncthing install,
-// a P2P upgrade, or a self-update —
-// but only one flow runs at a time). Order in kinds is
-// the match priority if more than one were somehow open.
-func (m Model) dispatchToFirstTab(
-	kinds []tabKind, msg tea.Msg,
-) (Model, tea.Cmd) {
-	for _, k := range kinds {
-		if rm, cmd, ok := m.routeToScreen(k, msg); ok {
-			return rm, cmd
-		}
 	}
 	return m, nil
 }

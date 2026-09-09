@@ -4,10 +4,12 @@ package helper
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/paths"
@@ -47,22 +49,30 @@ func helperDown(op string, err error) error {
 // drain it with Wait (simple verbs) or step through it with
 // WaitStep + Wait (streaming verbs feeding a step renderer).
 type Session struct {
-	conn    *net.UnixConn
+	conn    net.Conn
 	scanner *bufio.Scanner
 	verb    string
 
-	end    *Event // terminator, once seen
-	nextIx int    // next step index expected by WaitStep
-	stepOK map[int]bool
-	err    error // sticky transport/protocol error
+	end        *Event // terminator, once seen
+	stepOK     map[int]bool
+	err        error // sticky transport/protocol error
+	closeOnce  sync.Once
+	stopCancel func() bool
+	cancelDone chan struct{}
 }
 
 // Start dials the helper and sends the request. It returns
 // immediately after the request is written; the operation runs
 // (and possibly queues) on the root side.
 func Start(verb string, params any) (*Session, error) {
+	return StartContext(context.Background(), verb, params)
+}
+
+// StartContext owns the connection until Wait or Close. Cancellation stops local
+// I/O, including a blocked progress read. It cannot undo an accepted mutation.
+func StartContext(ctx context.Context, verb string, params any) (*Session, error) {
 	d := net.Dialer{Timeout: dialTimeout}
-	c, err := d.Dial("unix", paths.HelperSocket)
+	c, err := d.DialContext(ctx, "unix", paths.HelperSocket)
 	if err != nil {
 		return nil, helperDown(verb, err)
 	}
@@ -73,44 +83,57 @@ func Start(verb string, params any) (*Session, error) {
 			errors.New("not a unix socket connection"))
 	}
 
+	s := newSession(ctx, conn, verb)
+	success := false
+	defer func() {
+		if !success {
+			s.Close()
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	req := Request{Verb: verb}
 	if params != nil {
 		raw, err := json.Marshal(params)
 		if err != nil {
-			conn.Close()
 			return nil, fmt.Errorf("%s: encode params: %w", verb, err)
 		}
 		req.Params = raw
 	}
 	line, err := json.Marshal(req)
 	if err != nil {
-		conn.Close()
 		return nil, fmt.Errorf("%s: encode request: %w", verb, err)
 	}
 	if err := conn.SetWriteDeadline(
-		time.Now().Add(dialTimeout)); err == nil {
-		defer conn.SetWriteDeadline(time.Time{})
+		time.Now().Add(dialTimeout)); err != nil {
+		return nil, helperDown(verb, err)
 	}
+	defer conn.SetWriteDeadline(time.Time{})
 	if _, err := conn.Write(append(line, '\n')); err != nil {
-		conn.Close()
 		return nil, helperDown(verb, err)
 	}
 	// Half-close our sending side: the helper reads a clean EOF
 	// after the request line even if a future client forgets
 	// the trailing newline.
 	if err := conn.CloseWrite(); err != nil {
-		conn.Close()
 		return nil, helperDown(verb, err)
 	}
 
+	success = true
+	return s, nil
+}
+
+func newSession(ctx context.Context, conn net.Conn, verb string) *Session {
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 0, 64*1024), maxEventBytes)
-	return &Session{
-		conn:    conn,
-		scanner: sc,
-		verb:    verb,
-		stepOK:  map[int]bool{},
-	}, nil
+	s := &Session{conn: conn, scanner: sc, verb: verb, stepOK: map[int]bool{}, cancelDone: make(chan struct{})}
+	s.stopCancel = context.AfterFunc(ctx, func() {
+		conn.Close()
+		close(s.cancelDone)
+	})
+	return s
 }
 
 // readEvent reads the next response line. Returns nil at
@@ -200,7 +223,7 @@ func (s *Session) WaitStep(i int) error {
 // Wait blocks until the terminator, decoding its result payload
 // into result (which may be nil), and closes the connection.
 func (s *Session) Wait(result any) error {
-	defer s.conn.Close()
+	defer s.Close()
 	if err := s.advance(-1); err != nil {
 		return err
 	}
@@ -213,11 +236,17 @@ func (s *Session) Wait(result any) error {
 	return nil
 }
 
-// Close abandons the session. The root side finishes the
-// operation it started regardless — abandoning a mutation
-// halfway is exactly the inconsistent state the helper exists
-// to prevent — but this client stops listening.
-func (s *Session) Close() { s.conn.Close() }
+// Close stops observation and releases the connection. The helper deliberately
+// continues an accepted mutation after disconnection; Close is not rollback.
+// It may run concurrently with WaitStep or Wait. Reads must have one owner.
+func (s *Session) Close() {
+	s.closeOnce.Do(func() {
+		if s.stopCancel != nil && !s.stopCancel() {
+			<-s.cancelDone
+		}
+		s.conn.Close()
+	})
+}
 
 // Call performs a whole verb in one blocking call: start, drain
 // any progress events, decode the terminator. For streaming
