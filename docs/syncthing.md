@@ -60,7 +60,20 @@ In the Node dashboard:
 4. Paste your local Device ID
 5. Confirm with the Pair button
 
-The Node adds your device and shares the backup folder automatically.
+The Node adds your device and shares the backup folder. Completion confirms the
+Node's configuration; the receiver still needs steps 6 and 7 below. Avoid editing
+the Node's Syncthing configuration in its web UI while pairing or removing a
+device in the TUI.
+
+If pairing reports an incomplete or unconfirmed outcome, inspect the device and
+`lnd-backup` share in the Node's web UI before retrying. A device may have been
+added even when sharing was not confirmed. An explicit pairing retry preserves
+that device's settings and completes a missing backup share. It does not
+reinstall Syncthing or roll back earlier changes.
+
+Removal identifies the selected device by its complete Device ID. It removes
+that device and its folder shares on the Node; remote files remain intact.
+An unconfirmed removal requires checking the current device list before retrying.
 
 ### Step 6 — Add the Node in Your Local Syncthing
 
@@ -127,6 +140,14 @@ the System section.
   (not exposed to clearnet)
 
 ### Troubleshooting
+
+**Privacy or API-key check failed:**
+
+The TUI refuses pairing when it cannot verify the Node's privacy settings or
+send-only backup boundary. Ask the host administrator to inspect the existing
+configuration and staged credentials. Reinstalling over retained Syncthing state
+is not a supported repair. During installation, a failed privacy check triggers
+stop and disable; any failure of those actions is reported separately.
 
 **Devices not connecting:**
 

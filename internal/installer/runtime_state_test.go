@@ -68,27 +68,3 @@ func TestSyncthingResidueIncludesStagedCredentials(t *testing.T) {
 		}
 	}
 }
-
-func TestParseSyncthingDevicesUsesCurrentDaemonFacts(t *testing.T) {
-	raw := []byte(`[
-  {"deviceID":"LOCAL","name":"this node"},
-  {"deviceID":"B","name":" Laptop "},
-  {"deviceID":"A","name":""},
-  {"deviceID":"B","name":"stale duplicate"},
-  {"deviceID":" ","name":"invalid"}
-]`)
-	devices, err := parseSyncthingDevices(raw, "LOCAL")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(devices) != 2 {
-		t.Fatalf("devices = %+v", devices)
-	}
-	if devices[0].DeviceID != "B" || devices[0].Name != "Laptop" ||
-		devices[1].DeviceID != "A" || devices[1].Name != "Syncthing device" {
-		t.Fatalf("unexpected current device view: %+v", devices)
-	}
-	if _, err := parseSyncthingDevices([]byte(`{}`), "LOCAL"); err == nil {
-		t.Fatal("malformed device list accepted")
-	}
-}

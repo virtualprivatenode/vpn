@@ -255,6 +255,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.Kind == tabSyncthingDevice {
+			detail, ok := msg.Screen.(*SyncthingDeviceScreen)
+			if !ok || msg.Key == "" || detail.device.DeviceID != msg.Key || m.nav.ActiveSection() != secAddons {
+				return m, nil
+			}
+			for i, tab := range m.effectiveTabs() {
+				if tab.Kind == tabSyncthingDevice && tab.Key == msg.Key {
+					m.activeTab = i
+					m.rememberTabPosition()
+					m.focusContent()
+					return m, m.activateTab()
+				}
+			}
+		}
+
 		if msg.Kind == tabSSHKeyDetail {
 			detail, ok := msg.Screen.(*SSHKeyDetailScreen)
 			if !ok || msg.Key == "" || detail.keyInfo.Fingerprint != msg.Key || m.nav.ActiveSection() != secSystem {
@@ -285,7 +300,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Dedup by kind + index if Index is set
-		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Index != 0 {
+		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index != 0 {
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
 				if t.Kind == msg.Kind &&
@@ -303,7 +318,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Dedup flow tabs by kind + section
-		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Index == 0 {
+		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index == 0 {
 			sec := m.nav.ActiveSection()
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
@@ -311,7 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t)) {
+					if msg.Replace && (walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t) || m.syncthingTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&
@@ -406,18 +421,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syncthingWebPasswordMsg:
 		return m.dispatchToTab(tabSyncthingWebUI, msg)
 	case syncthingPairedMsg:
-		rm, cmd := m.dispatchToTab(tabSyncthingPair, msg)
-		if msg.err == nil {
-			return rm, tea.Batch(cmd, fetchSyncthingDevicesCmd())
+		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncPairStepPairing {
+			return m, nil
 		}
-		return rm, cmd
+		rm, cmd := m.routeSyncthingResult(msg.owner, msg)
+		return rm, tea.Batch(cmd, fetchSyncthingDevicesCmd(m.screenCtx))
 	case syncthingRemovedMsg:
-		rm, cmd := m.dispatchToTab(tabSyncthingDevice, msg)
-		if msg.err == nil {
-			return rm, tea.Batch(cmd, fetchSyncthingDevicesCmd())
+		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncDeviceStepRemoving {
+			return m, nil
 		}
-		return rm, cmd
+		rm, cmd := m.routeSyncthingResult(msg.owner, msg)
+		return rm, tea.Batch(cmd, fetchSyncthingDevicesCmd(m.screenCtx))
+	case syncthingCloseMsg:
+		switch owner := msg.owner.(type) {
+		case *SyncthingPairScreen:
+			if owner == nil || owner.attempt != msg.attempt || syncthingBusy(owner) {
+				return m, nil
+			}
+		case *SyncthingDeviceScreen:
+			if owner == nil || owner.attempt != msg.attempt || syncthingBusy(owner) {
+				return m, nil
+			}
+		default:
+			return m, nil
+		}
+		return m.closeScreenTab(msg.owner)
 	case syncthingDevicesMsg:
+		if msg.owner != m.screenCtx || msg.revision != m.screenCtx.syncthingRevision {
+			return m, nil
+		}
+		for _, tab := range m.tabs {
+			if detail, ok := tab.Screen.(*SyncthingDetailScreen); ok {
+				detail.HandleMsg(msg)
+			}
+		}
 		m.state.SyncthingDevices = msg.devices
 		m.state.SyncthingDevicesErr = msg.err
 		m.state.SyncthingDevicesKnown = msg.err == nil
@@ -963,7 +1000,7 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	if walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) {
+	if walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) || m.syncthingTabBusy(closingTab) {
 		return m, nil
 	}
 
@@ -1196,4 +1233,35 @@ func (m Model) sshTabBusy(tab openTab) bool {
 		}
 	}
 	return false
+}
+
+func syncthingBusy(screen Screen) bool {
+	switch s := screen.(type) {
+	case *SyncthingPairScreen:
+		return s.step == syncPairStepPairing
+	case *SyncthingDeviceScreen:
+		return s.step == syncDeviceStepRemoving
+	}
+	return false
+}
+func (m Model) syncthingTabBusy(tab openTab) bool {
+	if syncthingBusy(tab.Screen) {
+		return true
+	}
+	for _, child := range m.tabs {
+		if child.Section == tab.Section && child.Parent == tab.Kind && syncthingBusy(child.Screen) {
+			return true
+		}
+	}
+	return false
+}
+func (m Model) routeSyncthingResult(owner Screen, msg tea.Msg) (tea.Model, tea.Cmd) {
+	for i, tab := range m.tabs {
+		if tab.Screen == owner {
+			screen, cmd := owner.HandleMsg(msg)
+			m.tabs[i].Screen = screen
+			return m, cmd
+		}
+	}
+	return m, nil
 }

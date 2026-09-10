@@ -116,7 +116,7 @@ func (s *SyncthingInstallScreen) startInstall() (
 func (s *SyncthingInstallScreen) onInstallDone() tea.Cmd {
 	return tea.Batch(
 		func() tea.Msg { return refreshStatusMsg{} },
-		fetchSyncthingDevicesCmd(),
+		fetchSyncthingDevicesCmd(s.ctx),
 	)
 }
 

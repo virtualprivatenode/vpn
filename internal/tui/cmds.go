@@ -77,34 +77,27 @@ func fetchNodeAddressesCmd(tab tabKind) tea.Cmd {
 
 // ── Syncthing actions ────────────────────────────────────
 
-func fetchSyncthingDevicesCmd() tea.Cmd {
+func fetchSyncthingDevicesCmd(owner *ScreenContext) tea.Cmd {
+	owner.syncthingRevision++
+	revision := owner.syncthingRevision
+	runtime := owner.syncthing()
 	return func() tea.Msg {
-		devices, err := installer.ListSyncthingDevices()
-		if err != nil {
-			logger.Status("read Syncthing devices: %v", err)
-		}
-		return syncthingDevicesMsg{devices: devices, err: err}
+		devices, err := runtime.ListDevices()
+		return syncthingDevicesMsg{owner: owner, revision: revision, devices: devices, err: err}
 	}
 }
-
-func pairSyncthingDeviceCmd(
-	deviceID string,
-) tea.Cmd {
+func pairSyncthingDeviceCmd(owner *SyncthingPairScreen, deviceID string) tea.Cmd {
+	runtime, attempt := owner.ctx.syncthing(), owner.attempt
 	return func() tea.Msg {
-		err := installer.PairSyncthingDevice(deviceID)
-		return syncthingPairedMsg{
-			deviceID: deviceID, err: err}
+		return syncthingPairedMsg{owner: owner, attempt: attempt, result: runtime.Pair(deviceID)}
 	}
 }
-
-func removeSyncthingDeviceCmd(
-	deviceID string,
-) tea.Cmd {
-	return func() tea.Msg {
-		err := installer.UnpairSyncthingDevice(deviceID)
-		return syncthingRemovedMsg{
-			deviceID: deviceID, err: err}
-	}
+func removeSyncthingDeviceCmd(owner *SyncthingDeviceScreen) tea.Cmd {
+	runtime, attempt, id := owner.ctx.syncthing(), owner.attempt, owner.device.DeviceID
+	return func() tea.Msg { return syncthingRemovedMsg{owner: owner, attempt: attempt, result: runtime.Remove(id)} }
+}
+func closeSyncthingCmd(owner Screen, attempt uint64) tea.Cmd {
+	return func() tea.Msg { return syncthingCloseMsg{owner: owner, attempt: attempt} }
 }
 
 // ── LND queries & fund-moving ────────────────────────────
