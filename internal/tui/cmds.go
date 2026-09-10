@@ -37,11 +37,13 @@ func fetchLatestVersionCmd() tea.Cmd {
 
 // ── Live-read node facts ─────────────────────────────────
 
-func fetchWalletStateCmd() tea.Cmd {
+func fetchWalletStateCmd(owner *ScreenContext) tea.Cmd {
+	owner.walletRevision++
+	revision := owner.walletRevision
 	return func() tea.Msg {
 		var state helper.WalletStateResult
 		err := helper.Call(helper.VerbReadWalletState, nil, &state)
-		return walletStateMsg{state: state, err: err}
+		return walletStateMsg{owner: owner, revision: revision, state: state, err: err}
 	}
 }
 

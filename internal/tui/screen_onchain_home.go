@@ -103,7 +103,7 @@ func (s *OnChainHomeScreen) HandleKey(
 	case "enter":
 		// No wallet → trigger wallet creation flow
 		if !s.ctx.walletKnown() {
-			return s, fetchWalletStateCmd()
+			return s, fetchWalletStateCmd(s.ctx)
 		}
 		if !s.ctx.walletExists() {
 			screen := NewWalletCreateScreen(s.ctx)
