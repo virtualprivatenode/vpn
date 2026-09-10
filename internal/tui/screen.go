@@ -1,3 +1,4 @@
+// Package tui implements the unprivileged operator terminal interface.
 package tui
 
 import (
@@ -49,17 +50,28 @@ type Screen interface {
 // chain — zero refresh plumbing.
 
 type ScreenContext struct {
-	HelperWorkflows *app.HelperWorkflows
-	SSHAccess       *app.SSHAccess
-	sshAuthRevision uint64
-	Cfg             *config.AppConfig
-	State           *RuntimeState
-	LndClient       *lndrpc.Client
-	Status          *statusMsg
-	HasTabs         bool   // varies by section; Model sets before calling View/HelpBindings
-	ContentFocused  bool   // true when content pane has focus (not tab bar, not sidebar)
-	Version         string // set once at construction
-	LatestVersion   string // updated by latestVersionMsg handler
+	WalletCreation      *app.WalletCreation
+	walletCreationOwner *WalletCreateScreen
+	walletRevision      uint64
+	openWalletClient    func() (*lndrpc.Client, error)
+	HelperWorkflows     *app.HelperWorkflows
+	SSHAccess           *app.SSHAccess
+	sshAuthRevision     uint64
+	Cfg                 *config.AppConfig
+	State               *RuntimeState
+	LndClient           *lndrpc.Client
+	Status              *statusMsg
+	HasTabs             bool   // varies by section; Model sets before calling View/HelpBindings
+	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
+	Version             string // set once at construction
+	LatestVersion       string // updated by latestVersionMsg handler
+}
+
+func (c *ScreenContext) walletCreation() *app.WalletCreation {
+	if c.WalletCreation == nil {
+		c.WalletCreation = app.NewWalletCreation()
+	}
+	return c.WalletCreation
 }
 
 // RuntimeState contains facts whose authority is the live system rather than

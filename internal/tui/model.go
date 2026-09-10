@@ -68,15 +68,7 @@ type openTab struct {
 	Label string
 	Index int    // row identity for other detail tabs
 	Key   string // funding outpoint for channel detail tabs
-	// Section is the sticky owner of this tab — set
-	// at construction from m.nav.ActiveSection() and
-	// must never be mutated afterward. effectiveTabs,
-	// closeTab's cascade guard, and the sectionFocus
-	// restore logic all depend on it remaining stable.
-	// The only in-place tab transformation in the
-	// codebase (walletCreatedMsg's wallet-create →
-	// auto-unlock swap in update.go) explicitly
-	// preserves this field for that reason.
+	// Section remains the tab's owner across wallet-to-auto-unlock transitions.
 	Section int
 	// Parent declares which tab kind owns this tab.
 	// Zero means "section home is the parent" (top-
@@ -124,8 +116,10 @@ type nodeAddressesMsg struct {
 }
 
 type walletStateMsg struct {
-	state helper.WalletStateResult
-	err   error
+	owner    *ScreenContext
+	revision uint64
+	state    helper.WalletStateResult
+	err      error
 }
 
 type keyVerificationStateMsg struct {
@@ -327,15 +321,6 @@ type Model struct {
 	// instead of jumping to the leftmost detail tab.
 	// Zero means "no memory yet, fall back to tab 1".
 	//
-	// Invariant: tabs in non-active sections are
-	// never added, removed, or reordered. The only
-	// in-place mutation is the wallet-create →
-	// auto-unlock transformation in walletCreatedMsg,
-	// which preserves both the index and the Section
-	// field, so the saved index stays valid. If that
-	// invariant ever changes, this field needs a
-	// validate-on-restore pass to detect stale
-	// indices.
 	sectionFocus [numSections]int
 }
 
@@ -344,17 +329,8 @@ func NewModel(
 	state *RuntimeState, version string,
 ) Model {
 	theme.Init(prefs.Theme != "light")
-	// Invariant — load-bearing for the wallet-create
-	// flow: lndClient stays nil until a wallet exists.
-	// The walletCreatedMsg handler in update.go is the
-	// only code path that creates lndClient post-launch,
-	// and it runs in the same Update tick that records the live wallet as
-	// present. Together these prevent
-	// statusMsg from racing walletCreatedMsg. If a future change
-	// ever needs lndClient earlier — e.g. to read a
-	// macaroon before wallet creation — the walletExec
-	// → walletCreatedMsg → tab transform sequence needs
-	// to be re-audited for the two handlers interleaving.
+	// Creation owns credential staging before client publication. Startup can
+	// initialize an existing wallet independently of that interactive workflow.
 	var client *lndrpc.Client
 	if cfg.HasLND() && state.WalletKnown && state.WalletExists {
 		client = lndrpc.New()
@@ -426,6 +402,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.WalletCreation != nil {
+			m.screenCtx.WalletCreation.Close()
+		}
 		m.screenCtx.HelperWorkflows.Close()
 		if m.screenCtx.LndClient != nil {
 			m.screenCtx.LndClient.Close()
@@ -473,7 +452,7 @@ func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchStatus(m.cfg, m.state, m.lndClient),
-		fetchWalletStateCmd(),
+		fetchWalletStateCmd(m.screenCtx),
 		fetchKeyVerificationStateCmd(),
 		fetchLatestVersionCmd(),
 		tickEveryCmd(m.pollInterval()))

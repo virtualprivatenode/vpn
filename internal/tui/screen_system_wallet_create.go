@@ -2,50 +2,12 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/installer"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
-
-// ── WalletCreateScreen ──────────────────────────────────
-// Three-step wallet creation flow that runs entirely
-// inside the TUI:
-//
-//   walletConfirm — privacy + seed warnings, Cancel /
-//                   Proceed buttons. The user reads the
-//                   warnings and explicitly opts in.
-//
-//   walletWaiting — "Waiting for LND..." centered in the
-//                   pane while WaitForLND polls the REST
-//                   API. Async, can fail with a 120s
-//                   timeout.
-//
-//   walletExec    — tea.ExecProcess hands the terminal
-//                   to a single bash command that runs
-//                   `lncli create` interactively, then
-//                   prompts the user to type
-//                   "I SAVED MY SEED" to confirm. SIGINT
-//                   is trapped after lncli succeeds so
-//                   ctrl+c cannot escape the seed
-//                   confirmation loop.
-//
-// On success, the screen emits walletCreatedMsg. The
-// Model handles that message by transforming this tab
-// in place into an AutoUnlockScreen — the user goes
-// straight from "I SAVED MY SEED" into auto-unlock
-// configuration without any tab juggling. See the
-// walletCreatedMsg case in update.go.
-//
-// On error (timeout, lncli failure, user ctrl+c during
-// lncli create itself), the screen transitions to an
-// error view with a Done button. No config changes
-// occur on the failure path.
 
 type walletCreateStep int
 
@@ -53,103 +15,110 @@ const (
 	walletConfirm walletCreateStep = iota
 	walletWaiting
 	walletExec
-	walletErr
+	walletFinalizing
+	walletResult
 )
 
-// Messages emitted by the wallet creation flow.
-// All three are unique to this screen so they don't
-// collide with anything else in the routing table.
+type walletCreationAttempt struct {
+	execution    app.WalletExecution
+	finalization uint64
+}
 
-// walletLNDReadyMsg is delivered when WaitForLND
-// returns. The screen uses err to decide whether to
-// proceed to the bash exec or show the timeout error.
-type walletLNDReadyMsg struct{ err error }
+type walletLNDReadyMsg struct {
+	owner   *WalletCreateScreen
+	attempt *walletCreationAttempt
+	network string
+	err     error
+}
 
-// walletExecDoneMsg is delivered by the tea.ExecProcess
-// callback when the bash wrapper exits. err is nil on
-// success (lncli created the wallet AND the user typed
-// "I SAVED MY SEED"). Non-nil if lncli failed, the user
-// ctrl+c'd during lncli create, or the SSH session was
-// killed.
-type walletExecDoneMsg struct{ err error }
+type walletExecDoneMsg struct {
+	owner     *WalletCreateScreen
+	attempt   *walletCreationAttempt
+	execution app.WalletExecution
+}
 
-// walletCreatedMsg tells Model that wallet creation
-// finished successfully. Model creates the lndClient
-// (it didn't exist before this point) and transforms
-// this tab in place into an AutoUnlockScreen. See
-// update.go for the handler.
-type walletCreatedMsg struct{}
+type walletFinalizedMsg struct {
+	owner    *WalletCreateScreen
+	attempt  *walletCreationAttempt
+	revision uint64
+	result   app.WalletCreationResult
+}
 
-// walletStageFailedMsg reports that the wallet exists but the
-// helper could not stage its credentials for this TUI.
-type walletStageFailedMsg struct{ err error }
+type closeWalletCreateMsg struct {
+	owner    *WalletCreateScreen
+	attempt  *walletCreationAttempt
+	revision uint64
+}
+type continueWalletCreateMsg struct {
+	owner   *WalletCreateScreen
+	attempt *walletCreationAttempt
+}
 
+// WalletCreateScreen owns presentation and terminal handoff. Application calls
+// own readiness and finalization; every result identifies its original attempt.
 type WalletCreateScreen struct {
-	ctx  *ScreenContext
-	step walletCreateStep
-
-	// Confirm step — 0=Cancel, 1=Proceed
-	btnIdx int
-
-	// Error captured from a failed step
-	resultErr error
+	ctx       *ScreenContext
+	step      walletCreateStep
+	btnIdx    int
+	attempt   *walletCreationAttempt
+	result    app.WalletCreationResult
+	clientErr error
 }
 
-func NewWalletCreateScreen(
-	ctx *ScreenContext,
-) *WalletCreateScreen {
-	return &WalletCreateScreen{
-		ctx:    ctx,
-		step:   walletConfirm,
-		btnIdx: 1, // default focus on Proceed
+func NewWalletCreateScreen(ctx *ScreenContext) *WalletCreateScreen {
+	return &WalletCreateScreen{ctx: ctx, btnIdx: 1}
+}
+
+func (s *WalletCreateScreen) Init() tea.Cmd { return nil }
+
+func walletCreationBusy(screen Screen) bool {
+	s, ok := screen.(*WalletCreateScreen)
+	return ok && s != nil && (s.step == walletWaiting || s.step == walletExec || s.step == walletFinalizing)
+}
+
+func (s *WalletCreateScreen) closeCmd() tea.Cmd {
+	attempt, revision := s.attempt, uint64(0)
+	if attempt != nil {
+		revision = attempt.finalization
 	}
+	return func() tea.Msg { return closeWalletCreateMsg{owner: s, attempt: attempt, revision: revision} }
 }
 
-// ── Screen interface ────────────────────────────────────
-
-func (s *WalletCreateScreen) Init() tea.Cmd {
-	return nil
-}
-
-func (s *WalletCreateScreen) HandleKey(
-	keyStr string, msg tea.KeyPressMsg,
-) (Screen, tea.Cmd) {
-	// Error state
-	if s.step == walletErr {
+func (s *WalletCreateScreen) HandleKey(keyStr string, msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	if keyStr == "ctrl+c" {
+		return s, tea.Quit
+	}
+	if walletCreationBusy(s) {
 		switch keyStr {
-		case "ctrl+c":
-			return s, tea.Quit
-		case "enter":
-			return s, emitCloseTab
 		case "left":
 			return s, emitFocusSidebar
 		case "up", "shift+tab":
-			if s.ctx.HasTabs {
-				return s, emitFocusTabBar
+			return s, emitFocusTabBar
+		}
+		return s, nil
+	}
+	if s.step == walletResult {
+		switch keyStr {
+		case "left", "right":
+			if s.hasRecoveryAction() {
+				s.btnIdx = 1 - s.btnIdx
 			}
+		case "enter":
+			if s.btnIdx == 1 && s.hasRecoveryAction() {
+				if s.retrySetup() {
+					return s, s.finalizeCmd()
+				}
+				return s, func() tea.Msg { return continueWalletCreateMsg{owner: s, attempt: s.attempt} }
+			}
+			return s, s.closeCmd()
+		case "up", "shift+tab":
+			return s, emitFocusTabBar
 		case "backspace":
 			return s, emitFocusParent
 		}
 		return s, nil
 	}
-
-	// Waiting and exec steps — block all keys.
-	// During walletWaiting we're polling LND and there's
-	// nothing meaningful to interact with. During
-	// walletExec the bash command owns the terminal and
-	// the TUI isn't even visible — but ctrl+c here would
-	// quit the entire TUI, which we don't want either.
-	if s.step == walletWaiting || s.step == walletExec {
-		if keyStr == "ctrl+c" {
-			return s, tea.Quit
-		}
-		return s, nil
-	}
-
-	// Confirm step
 	switch keyStr {
-	case "ctrl+c":
-		return s, tea.Quit
 	case "left":
 		if s.btnIdx > 0 {
 			s.btnIdx--
@@ -157,232 +126,126 @@ func (s *WalletCreateScreen) HandleKey(
 		}
 		return s, emitFocusSidebar
 	case "right":
-		if s.btnIdx < 1 {
-			s.btnIdx++
-		}
-		return s, nil
-	case "up":
+		s.btnIdx = 1
+	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
 		}
-		return s, nil
 	case "enter":
 		if s.btnIdx == 0 {
-			return s, emitCloseTab
+			return s, s.closeCmd()
 		}
-		return s.startWaitingForLND()
+		return s, s.startWaitingForLND()
 	case "backspace":
 		return s, emitFocusParent
 	}
 	return s, nil
 }
 
-func (s *WalletCreateScreen) startWaitingForLND() (
-	Screen, tea.Cmd,
-) {
-	if !s.ctx.walletKnown() {
-		s.step = walletErr
-		s.resultErr = fmt.Errorf(
-			"wallet state is unavailable; refusing to create a wallet")
-		return s, nil
+func (s *WalletCreateScreen) startWaitingForLND() tea.Cmd {
+	if !s.ctx.walletKnown() || s.ctx.walletExists() {
+		s.step = walletResult
+		s.btnIdx = 0
+		s.result = app.WalletCreationResult{Err: fmt.Errorf("wallet must be known absent before creation")}
+		if s.ctx.walletKnown() {
+			s.result.Presence = app.WalletPresent
+		}
+		return nil
 	}
-	if s.ctx.walletExists() {
-		s.step = walletErr
-		s.resultErr = fmt.Errorf("an LND wallet already exists")
-		return s, nil
+	if owner := s.ctx.walletCreationOwner; owner != nil && owner != s {
+		return nil
 	}
+	s.ctx.walletCreationOwner = s
+	s.ctx.walletRevision++
 	s.step = walletWaiting
-	return s, waitForLNDCmd()
-}
-
-func waitForLNDCmd() tea.Cmd {
+	s.attempt = &walletCreationAttempt{}
+	attempt, network, workflow := s.attempt, s.ctx.Cfg.Network, s.ctx.walletCreation()
 	return func() tea.Msg {
-		err := installer.WaitForLND()
-		return walletLNDReadyMsg{err: err}
+		readyNetwork, err := workflow.Prepare(network)
+		return walletLNDReadyMsg{owner: s, attempt: attempt, network: readyNetwork, err: err}
 	}
 }
 
-// ── HandleMsg ───────────────────────────────────────────
+func (s *WalletCreateScreen) finalizeCmd() tea.Cmd {
+	s.step = walletFinalizing
+	s.attempt.finalization++
+	attempt, revision, execution := s.attempt, s.attempt.finalization, s.attempt.execution
+	workflow := s.ctx.walletCreation()
+	return func() tea.Msg {
+		return walletFinalizedMsg{owner: s, attempt: attempt, revision: revision, result: workflow.Finalize(execution)}
+	}
+}
 
-func (s *WalletCreateScreen) HandleMsg(
-	msg tea.Msg,
-) (Screen, tea.Cmd) {
+func (s *WalletCreateScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 	switch m := msg.(type) {
 	case walletLNDReadyMsg:
-		if m.err != nil {
-			s.step = walletErr
-			s.resultErr = fmt.Errorf(
-				"LND did not respond in time. "+
-					"Make sure bitcoind is running "+
-					"and try again. (%v)", m.err)
+		if m.owner != s || m.attempt != s.attempt || s.step != walletWaiting {
 			return s, nil
 		}
-		// LND is ready — kick off the bash wrapper
+		if m.err != nil {
+			s.step = walletResult
+			s.btnIdx = 0
+			s.result = app.WalletCreationResult{Err: m.err}
+			return s, nil
+		}
 		s.step = walletExec
-		return s, s.startExecProcess()
-
+		attempt := s.attempt
+		terminal := newWalletTerminal(m.network)
+		return s, tea.Exec(terminal, func(err error) tea.Msg {
+			execution := terminal.execution
+			if execution.Err == nil && err != nil {
+				execution.Err = fmt.Errorf("terminal session: %w", err)
+			}
+			return walletExecDoneMsg{owner: s, attempt: attempt, execution: execution}
+		})
 	case walletExecDoneMsg:
-		if m.err != nil {
-			s.step = walletErr
-			s.resultErr = fmt.Errorf(
-				"wallet creation failed: %v", m.err)
+		if m.owner != s || m.attempt != s.attempt || s.step != walletExec {
 			return s, nil
 		}
-		// Success. Wallet creation just minted this node's
-		// admin macaroon — have the helper stage copies for
-		// this TUI BEFORE the Model builds the gRPC
-		// client that reads them.
-		return s, func() tea.Msg {
-			if err := helper.Call(
-				helper.VerbStageLNDMacaroon,
-				nil, nil); err != nil {
-				return walletStageFailedMsg{err: err}
-			}
-			return walletCreatedMsg{}
+		s.attempt.execution = m.execution
+		return s, s.finalizeCmd()
+	case walletFinalizedMsg:
+		if !s.acceptsFinalization(m) {
+			return s, nil
 		}
-
-	case walletStageFailedMsg:
-		s.step = walletErr
-		s.resultErr = fmt.Errorf(
-			"the wallet was created, but its credentials "+
-				"could not be staged for this TUI: %v — "+
-				"the TUI cannot reach the wallet until "+
-				"that is resolved", m.err)
-		return s, nil
+		s.result = m.result
+		s.step = walletResult
+		s.btnIdx = 0
 	}
 	return s, nil
 }
 
-// startExecProcess builds and returns the bash wrapper
-// as a tea.ExecProcess. The wrapper:
-//  1. Runs `lncli create` interactively. The user types
-//     a wallet password, confirms it, chooses 'n' for
-//     a new seed, optionally adds a cipher seed
-//     passphrase, and sees the 24 words.
-//  2. If lncli exits 0, sets `trap ” INT` to ignore
-//     ctrl+c, then loops prompting for "I SAVED MY
-//     SEED" until the user types it exactly.
-//  3. Exits 0 only after the user types the exact
-//     confirmation phrase.
-//
-// ── Asymmetric ctrl+c handling is deliberate ────────
-// Step 1 allows ctrl+c. Step 2 blocks it. This mirrors
-// the atomicity boundary inside lncli itself: until
-// GenSeed completes, no seed exists and no wallet file
-// has been written, so a canceled context leaves the
-// node in a clean state and the user can retry. Once
-// InitWallet has run, the wallet file is on disk and
-// the only remaining risk is a user who aborts before
-// writing down their seed — which would be
-// unrecoverable. Blocking SIGINT in step 2 removes
-// that exit path entirely.
-//
-// A subtlety worth knowing: lncli doesn't make a gRPC
-// call during the password / seed-type / passphrase
-// prompts. Those are local readline-style inputs.
-// The first (and only, for seed generation) RPC is
-// GenSeed, which fires after the cipher passphrase
-// prompt is submitted. If the user ctrl+c's during
-// the earlier prompts, lncli's SIGINT handler arms
-// cancellation on a context that doesn't exist yet,
-// and the terminal appears to swallow the signal. The
-// cancellation then fires the instant GenSeed is
-// called, and LND returns:
-//
-//	unable to generate seed: rpc error:
-//	code = Canceled desc = context canceled
-//
-// This looks like an error but is actually the
-// intended cancellation path — no wallet is written,
-// no seed is displayed, the user is safe to retry.
-// Do not "fix" this by blocking SIGINT in step 1:
-// that would remove a legitimate escape hatch that
-// depends on lncli's atomicity guarantee for its
-// correctness.
-//
-// If the user ctrl+c's during step 2, the trap
-// ignores the signal and the loop continues — the
-// only escape is typing the exact phrase or killing
-// the SSH session.
-func (s *WalletCreateScreen) startExecProcess() tea.Cmd {
-	net, err := s.ctx.Cfg.NetworkConfig()
-	if err != nil {
-		return func() tea.Msg { return walletExecDoneMsg{err: err} }
-	}
-	script := `clear
-echo
-echo "  ==================================================="
-echo "    Lightning Wallet Creation"
-echo "  ==================================================="
-echo
-echo "  You're about to create the Lightning wallet that"
-echo "  will hold your Bitcoin on this node."
-echo
-echo "  In a moment you'll be asked to:"
-echo "    1. Choose a wallet password (you'll use this"
-echo "       to unlock the wallet)"
-echo "    2. Confirm the password"
-echo "    3. Press 'n' to generate a new 24-word seed"
-echo "    4. Skip the cipher seed passphrase by pressing"
-echo "       Enter (most users do)"
-echo
-echo "  Your seed phrase will appear in this terminal."
-echo "  Make sure nobody is looking over your shoulder."
-echo
-/usr/local/bin/lncli ` +
-		`--rpcserver=` + paths.LNDGRPCEndpoint + ` ` +
-		`--tlscertpath=` + paths.StateLNDTLSCert + ` ` +
-		`--network=` + net.LNDNetwork + ` create && {
-  trap '' INT
-  echo
-  echo "  ==================================================="
-  echo "  Your 24-word seed is displayed above."
-  echo "  Write it down NOW."
-  echo
-  echo "  Storage options:"
-  echo "    * Pen and paper, kept somewhere safe"
-  echo "    * An offline password manager (e.g. KeePass)"
-  echo
-  echo "  Digital copies (screenshots, photos, cloud"
-  echo "  storage) are NOT safe."
-  echo
-  while true; do
-    printf "  Type I SAVED MY SEED: "
-    read line
-    [ "$line" = "I SAVED MY SEED" ] && break
-    echo "  Please type exactly: I SAVED MY SEED"
-  done
-  echo
-  echo "  Seed confirmed. Returning to TUI..."
-  sleep 1
-  printf '\033[2J\033[3J\033[H'
-}`
-
-	cmd := exec.Command("bash", "-c", script)
-	return tea.ExecProcess(cmd,
-		func(err error) tea.Msg {
-			return walletExecDoneMsg{err: err}
-		})
+func (s *WalletCreateScreen) acceptsFinalization(m walletFinalizedMsg) bool {
+	return m.owner == s && s.attempt != nil && m.attempt == s.attempt &&
+		s.step == walletFinalizing && m.revision == s.attempt.finalization
 }
 
-// ── View ────────────────────────────────────────────────
+func (s *WalletCreateScreen) canContinue() bool {
+	return s.result.Presence == app.WalletPresent && s.result.CredentialsStaged && s.result.SeedAcknowledged && s.clientErr == nil
+}
 
-func (s *WalletCreateScreen) View(
-	w, h int,
-) string {
+func (s *WalletCreateScreen) retrySetup() bool {
+	return s.result.CanRetryFinalization() || s.clientErr != nil
+}
+
+func (s *WalletCreateScreen) hasRecoveryAction() bool {
+	return s.attempt != nil && s.attempt.finalization > 0 && (s.retrySetup() || s.canContinue())
+}
+
+func (s *WalletCreateScreen) View(w, h int) string {
 	switch s.step {
-	case walletWaiting:
+	case walletWaiting, walletExec:
 		return renderWaitingForLND(w, h)
-	case walletExec:
-		// During exec, bash owns the terminal and the
-		// TUI isn't visible. If something does render
-		// briefly during the handoff, show a neutral
-		// placeholder.
-		return renderWaitingForLND(w, h)
-	case walletErr:
-		return s.viewError(w, h)
+	case walletFinalizing:
+		p := newPane(w)
+		p.title(theme.Header, "Checking Wallet and Credentials")
+		p.dim("Wallet creation will not be repeated.")
+		return p.render()
+	case walletResult:
+		return s.viewResult(w, h)
+	default:
+		return s.viewConfirm(w, h)
 	}
-	return s.viewConfirm(w, h)
 }
 
 func (s *WalletCreateScreen) viewConfirm(
@@ -448,54 +311,37 @@ func (s *WalletCreateScreen) viewConfirm(
 		s.btnIdx, isFocused, h)
 }
 
-func (s *WalletCreateScreen) viewError(
-	w, h int,
-) string {
-	isFocused := s.ctx.ContentFocused
+func (s *WalletCreateScreen) viewResult(w, h int) string {
 	p := newPane(w)
-
-	p.title(theme.Header,
-		"Wallet Creation Failed")
-	p.blank()
-	if s.resultErr != nil {
-		p.warnWrap(s.resultErr.Error())
+	title := "Wallet Creation Not Completed"
+	if s.result.Presence == app.WalletPresent {
+		title = "Wallet Exists"
 	}
-	p.blank()
-	p.line(" " + theme.Value.Render(
-		"You can close this and try again."))
-
-	return p.renderWithBottomButtons(
-		[]string{"Done"}, 0, isFocused, h)
+	if s.result.Presence == app.WalletUnknown {
+		title = "Wallet State Unconfirmed"
+	}
+	p.title(theme.Header, title)
+	if s.result.Err != nil {
+		p.warnWrap(s.result.Err.Error())
+	}
+	if s.hasRecoveryAction() && s.retrySetup() {
+		p.dim("Retry checks wallet state and stages credentials.")
+		p.dim("It does not run wallet creation again.")
+	}
+	buttons := []string{"Done"}
+	if s.hasRecoveryAction() {
+		label := "Continue"
+		if s.retrySetup() {
+			label = "Retry Setup"
+		}
+		buttons = append(buttons, label)
+	}
+	return p.renderWithBottomButtons(buttons, s.btnIdx, s.ctx.ContentFocused, h)
 }
 
-// ── HelpBindings ────────────────────────────────────────
-
 func (s *WalletCreateScreen) HelpBindings() []key.Binding {
-	if s.step == walletWaiting || s.step == walletExec {
-		return []key.Binding{kQuit}
+	if walletCreationBusy(s) {
+		return []key.Binding{kSidebar, kUpTabBar, kQuit}
 	}
-
-	if s.step == walletErr {
-		return resultBindings(s.ctx.HasTabs)
-	}
-
-	// Confirm step
-	var binds []key.Binding
-	if s.btnIdx == 0 {
-		binds = append(binds,
-			kSidebar,
-			kRightButton)
-	} else {
-		binds = append(binds,
-			kLeftRightButtons)
-	}
-	binds = append(binds,
-		kEnter,
-		kBack)
-	if s.ctx.HasTabs {
-		binds = append(binds,
-			kUpTabBar)
-	}
-	binds = append(binds, kQuit)
-	return binds
+	return tabButtonBindings(s.ctx.HasTabs)
 }

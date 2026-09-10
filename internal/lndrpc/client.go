@@ -90,55 +90,10 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
-	// Read the staged TLS cert copy (fail-noisy: a missing
-	// staged fact names itself and points at the journal).
-	certData, err := helper.ReadBoard(paths.StateLNDTLSCert)
-	if err != nil {
-		return fmt.Errorf("read TLS cert: %w", err)
+	if err := c.loadStaged(); err != nil {
+		return err
 	}
-
-	certPool := x509.NewCertPool()
-	if !certPool.AppendCertsFromPEM(certData) {
-		return fmt.Errorf("failed to parse TLS cert")
-	}
-
-	tlsCreds := credentials.NewClientTLSFromCert(certPool, "")
-
-	// Read the staged admin macaroon copy (staged at wallet
-	// creation; re-staged whenever an operation invalidates it).
-	macBytes, err := helper.ReadBoard(paths.StateLNDMacaroon)
-	if err != nil {
-		return fmt.Errorf("read macaroon: %w", err)
-	}
-	c.macaroonHex = hex.EncodeToString(macBytes)
-
-	// Connect. Keepalive bounds how long a silently dead TCP
-	// connection (LND restarted underneath the TUI, a network
-	// blip) can block calls and streams instead of blocking
-	// forever; LND disconnects clients that ping more often
-	// than every five seconds, and one minute stays far clear
-	// of that floor with pings only while calls are active.
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(tlsCreds),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(50 * 1024 * 1024)),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    time.Minute,
-			Timeout: 20 * time.Second,
-		}),
-	}
-
-	// Dial by the shared loopback constant — the same value
-	// lnd.conf binds to. Never by the name localhost: with
-	// IPv6 disabled on the node, that name can resolve to an
-	// IPv6 address the connection cannot use.
-	conn, err := grpc.NewClient(paths.LNDGRPCEndpoint, opts...)
-	if err != nil {
-		return fmt.Errorf("grpc connect: %w", err)
-	}
-
-	c.conn = conn
-	c.lightning = lnrpc.NewLightningClient(conn)
-	c.state = lnrpc.NewStateClient(conn)
+	conn := c.conn
 
 	// Test the connection with a longer timeout.
 	// During IBD, LND's GetInfo queries Bitcoin Core which can
@@ -150,7 +105,7 @@ func (c *Client) dial(parent context.Context, allowHeal bool) error {
 	ctx, cancel := context.WithTimeout(probeCtx, 30*time.Second)
 	defer cancel()
 
-	_, err = c.lightning.GetInfo(ctx, &lnrpc.GetInfoRequest{})
+	_, err := c.lightning.GetInfo(ctx, &lnrpc.GetInfoRequest{})
 	if err == nil {
 		logger.Status("LND gRPC connected and ready")
 		return nil
@@ -300,4 +255,66 @@ func (c *Client) stateRPC() lnrpc.StateClient {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.state
+}
+
+// NewStagedClient opens a lazy transport from credentials already staged by the
+// wallet workflow. It does no GetInfo probe or repair and does not claim RPC
+// readiness. Normal queries observe readiness using the existing client policy.
+func NewStagedClient() (*Client, error) {
+	c := &Client{}
+	if err := c.loadStaged(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func stagedTLSCredentials() (credentials.TransportCredentials, error) {
+	certData, err := helper.ReadBoard(paths.StateLNDTLSCert)
+	if err != nil {
+		return nil, fmt.Errorf("read TLS cert: %w", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(certData) {
+		return nil, fmt.Errorf("failed to parse TLS cert")
+	}
+
+	return credentials.NewClientTLSFromCert(certPool, ""), nil
+}
+
+func (c *Client) loadStaged() error {
+	tlsCreds, err := stagedTLSCredentials()
+	if err != nil {
+		return err
+	}
+
+	// Read the staged admin macaroon copy (staged at wallet
+	// creation; re-staged whenever an operation invalidates it).
+	macBytes, err := helper.ReadBoard(paths.StateLNDMacaroon)
+	if err != nil {
+		return fmt.Errorf("read macaroon: %w", err)
+	}
+	c.macaroonHex = hex.EncodeToString(macBytes)
+
+	// Preserve the normal client's receive limit and conservative keepalive.
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(tlsCreds),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(50 * 1024 * 1024)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:    time.Minute,
+			Timeout: 20 * time.Second,
+		}),
+	}
+
+	// Match LND's configured loopback listener without hostname resolution.
+	conn, err := grpc.NewClient(paths.LNDGRPCEndpoint, opts...)
+	if err != nil {
+		return fmt.Errorf("grpc connect: %w", err)
+	}
+
+	c.conn = conn
+	c.lightning = lnrpc.NewLightningClient(conn)
+	c.state = lnrpc.NewStateClient(conn)
+
+	return nil
 }

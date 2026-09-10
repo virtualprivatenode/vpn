@@ -111,12 +111,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				fetchStatus(m.cfg, m.state, m.lndClient),
 				fetchPaymentHistoryCmd(m.lndClient),
-				fetchWalletStateCmd(),
+				fetchWalletStateCmd(m.screenCtx),
 				fetchKeyVerificationStateCmd())
 		}
 		return m, tea.Batch(
 			fetchStatus(m.cfg, m.state, m.lndClient),
-			fetchWalletStateCmd(),
+			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd())
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -238,6 +238,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshStatusMsg:
 		return m, fetchStatus(m.cfg, m.state, m.lndClient)
 	case openTabMsg:
+		if msg.Kind == tabWalletCreate {
+			// One wallet belongs to this node, even when opened from another section.
+			for _, tab := range m.tabs {
+				if tab.Kind != tabWalletCreate {
+					continue
+				}
+				m.nav.ActiveItem, m.nav.Cursor = tab.Section, tab.Section
+				for i, visible := range m.effectiveTabs() {
+					if visible.Screen == tab.Screen {
+						m.activeTab = i
+						m.rememberTabPosition()
+						m.focusContent()
+						return m, m.activateTab()
+					}
+				}
+			}
+		}
 		if msg.Kind == tabSSHKeyDetail {
 			detail, ok := msg.Screen.(*SSHKeyDetailScreen)
 			if !ok || msg.Key == "" || detail.keyInfo.Fingerprint != msg.Key || m.nav.ActiveSection() != secSystem {
@@ -294,7 +311,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t)) {
+					if msg.Replace && (walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&
@@ -360,6 +377,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (it recorded which tab kind it lives on).
 		return m.dispatchToTab(msg.tab, msg)
 	case walletStateMsg:
+		if msg.owner != m.screenCtx || msg.revision != m.screenCtx.walletRevision || walletCreationBusy(m.screenCtx.walletCreationOwner) {
+			return m, nil
+		}
 		if msg.err != nil {
 			m.state.WalletKnown = false
 			logger.TUI("read live wallet state: %v", msg.err)
@@ -368,7 +388,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.WalletExists = msg.state.WalletExists
 		m.state.WalletKnown = true
 		if m.state.WalletExists && m.lndClient == nil &&
-			m.cfg.HasLND() {
+			m.cfg.HasLND() && m.screenCtx.walletCreationOwner == nil {
 			m.lndClient = lndrpc.New()
 			m.screenCtx.LndClient = m.lndClient
 			return m, fetchStatus(m.cfg, m.state, m.lndClient)
@@ -547,43 +567,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case changePwDoneMsg:
 		return m.dispatchToTab(tabSSHChangePassword, msg)
 	case walletLNDReadyMsg:
-		return m.dispatchToTab(tabWalletCreate, msg)
+		return m.routeWalletCreation(msg.owner, msg)
 	case walletExecDoneMsg:
-		return m.dispatchToTab(tabWalletCreate, msg)
-	case walletCreatedMsg:
-		// Wallet was successfully created. Record the live result and create
-		// the lndClient (it didn't
-		// exist before this point because NewModel
-		// only constructs it when the wallet already
-		// exists), and transform the wallet creation
-		// tab in place into an AutoUnlockScreen so
-		// the user goes straight from "I SAVED MY
-		// SEED" into auto-unlock setup.
-		m.state.WalletExists = true
-		m.state.WalletKnown = true
-		if m.lndClient == nil && m.cfg.HasLND() {
-			m.lndClient = lndrpc.New()
-			m.screenCtx.LndClient = m.lndClient
+		return m.routeWalletCreation(msg.owner, msg)
+	case walletFinalizedMsg:
+		return m.finishWalletCreation(msg)
+	case closeWalletCreateMsg:
+		if msg.owner == nil || msg.owner.attempt != msg.attempt || walletCreationBusy(msg.owner) ||
+			(msg.attempt != nil && msg.revision != msg.attempt.finalization) {
+			return m, nil
 		}
-		// Find the wallet creation tab and transform
-		// it. We mutate m.tabs directly because the
-		// effectiveTabs() view is computed on demand.
-		for i := range m.tabs {
-			if m.tabs[i].Kind == tabWalletCreate {
-				newScreen :=
-					NewAutoUnlockScreen(m.screenCtx)
-				m.tabs[i].Kind = tabAutoUnlock
-				m.tabs[i].Label = "Auto-Unlock"
-				m.tabs[i].Screen = newScreen
-				return m, tea.Batch(
-					fetchStatus(m.cfg, m.state, m.lndClient),
-					newScreen.Init(),
-				)
-			}
+		return m.closeScreenTab(msg.owner)
+	case continueWalletCreateMsg:
+		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != walletResult || !msg.owner.canContinue() {
+			return m, nil
 		}
-		// Tab not found (shouldn't happen, but be
-		// defensive). Just refresh status.
-		return m, fetchStatus(m.cfg, m.state, m.lndClient)
+		return m.continueWalletCreation(msg.owner)
 	case adminLoginVerifiedMsg:
 		if msg.err != nil {
 			logger.TUI("verify admin login: %v", msg.err)
@@ -599,7 +598,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fetchInFlight = true
 		cmds := []tea.Cmd{
 			fetchStatus(m.cfg, m.state, m.lndClient),
-			fetchWalletStateCmd(),
+			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd(),
 			tickEveryCmd(m.pollInterval()),
 		}
@@ -945,6 +944,7 @@ func (m Model) closeScreenTab(screen Screen) (tea.Model, tea.Cmd) {
 				}
 			}
 		} else {
+			m.releaseWalletCreation(tab.Screen)
 			m.tabs = append(m.tabs[:i], m.tabs[i+1:]...)
 			m.sectionFocus[tab.Section] = 0
 			return m, nil
@@ -963,7 +963,7 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	if onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) {
+	if walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) {
 		return m, nil
 	}
 
@@ -992,6 +992,7 @@ func (m Model) closeTab(
 	var newTabs []openTab
 	for _, t := range m.tabs {
 		if shouldRemove(t) {
+			m.releaseWalletCreation(t.Screen)
 			continue
 		}
 		newTabs = append(newTabs, t)

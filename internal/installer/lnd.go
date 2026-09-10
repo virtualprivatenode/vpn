@@ -3,12 +3,10 @@
 package installer
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -517,32 +515,6 @@ func startLND() error {
 	return system.SudoRun("systemctl", "restart", "lnd")
 }
 
-func waitForLND() error {
-	for i := 0; i < 60; i++ {
-		client := buildLNDClient()
-		resp, err := client.Get(
-			"https://" + paths.LNDRESTEndpoint + "/v1/state")
-		if err == nil {
-			resp.Body.Close()
-			return nil
-		}
-		time.Sleep(2 * time.Second)
-	}
-	return fmt.Errorf("LND did not respond after 120 seconds")
-}
-
-// ── Exported wrappers for the tui package ───────────
-// These wrap the unexported helpers so the tui
-// package can call them from screens without leaking
-// the rest of the installer package.
-
-// WaitForLND blocks until LND's REST API responds, or
-// returns an error after 120 seconds. Safe to call as a
-// tea.Cmd from a screen.
-func WaitForLND() error {
-	return waitForLND()
-}
-
 // SetupAutoUnlock enables and synchronously proves wallet auto-unlock. As root
 // it runs the bounded transition directly; from the unprivileged TUI it asks
 // the typed helper operation. The password crosses only the root-owned local
@@ -575,31 +547,4 @@ func DisableAutoUnlock() (AutoUnlockResult, error) {
 	var result AutoUnlockResult
 	err := helper.Call(helper.VerbRemoveWalletPassword, nil, &result)
 	return result, err
-}
-
-// lndTLSCertBytes returns LND's TLS certificate for client
-// use: read directly where permitted (root; some setups leave
-// it world-readable), else from the staging board copy.
-func lndTLSCertBytes() ([]byte, error) {
-	if data, err := os.ReadFile(paths.LNDTLSCert); err == nil {
-		return data, nil
-	}
-	return helper.ReadBoard(paths.StateLNDTLSCert)
-}
-
-func buildLNDClient() *http.Client {
-	tlsConfig := &tls.Config{}
-	certData, err := lndTLSCertBytes()
-	if err != nil {
-		logger.System("LND REST client: %v", err)
-	} else {
-		pool := x509.NewCertPool()
-		if pool.AppendCertsFromPEM(certData) {
-			tlsConfig.RootCAs = pool
-		}
-	}
-	return &http.Client{
-		Transport: &http.Transport{TLSClientConfig: tlsConfig},
-		Timeout:   5 * time.Second,
-	}
 }

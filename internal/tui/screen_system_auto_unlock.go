@@ -33,7 +33,7 @@ import (
 //   1. 'u' hotkey on the LND service row in System home
 //   2. Auto-launched after wallet creation completes
 //      (stage 2; the wallet creation flow swaps its tab
-//      into this screen via the walletCreatedMsg handler
+//      into this screen via the wallet finalization handler
 //      in update.go)
 
 type autoUnlockMode int
