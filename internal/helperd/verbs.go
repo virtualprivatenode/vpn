@@ -322,9 +322,8 @@ func verbReadNodeAddresses(_ *verbCtx, _ json.RawMessage) (any, error) {
 			paths.TorLNDGRPC + "/hostname"),
 		LNDRESTOnion:   readHostname(paths.TorLNDRESTHostname),
 		SyncthingOnion: readHostname(paths.TorSyncthingHostname),
-		// Root-side read: parses Syncthing's own config, so it
-		// answers correctly even when the daemon is stopped.
-		SyncthingDeviceID: installer.GetSyncthingDeviceID(),
+		// Read the certificate identity even when the daemon is stopped.
+		SyncthingDeviceID: host.SyncthingDeviceID(),
 	}, nil
 }
 

@@ -1,26 +1,28 @@
 // internal/installer/syncthing.go
 
+// Package installer provisions VPN and coordinates fresh or resumed installation.
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/syncthing"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
@@ -454,15 +456,22 @@ ExecStart=%s publish-lnd-backup %s
 	return pathUnit, exportService, nil
 }
 
-// stopSyncthingFailSafe stops AND disables Syncthing. Used on
-// the fail-safe paths (readiness timeout, privacy-confirm
-// failure) so that a later reboot — including the automatic
-// reboot from unattended-upgrades — cannot silently restart a
-// daemon whose privacy state we could not verify. A retried
-// install re-enables via startSyncthing.
-func stopSyncthingFailSafe() {
-	system.SudoRunSilent("systemctl", "stop", "syncthing")
-	system.SudoRunSilent("systemctl", "disable", "syncthing")
+var syncthingServiceCommand = system.SudoRun
+
+// stopSyncthingFailSafe attempts both stop and disable so an unverified daemon
+// cannot silently return on reboot. Failures remain explicit; retained residue
+// is not repaired by retrying installation.
+func stopSyncthingFailSafe() error {
+	stopErr := syncthingServiceCommand("systemctl", "stop", "syncthing")
+	disableErr := syncthingServiceCommand("systemctl", "disable", "syncthing")
+	return errors.Join(stopErr, disableErr)
+}
+
+func failSyncthingPrivacy(cause error) error {
+	if err := stopSyncthingFailSafe(); err != nil {
+		return errors.Join(cause, fmt.Errorf("could not confirm Syncthing stop/disable; administrator action is required: %w", err))
+	}
+	return fmt.Errorf("syncthing stopped and disabled: %w", cause)
 }
 
 func startSyncthing() error {
@@ -473,75 +482,39 @@ func startSyncthing() error {
 		return err
 	}
 	if err := system.SudoRun("systemctl", "start", "syncthing"); err != nil {
-		return err
+		return failSyncthingPrivacy(err)
 	}
 
-	// Readiness probe. /rest/noauth/health is the documented
-	// unauthenticated endpoint; the previous probe hit
-	// /rest/system/status without an API key, got 403 on every
-	// try, and spun the full 30s. Same standard HTTP client as
-	// the REST transport below. Fail-safe: if the daemon never
-	// readies, stop it and fail the install.
+	// Health and privacy reads use the same loopback-only transport as runtime.
 	ready := false
-	probe := &http.Client{Timeout: 3 * time.Second}
+	probe := syncthing.NewClient("")
 	for i := 0; i < 30; i++ {
-		resp, err := probe.Get(
-			syncthingGUIBase + "/rest/noauth/health")
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, err := probe.Request(ctx, http.MethodGet, "/rest/noauth/health", "")
+		cancel()
 		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				ready = true
-				break
-			}
+			ready = true
+			break
 		}
 		time.Sleep(1 * time.Second)
 	}
 	if !ready {
-		stopSyncthingFailSafe()
-		return fmt.Errorf(
-			"syncthing did not become ready — stopped")
+		return failSyncthingPrivacy(errors.New("syncthing did not become ready"))
 	}
 
-	// Post-start confirmation (defense in depth): the RUNNING
-	// daemon must report the privacy settings off. This is the
-	// exact check that exposed finding H. Fail-safe on mismatch.
+	// Verify the running daemon accepted the authored privacy settings.
 	return confirmSyncthingPrivacy()
 }
 
-// confirmSyncthingPrivacy reads the effective options from the
-// running daemon and hard-fails (stopping Syncthing) if any
-// announce/relay setting is enabled.
+// confirmSyncthingPrivacy verifies effective network, reporting and GUI settings
+// after startup. Missing or mismatched values trigger stop and disable.
 func confirmSyncthingPrivacy() error {
 	apiKey, err := getSyncthingAPIKey()
+	if err == nil {
+		err = syncthing.NewClient(apiKey).ConfirmPrivacy(context.Background())
+	}
 	if err != nil {
-		stopSyncthingFailSafe()
-		return fmt.Errorf("privacy confirm: get API key: %w", err)
-	}
-	resp, err := syncthingAPIGet(apiKey, "/rest/config/options")
-	if err != nil {
-		stopSyncthingFailSafe()
-		return fmt.Errorf("privacy confirm: get options: %w", err)
-	}
-
-	var opts struct {
-		GlobalAnnounceEnabled bool `json:"globalAnnounceEnabled"`
-		LocalAnnounceEnabled  bool `json:"localAnnounceEnabled"`
-		RelaysEnabled         bool `json:"relaysEnabled"`
-		NATEnabled            bool `json:"natEnabled"`
-	}
-	if err := json.Unmarshal([]byte(resp), &opts); err != nil {
-		stopSyncthingFailSafe()
-		return fmt.Errorf("privacy confirm: parse options: %w", err)
-	}
-	if opts.GlobalAnnounceEnabled || opts.LocalAnnounceEnabled ||
-		opts.RelaysEnabled || opts.NATEnabled {
-		stopSyncthingFailSafe()
-		return fmt.Errorf(
-			"privacy confirm FAILED: running daemon reports "+
-				"announce/relay enabled (global=%t local=%t "+
-				"relays=%t nat=%t) — Syncthing stopped",
-			opts.GlobalAnnounceEnabled, opts.LocalAnnounceEnabled,
-			opts.RelaysEnabled, opts.NATEnabled)
+		return failSyncthingPrivacy(fmt.Errorf("privacy confirmation failed: %w", err))
 	}
 	logger.Install("Syncthing privacy confirmed on running daemon")
 	return nil
@@ -557,12 +530,12 @@ func registerBackupFolder() error {
 	if err != nil {
 		return fmt.Errorf("get API key: %w", err)
 	}
+	client := syncthing.NewClient(apiKey)
 
 	// Check for the exact folder ID. Searching the raw JSON for
 	// a substring can confuse an unrelated label or longer ID
 	// for the required folder.
-	existing, err := syncthingAPIGet(apiKey,
-		"/rest/config/folders")
+	existing, err := client.Request(context.Background(), http.MethodGet, "/rest/config/folders", "")
 	if err != nil {
 		return fmt.Errorf("list folders: %w", err)
 	}
@@ -575,15 +548,14 @@ func registerBackupFolder() error {
 	}
 
 	// Get local device ID to include in folder config
-	localID := GetSyncthingDeviceID()
+	localID := host.SyncthingDeviceID()
 	if localID == "" {
 		return fmt.Errorf("cannot determine local device ID")
 	}
 
 	folder := renderBackupFolderConfig(localID)
 
-	if err := syncthingAPIPost(apiKey,
-		"/rest/config/folders", folder); err != nil {
+	if _, err := client.Request(context.Background(), http.MethodPost, "/rest/config/folders", folder); err != nil {
 		return fmt.Errorf("register folder: %w", err)
 	}
 
@@ -620,159 +592,9 @@ func backupFolderRegistered(foldersJSON string) (bool, error) {
 	return false, nil
 }
 
-// ── Syncthing Device Pairing ─────────────────────────────
-
-type SyncthingDevice struct {
-	Name     string
-	DeviceID string
-}
-
-// ListSyncthingDevices reads the daemon's effective device list at screen
-// cadence. It excludes this node's own identity and returns the current names,
-// including changes made through Syncthing's Web UI.
-func ListSyncthingDevices() ([]SyncthingDevice, error) {
-	apiKey, err := getSyncthingAPIKey()
-	if err != nil {
-		return nil, fmt.Errorf("get API key: %w", err)
-	}
-	raw, err := syncthingAPIGet(apiKey, "/rest/config/devices")
-	if err != nil {
-		return nil, err
-	}
-	localID := GetSyncthingDeviceID()
-	if localID == "" {
-		return nil, fmt.Errorf("local Syncthing device ID unavailable")
-	}
-	return parseSyncthingDevices([]byte(raw), localID)
-}
-
-func parseSyncthingDevices(
-	raw []byte, localID string,
-) ([]SyncthingDevice, error) {
-	seen := make(map[string]bool)
-	var entries []struct {
-		DeviceID string `json:"deviceID"`
-		Name     string `json:"name"`
-	}
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return nil, fmt.Errorf("decode Syncthing devices: %w", err)
-	}
-	devices := make([]SyncthingDevice, 0, len(entries))
-	for _, entry := range entries {
-		id := strings.TrimSpace(entry.DeviceID)
-		if id == "" || id == localID || seen[id] {
-			continue
-		}
-		seen[id] = true
-		name := strings.TrimSpace(entry.Name)
-		if name == "" {
-			name = "Syncthing device"
-		}
-		devices = append(devices, SyncthingDevice{Name: name, DeviceID: id})
-	}
-	sort.Slice(devices, func(i, j int) bool {
-		if devices[i].Name == devices[j].Name {
-			return devices[i].DeviceID < devices[j].DeviceID
-		}
-		return devices[i].Name < devices[j].Name
-	})
-	return devices, nil
-}
-
-// GetSyncthingDeviceID returns this node's Syncthing device
-// ID. As root it parses Syncthing's config XML (works even
-// with the daemon stopped — the ID derives from the TLS cert);
-// unprivileged it asks the helper's read-node-addresses
-// operation, which performs that same root-side read at the
-// moment of the question. No copy is kept: the ID changes when
-// Syncthing's identity is regenerated (a reinstall, a manual
-// key deletion), a stale copy would fail silently — the remote
-// device just never pairs — and screens need it only at human
-// cadence.
-func GetSyncthingDeviceID() string {
-	if os.Geteuid() != 0 {
-		var res helper.NodeAddressesResult
-		if err := helper.Call(
-			helper.VerbReadNodeAddresses, nil, &res); err != nil {
-			logger.Status("syncthing device ID: %v", err)
-			return ""
-		}
-		return res.SyncthingDeviceID
-	}
-
-	output, err := os.ReadFile(paths.SyncthingConfigXML)
-	if err != nil {
-		return ""
-	}
-
-	type device struct {
-		ID   string `xml:"id,attr"`
-		Name string `xml:"name,attr"`
-	}
-	type syncCfg struct {
-		XMLName xml.Name `xml:"configuration"`
-		Devices []device `xml:"device"`
-	}
-
-	var c syncCfg
-	if xml.Unmarshal(output, &c) != nil {
-		return ""
-	}
-
-	if len(c.Devices) > 0 {
-		return c.Devices[0].ID
-	}
-	return ""
-}
-
-// PairSyncthingDevice adds a remote device to Syncthing and
-// shares the lnd-backup folder with it via the REST API.
-func PairSyncthingDevice(deviceID string) error {
-	apiKey, err := getSyncthingAPIKey()
-	if err != nil {
-		return fmt.Errorf("get API key: %w", err)
-	}
-
-	// Add the device
-	devicePayload := fmt.Sprintf(`{
-        "deviceID": %q,
-        "name": "local-backup",
-        "addresses": ["dynamic"],
-        "autoAcceptFolders": false
-    }`, deviceID)
-
-	if err := syncthingAPIPost(apiKey,
-		"/rest/config/devices", devicePayload); err != nil {
-		return fmt.Errorf("add device: %w", err)
-	}
-
-	// Share the backup folder with the new device
-	folderConfig, err := syncthingAPIGet(apiKey,
-		"/rest/config/folders")
-	if err != nil {
-		return fmt.Errorf("get folders: %w", err)
-	}
-
-	if err := addDeviceToBackupFolder(apiKey,
-		folderConfig, deviceID); err != nil {
-		return fmt.Errorf("share folder: %w", err)
-	}
-
-	logger.Install("Paired Syncthing device: %s...",
-		deviceID[:min(16, len(deviceID))])
-	return nil
-}
-
-// getSyncthingAPIKey returns the REST API key. As root it
-// parses Syncthing's config; unprivileged it reads the staged
-// board copy — which is what makes every runtime device
-// operation (pair, unpair, folder share) plain localhost REST
-// with no privilege involved.
+// getSyncthingAPIKey reads the private configuration for root-side provisioning.
+// Runtime workflows read their staged credentials in the application layer.
 func getSyncthingAPIKey() (string, error) {
-	if os.Geteuid() != 0 {
-		return helper.ReadBoardString(paths.StateSyncthingAPIKey)
-	}
-
 	output, err := os.ReadFile(paths.SyncthingConfigXML)
 	if err != nil {
 		return "", err
@@ -793,173 +615,4 @@ func getSyncthingAPIKey() (string, error) {
 		return "", fmt.Errorf("no API key found")
 	}
 	return cfg.GUI.APIKey, nil
-}
-
-// ── REST transport (fail-noisy) ──────────────────────────
-//
-// Every Syncthing REST call goes through syncthingAPI, which
-// FAILS on any HTTP error status. This is load-bearing: the
-// previous transport shelled out to curl -s, which exits 0 on
-// a 403, and these calls once reported success while the
-// daemon had rejected the request — a pairing "done" that had
-// paired nothing, which for the channel-backup folder means
-// the off-box copy the operator is counting on never starts
-// replicating. A silent false success here is forbidden.
-//
-// The transport is Go's standard HTTP client, not a curl
-// subprocess: the status code arrives as an integer with
-// nothing to parse out of shell output, and this path stops
-// depending on an image-supplied binary nothing of ours
-// installs. Same client choice as the LND readiness probe
-// (waitForLND).
-
-// syncthingGUIBase is the daemon's loopback GUI/REST address.
-// A variable so the transport tests can point it at a local
-// test server.
-var syncthingGUIBase = "http://127.0.0.1:8384"
-
-// syncthingAPI performs one REST call against the local
-// Syncthing daemon and returns the response body. Any non-2xx
-// answer is an error naming the refused call.
-func syncthingAPI(
-	method, apiKey, endpoint, body string,
-) (string, error) {
-	fail := func(err error) (string, error) {
-		return "", fmt.Errorf(
-			"syncthing API %s %s: %w", method, endpoint, err)
-	}
-	var reqBody io.Reader
-	if body != "" {
-		reqBody = strings.NewReader(body)
-	}
-	req, err := http.NewRequest(method,
-		syncthingGUIBase+endpoint, reqBody)
-	if err != nil {
-		return fail(err)
-	}
-	if apiKey != "" {
-		req.Header.Set("X-API-Key", apiKey)
-	}
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fail(err)
-	}
-	defer resp.Body.Close()
-	// The bound exists so a defect cannot balloon memory; real
-	// answers are far smaller.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-	if err != nil {
-		return fail(fmt.Errorf("read response: %w", err))
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		hint := ""
-		if resp.StatusCode == http.StatusForbidden {
-			hint = " — the daemon rejected the API key this " +
-				"node staged; reinstalling Syncthing from " +
-				"the Add-On section refreshes it"
-		}
-		return "", fmt.Errorf(
-			"syncthing API %s %s failed: HTTP %d%s",
-			method, endpoint, resp.StatusCode, hint)
-	}
-	return string(data), nil
-}
-
-func syncthingAPIPost(apiKey, endpoint, body string) error {
-	_, err := syncthingAPI("POST", apiKey, endpoint, body)
-	return err
-}
-
-func syncthingAPIPatch(apiKey, endpoint, body string) error {
-	_, err := syncthingAPI("PATCH", apiKey, endpoint, body)
-	return err
-}
-
-func syncthingAPIDelete(apiKey, endpoint string) error {
-	_, err := syncthingAPI("DELETE", apiKey, endpoint, "")
-	return err
-}
-
-// UnpairSyncthingDevice removes a device from Syncthing
-// via the REST API. The folder sharing is dropped
-// automatically when the device is removed.
-func UnpairSyncthingDevice(deviceID string) error {
-	apiKey, err := getSyncthingAPIKey()
-	if err != nil {
-		return fmt.Errorf("get API key: %w", err)
-	}
-
-	if err := syncthingAPIDelete(apiKey,
-		"/rest/config/devices/"+deviceID); err != nil {
-		return fmt.Errorf("remove device: %w", err)
-	}
-
-	logger.Install("Removed Syncthing device: %s...",
-		deviceID[:min(16, len(deviceID))])
-	return nil
-}
-
-func syncthingAPIGet(apiKey, endpoint string) (string, error) {
-	return syncthingAPI("GET", apiKey, endpoint, "")
-}
-
-func addDeviceToBackupFolder(
-	apiKey, foldersJSON, deviceID string,
-) error {
-	type folderDevice struct {
-		DeviceID     string `json:"deviceID"`
-		IntroducedBy string `json:"introducedBy,omitempty"`
-	}
-	type folder struct {
-		ID      string         `json:"id"`
-		Path    string         `json:"path"`
-		Devices []folderDevice `json:"devices"`
-	}
-
-	var folders []folder
-	if err := json.Unmarshal(
-		[]byte(foldersJSON), &folders); err != nil {
-		return err
-	}
-
-	for i, f := range folders {
-		if f.Path == paths.LNDBackupExport ||
-			f.Path == paths.LNDBackupExport+"/" {
-			// Check if device already added
-			for _, d := range f.Devices {
-				if d.DeviceID == deviceID {
-					return nil
-				}
-			}
-			folders[i].Devices = append(
-				folders[i].Devices,
-				folderDevice{DeviceID: deviceID},
-			)
-
-			// PATCH only the devices array. The previous PUT sent
-			// a 3-field object (id/path/devices) with no "type" —
-			// Syncthing's PUT replaces the WHOLE folder, so
-			// type:"sendonly" reverted to "sendreceive" on every
-			// pairing (finding P, reproduced live).
-			//
-			// WARNING: PATCH replaces child arrays WHOLESALE (v2
-			// Config Endpoints docs) — this MUST send the complete
-			// merged devices array (existing + new), never a
-			// single-element array, or the local device is wiped
-			// and the folder de-shared.
-			devices, err := json.Marshal(folders[i].Devices)
-			if err != nil {
-				return err
-			}
-			return syncthingAPIPatch(apiKey,
-				"/rest/config/folders/"+f.ID,
-				`{"devices":`+string(devices)+`}`)
-		}
-	}
-
-	return fmt.Errorf("backup folder not found")
 }

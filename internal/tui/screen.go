@@ -7,8 +7,8 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/syncthing"
 )
 
 // ── Screen interface ────────────────────────────────────
@@ -50,6 +50,8 @@ type Screen interface {
 // chain — zero refresh plumbing.
 
 type ScreenContext struct {
+	Syncthing           *app.Syncthing
+	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
 	walletCreationOwner *WalletCreateScreen
 	walletRevision      uint64
@@ -65,6 +67,13 @@ type ScreenContext struct {
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
 	LatestVersion       string // updated by latestVersionMsg handler
+}
+
+func (c *ScreenContext) syncthing() *app.Syncthing {
+	if c.Syncthing == nil {
+		c.Syncthing = app.NewSyncthing()
+	}
+	return c.Syncthing
 }
 
 func (c *ScreenContext) walletCreation() *app.WalletCreation {
@@ -84,7 +93,7 @@ type RuntimeState struct {
 	KeyVerificationKnown    bool
 	SSHPasswordAuthDisabled bool
 	SSHPasswordAuthKnown    bool
-	SyncthingDevices        []installer.SyncthingDevice
+	SyncthingDevices        []syncthing.Device
 	SyncthingDevicesErr     error
 	SyncthingDevicesKnown   bool
 }

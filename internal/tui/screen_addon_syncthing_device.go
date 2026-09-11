@@ -4,7 +4,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtualprivatenode/vpn/internal/syncthing"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -17,27 +18,27 @@ type syncDeviceStep int
 const (
 	syncDeviceStepDetail syncDeviceStep = iota
 	syncDeviceStepConfirm
+	syncDeviceStepRemoving
+	syncDeviceStepRemoved
 )
 
 type SyncthingDeviceScreen struct {
 	ctx         *ScreenContext
 	step        syncDeviceStep
-	device      installer.SyncthingDevice // live-read snapshot
-	deviceIndex int                       // index in displayed list
-	viewBtnIdx  int                       // 0=Cancel, 1=Remove
-	confirmIdx  int                       // 0=Go Back, 1=Remove
+	device      syncthing.Device // live-read snapshot
+	attempt     uint64
+	viewBtnIdx  int // 0=Cancel, 1=Remove
+	confirmIdx  int // 0=Go Back, 1=Remove
 	removeError string
 }
 
 func NewSyncthingDeviceScreen(
 	ctx *ScreenContext,
-	device installer.SyncthingDevice,
-	index int,
+	device syncthing.Device,
 ) *SyncthingDeviceScreen {
 	return &SyncthingDeviceScreen{
-		ctx:         ctx,
-		device:      device,
-		deviceIndex: index,
+		ctx:    ctx,
+		device: device,
 	}
 }
 
@@ -51,6 +52,28 @@ func (s *SyncthingDeviceScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
 	switch s.step {
+	case syncDeviceStepRemoving:
+		if keyStr == "ctrl+c" {
+			return s, tea.Quit
+		}
+		if keyStr == "left" {
+			return s, emitFocusSidebar
+		}
+		if keyStr == "up" || keyStr == "shift+tab" {
+			return s, emitFocusTabBar
+		}
+		return s, nil
+	case syncDeviceStepRemoved:
+		if keyStr == "enter" {
+			return s, closeSyncthingCmd(s, s.attempt)
+		}
+		if keyStr == "ctrl+c" {
+			return s, tea.Quit
+		}
+		if keyStr == "left" {
+			return s, emitFocusSidebar
+		}
+		return s, nil
 	case syncDeviceStepDetail:
 		return s.handleDetailKey(keyStr)
 	case syncDeviceStepConfirm:
@@ -64,13 +87,20 @@ func (s *SyncthingDeviceScreen) HandleMsg(
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case syncthingRemovedMsg:
-		if msg.err != nil {
-			s.removeError = msg.err.Error()
+		if msg.owner != s || msg.attempt != s.attempt || s.step != syncDeviceStepRemoving {
+			return s, nil
+		}
+		if msg.result.Outcome != app.SyncthingComplete {
+			s.removeError = "Removal was not completed."
+			if msg.result.Err != nil {
+				s.removeError = msg.result.Err.Error()
+			}
 			s.step = syncDeviceStepDetail
 			return s, nil
 		}
-		// Success — close tab; the model refreshes the live list.
-		return s, emitCloseTab
+		s.step = syncDeviceStepRemoved
+		s.removeError = ""
+
 	}
 	return s, nil
 }
@@ -79,6 +109,15 @@ func (s *SyncthingDeviceScreen) View(
 	w, h int,
 ) string {
 	switch s.step {
+	case syncDeviceStepRemoving, syncDeviceStepRemoved:
+		p := newPane(w)
+		title, button := "Removing Device...", "Removing..."
+		if s.step == syncDeviceStepRemoved {
+			title, button = "Device Removed", "Done"
+		}
+		p.title(theme.Header, title)
+		p.monoWrap(s.device.DeviceID)
+		return p.renderWithBottomButtons([]string{button}, 0, s.ctx.ContentFocused && s.step == syncDeviceStepRemoved, h)
 	case syncDeviceStepDetail:
 		return s.viewDetail(w, h)
 	case syncDeviceStepConfirm:
@@ -89,6 +128,10 @@ func (s *SyncthingDeviceScreen) View(
 
 func (s *SyncthingDeviceScreen) HelpBindings() []key.Binding {
 	switch s.step {
+	case syncDeviceStepRemoving:
+		return []key.Binding{kSidebar, kShiftTabBar, kQuit}
+	case syncDeviceStepRemoved:
+		return tabButtonBindings(s.ctx.HasTabs)
 	case syncDeviceStepDetail:
 		return detailActionBindings(
 			"remove", s.viewBtnIdx, s.ctx.HasTabs)
@@ -130,7 +173,7 @@ func (s *SyncthingDeviceScreen) handleDetailKey(
 		return s, emitFocusParent
 	case "enter":
 		if s.viewBtnIdx == 0 {
-			return s, emitCloseTab
+			return s, closeSyncthingCmd(s, s.attempt)
 		}
 		s.step = syncDeviceStepConfirm
 		s.confirmIdx = 0
@@ -148,12 +191,10 @@ func (s *SyncthingDeviceScreen) viewDetail(
 	p.title(theme.Header, dev.Name)
 
 	p.labelLine("Device ID:")
-	id := dev.DeviceID
-	if len(id) > w-4 {
-		id = id[:w-7] + "..."
+	p.monoWrap(dev.DeviceID)
+	if s.removeError != "" {
+		p.warnWrapWords(s.removeError)
 	}
-	p.mono(id)
-	p.appendError(s.removeError)
 
 	return p.renderWithBottomButtons(
 		[]string{"Cancel", "Remove"}, s.viewBtnIdx,
@@ -195,8 +236,9 @@ func (s *SyncthingDeviceScreen) handleConfirmKey(
 			s.step = syncDeviceStepDetail
 			return s, nil
 		case 1: // Remove
-			return s, removeSyncthingDeviceCmd(
-				s.device.DeviceID)
+			s.attempt++
+			s.step = syncDeviceStepRemoving
+			return s, removeSyncthingDeviceCmd(s)
 		}
 	}
 	return s, nil
@@ -208,6 +250,7 @@ func (s *SyncthingDeviceScreen) viewConfirm(
 	p := newPane(w)
 	p.title(theme.Warning,
 		"Remove "+s.device.Name+"?")
+	p.monoWrap(s.device.DeviceID)
 	p.line(" " + theme.Value.Render(
 		"• Stop syncing channel backups"+
 			" to this device"))

@@ -11,6 +11,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/syncthing"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -128,16 +129,24 @@ type keyVerificationStateMsg struct {
 }
 
 type syncthingPairedMsg struct {
-	deviceID string
-	err      error
+	owner   *SyncthingPairScreen
+	attempt uint64
+	result  app.SyncthingResult
 }
 type syncthingRemovedMsg struct {
-	deviceID string
-	err      error
+	owner   *SyncthingDeviceScreen
+	attempt uint64
+	result  app.SyncthingResult
 }
 type syncthingDevicesMsg struct {
-	devices []installer.SyncthingDevice
-	err     error
+	owner    *ScreenContext
+	revision uint64
+	devices  []syncthing.Device
+	err      error
+}
+type syncthingCloseMsg struct {
+	owner   Screen
+	attempt uint64
 }
 type channelOpenResultMsg struct {
 	attempt *channelOpenAttempt
@@ -342,6 +351,7 @@ func NewModel(
 		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
+		Syncthing:       app.NewSyncthing(),
 		HelperWorkflows: app.NewHelperWorkflows(installer.SyncthingVersionStr()),
 		Cfg:             cfg,
 		State:           state,
@@ -406,6 +416,7 @@ func Show(
 			m.screenCtx.WalletCreation.Close()
 		}
 		m.screenCtx.HelperWorkflows.Close()
+		m.screenCtx.Syncthing.Close()
 		if m.screenCtx.LndClient != nil {
 			m.screenCtx.LndClient.Close()
 		}
@@ -442,8 +453,9 @@ func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 		state.SSHPasswordAuthKnown = true
 	}
 	if cfg.SyncthingEnabled {
-		state.SyncthingDevices, state.SyncthingDevicesErr =
-			installer.ListSyncthingDevices()
+		runtime := app.NewSyncthing()
+		state.SyncthingDevices, state.SyncthingDevicesErr = runtime.ListDevices()
+		runtime.Close()
 		state.SyncthingDevicesKnown = state.SyncthingDevicesErr == nil
 	}
 	return state

@@ -38,7 +38,7 @@ func NewSyncthingDetailScreen(
 // ── Screen interface ────────────────────────────────────
 
 func (s *SyncthingDetailScreen) Init() tea.Cmd {
-	return fetchSyncthingDevicesCmd()
+	return fetchSyncthingDevicesCmd(s.ctx)
 }
 
 func (s *SyncthingDetailScreen) HandleKey(
@@ -140,20 +140,19 @@ func (s *SyncthingDetailScreen) handleEnter() (
 
 	// Device list — open device detail
 	devices := s.ctx.State.SyncthingDevices
-	if s.cursor < len(devices) {
+	if s.ctx.State.SyncthingDevicesKnown && s.cursor >= 0 && s.cursor < len(devices) {
 		dev := devices[s.cursor]
 		label := dev.Name
 		if len(label) > 17 {
 			label = label[:17] + "..."
 		}
 		screen := NewSyncthingDeviceScreen(
-			s.ctx, dev, s.cursor)
-		idx := s.cursor
+			s.ctx, dev)
 		return s, func() tea.Msg {
 			return openTabMsg{
 				Kind:   tabSyncthingDevice,
 				Label:  label,
-				Index:  idx,
+				Key:    dev.DeviceID,
 				Screen: screen,
 				Parent: tabSyncthing,
 			}
@@ -165,8 +164,25 @@ func (s *SyncthingDetailScreen) handleEnter() (
 func (s *SyncthingDetailScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	if refreshed, ok := msg.(syncthingDevicesMsg); ok {
+		if s.focusZone == syncDetailZoneList {
+			previous := s.ctx.State.SyncthingDevices
+			id := ""
+			if s.cursor >= 0 && s.cursor < len(previous) {
+				id = previous[s.cursor].DeviceID
+			}
+			for i, d := range refreshed.devices {
+				if refreshed.err == nil && d.DeviceID == id {
+					s.cursor = i
+					return s, nil
+				}
+			}
+			s.focusZone = syncDetailZoneButtons
+			s.cursor = 0
+		}
+	}
 	if _, ok := msg.(tabActivatedMsg); ok {
-		return s, fetchSyncthingDevicesCmd()
+		return s, fetchSyncthingDevicesCmd(s.ctx)
 	}
 	return s, nil
 }
@@ -214,7 +230,7 @@ func (s *SyncthingDetailScreen) View(
 				"Cannot read the current device list"))
 		midLines = append(midLines,
 			" "+theme.Dim.Render(
-				"Check: journalctl -u vpn-helperd"))
+				"Reopen this tab to refresh; inspect Syncthing if it persists."))
 	} else if pairedCount == 0 {
 		midLines = append(midLines,
 			" "+theme.Dim.Render(

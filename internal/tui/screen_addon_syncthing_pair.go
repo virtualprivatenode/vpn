@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -18,6 +19,7 @@ const (
 	syncPairStepInput    syncPairStep = iota // device ID entry
 	syncPairStepPairing                      // waiting for pair
 	syncPairStepPostPair                     // success + instructions
+	syncPairStepResult
 )
 
 // ── Focus zones for input step ─────────────────────────
@@ -30,16 +32,14 @@ const (
 // ── SyncthingPairScreen ────────────────────────────────
 
 type SyncthingPairScreen struct {
+	attempt   uint64
+	result    app.SyncthingResult
 	ctx       *ScreenContext
 	step      syncPairStep
 	input     textinput.Model
 	focusZone int // 0=input, 1=buttons
 	btnIdx    int
 	pairError string
-	// This node's Syncthing device ID, live-read at screen
-	// entry through the helper (no stored copy exists
-	// anywhere) and held only for this screen's lifetime.
-	nodeDeviceID string
 }
 
 func NewSyncthingPairScreen(
@@ -55,7 +55,7 @@ func NewSyncthingPairScreen(
 // ── Screen interface ────────────────────────────────────
 
 func (s *SyncthingPairScreen) Init() tea.Cmd {
-	return fetchNodeAddressesCmd(tabSyncthingPair)
+	return nil
 }
 
 func (s *SyncthingPairScreen) HandleKey(
@@ -68,6 +68,23 @@ func (s *SyncthingPairScreen) HandleKey(
 		return s.handlePairingKey(keyStr)
 	case syncPairStepPostPair:
 		return s.handlePostPairKey(keyStr)
+	case syncPairStepResult:
+		if keyStr == "enter" {
+			s.step = syncPairStepInput
+			s.focusZone = syncPairZoneInput
+			s.input.Focus()
+			return s, nil
+		}
+		if keyStr == "backspace" {
+			return s, closeSyncthingCmd(s, s.attempt)
+		}
+		if keyStr == "left" {
+			return s, emitFocusSidebar
+		}
+		if keyStr == "ctrl+c" {
+			return s, tea.Quit
+		}
+		return s, nil
 	}
 	return s, nil
 }
@@ -83,22 +100,21 @@ func (s *SyncthingPairScreen) HandleMsg(
 			s.input, cmd = s.input.Update(msg)
 			return s, cmd
 		}
-	case tabActivatedMsg:
-		// Re-entering the tab re-asks: screen entry is the
-		// cadence at which live-read facts are read.
-		return s, fetchNodeAddressesCmd(tabSyncthingPair)
-	case nodeAddressesMsg:
-		s.nodeDeviceID = msg.addrs.SyncthingDeviceID
 	case syncthingPairedMsg:
-		if msg.err != nil {
-			s.pairError = msg.err.Error()
-			s.step = syncPairStepInput
+		if msg.owner != s || msg.attempt != s.attempt || s.step != syncPairStepPairing {
 			return s, nil
 		}
-		// Success — the model refreshes the daemon-observed list.
-		s.step = syncPairStepPostPair
-		s.btnIdx = 0
+		s.result = msg.result
 		s.pairError = ""
+		if msg.result.Err != nil {
+			s.pairError = msg.result.Err.Error()
+		}
+		s.step = syncPairStepResult
+		if msg.result.Outcome == app.SyncthingComplete {
+			s.step = syncPairStepPostPair
+		}
+		s.btnIdx = 0
+
 	}
 	return s, nil
 }
@@ -107,6 +123,24 @@ func (s *SyncthingPairScreen) View(
 	w, h int,
 ) string {
 	switch s.step {
+	case syncPairStepResult:
+		p := newPane(w)
+		title := "Pairing Not Completed"
+		if s.result.Outcome == app.SyncthingPartial {
+			title = "Device Configured; Sharing Incomplete"
+		}
+		if s.result.Outcome == app.SyncthingUnknown {
+			title = "Pairing Outcome Unconfirmed"
+		}
+		p.title(theme.Warning, title)
+		id := s.result.DeviceID
+		if id == "" {
+			id = syncthingIDValue(s.input)
+		}
+		p.monoWrap(id)
+		p.warnWrapWords(s.pairError)
+		p.wrappedLines("Review the current device/share state before retrying.", theme.Dim)
+		return p.renderWithBottomButtons([]string{"Review Device ID"}, 0, s.ctx.ContentFocused, h)
 	case syncPairStepInput:
 		return s.viewInput(w, h)
 	case syncPairStepPairing:
@@ -128,7 +162,7 @@ func (s *SyncthingPairScreen) HelpBindings() []key.Binding {
 		}
 		binds = append(binds, kQuit)
 		return binds
-	case syncPairStepPostPair:
+	case syncPairStepPostPair, syncPairStepResult:
 		return tabButtonBindings(s.ctx.HasTabs)
 	}
 	return nil
@@ -256,40 +290,17 @@ func (s *SyncthingPairScreen) submitPair() (
 	Screen, tea.Cmd,
 ) {
 	deviceID := syncthingIDValue(s.input)
-	if !s.ctx.State.SyncthingDevicesKnown {
-		s.pairError = "Current device list unavailable. Reopen Syncthing and try again."
-		return s, nil
-	}
 	if deviceID == "" {
 		s.pairError = "Paste a Device ID"
 		return s, nil
 	}
-	parts := strings.Split(deviceID, "-")
-	if len(parts) != 8 {
-		s.pairError =
-			"Invalid format. Expected 8 groups" +
-				" separated by hyphens."
+	if s.step != syncPairStepInput {
 		return s, nil
 	}
-	for _, p := range parts {
-		if len(p) != 7 {
-			s.pairError =
-				"Invalid format. Each group" +
-					" should be 7 characters."
-			return s, nil
-		}
-	}
-	// Check for duplicate
-	for _, d := range s.ctx.State.SyncthingDevices {
-		if d.DeviceID == deviceID {
-			s.pairError =
-				"Device already paired."
-			return s, nil
-		}
-	}
+	s.attempt++
 	s.pairError = ""
 	s.step = syncPairStepPairing
-	return s, pairSyncthingDeviceCmd(deviceID)
+	return s, pairSyncthingDeviceCmd(s, deviceID)
 }
 
 // ── Pairing (in-flight) step ────────────────────────────
@@ -343,7 +354,7 @@ func (s *SyncthingPairScreen) handlePostPairKey(
 	case "enter":
 		switch s.btnIdx {
 		case 0: // Show QR
-			vpsDeviceID := s.nodeDeviceID
+			vpsDeviceID := s.result.LocalID
 			if vpsDeviceID == "" {
 				return s, nil
 			}
@@ -354,7 +365,7 @@ func (s *SyncthingPairScreen) handlePostPairKey(
 				}
 			}
 		case 1: // Done
-			return s, emitCloseTab
+			return s, closeSyncthingCmd(s, s.attempt)
 		}
 		return s, nil
 	}
@@ -508,7 +519,7 @@ func (s *SyncthingPairScreen) viewPostPair(
 				"Complete Pairing"), w))
 	lines = append(lines, "")
 
-	vpsDeviceID := s.nodeDeviceID
+	vpsDeviceID := s.result.LocalID
 	if vpsDeviceID != "" {
 		lines = append(lines,
 			" "+theme.Dim.Render(
