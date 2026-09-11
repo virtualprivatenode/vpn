@@ -8,6 +8,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/syncthing"
 )
 
@@ -50,6 +51,7 @@ type Screen interface {
 // chain — zero refresh plumbing.
 
 type ScreenContext struct {
+	LoginPasswords      loginPasswordChanges
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
@@ -67,6 +69,18 @@ type ScreenContext struct {
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
 	LatestVersion       string // updated by latestVersionMsg handler
+}
+
+type loginPasswordChanges interface {
+	Change(loginpassword.Password) <-chan app.LoginPasswordResult
+	Close()
+}
+
+func (c *ScreenContext) loginPasswords() loginPasswordChanges {
+	if c.LoginPasswords == nil {
+		c.LoginPasswords = app.NewLoginPasswordChanges()
+	}
+	return c.LoginPasswords
 }
 
 func (c *ScreenContext) syncthing() *app.Syncthing {

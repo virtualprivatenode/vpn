@@ -472,6 +472,8 @@ func (s *SSHKeysScreen) clampCursor() {
 
 func sshAccessBusy(screen Screen) bool {
 	switch s := screen.(type) {
+	case *ChangePasswordScreen:
+		return s.step == changePwStepWorking
 	case *SSHKeyAddScreen:
 		return s.step == sshAddStepWorking
 	case *SSHKeyDetailScreen:

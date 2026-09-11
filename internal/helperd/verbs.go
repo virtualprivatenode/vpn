@@ -15,6 +15,8 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -73,6 +75,8 @@ var verbs = map[string]verbDef{
 }
 
 var (
+	setLoginPassword             = host.SetLoginPassword
+	clearPasswordPendingMarker   = host.ClearPasswordPendingMarker
 	loadSystemConfig             = config.Load
 	saveSystemConfig             = config.Save
 	setupAutoUnlock              = installer.SetupAutoUnlock
@@ -227,19 +231,19 @@ func verbSetUserPassword(_ *verbCtx, params json.RawMessage) (any, error) {
 			"only the %q user's password is managed here",
 			paths.AdminUser)
 	}
-	// Same rule as the client's input screen, enforced again
-	// at the boundary — the two share one constructor, so they
-	// cannot disagree.
-	pw, err := installer.NewLoginPassword(p.Password)
+	// Validate again at the privileged boundary using the shared contract.
+	pw, err := loginpassword.New(p.Password)
 	if err != nil {
 		return nil, err
 	}
-	if err := installer.SetUserPassword(p.User, pw); err != nil {
+	if err := setLoginPassword(pw); err != nil {
 		return nil, err
 	}
 	// An operator-chosen password supersedes any generated one
 	// that was never displayed (the unattended-install marker).
-	installer.ClearPasswordPendingMarker()
+	if err := clearPasswordPendingMarker(); err != nil {
+		logger.Install("password changed, but password-delivery state remains pending: %v", err)
+	}
 	return nil, nil
 }
 

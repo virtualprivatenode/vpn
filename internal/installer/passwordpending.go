@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -61,22 +60,6 @@ func clearPasswordPendingMarkerStrict() error {
 			paths.PasswordPendingMarker, err)
 	}
 	return nil
-}
-
-// ClearPasswordPendingMarker removes the marker. Best-effort by
-// design: it runs at moments when the operator HAS a working
-// credential (it was just printed, or they just chose one), so a
-// failed removal must not fail that operation — the cost of a
-// stale marker is one redundant password re-apply and re-print
-// on a later completing run.
-func ClearPasswordPendingMarker() {
-	if err := os.Remove(paths.PasswordPendingMarker); err != nil &&
-		!os.IsNotExist(err) {
-		logger.Install(
-			"WARNING: could not remove %s (%v) — password-delivery "+
-				"state remains pending",
-			paths.PasswordPendingMarker, err)
-	}
 }
 
 // needsPasswordReapply decides whether a completing unattended

@@ -55,21 +55,6 @@ func SudoRun(name string, args ...string) error {
 	return Run(name, args...)
 }
 
-// SudoRunStdin executes a root-requiring command, feeding stdin
-// from the given string. The payload never appears in argv
-// (which would leak via /proc/*/cmdline). Returns trimmed
-// combined output alongside any error, for caller-side message
-// formatting.
-func SudoRunStdin(stdin, name string, args ...string) (string, error) {
-	if err := requireRoot(name); err != nil {
-		return "", err
-	}
-	cmd := exec.Command(name, args...)
-	cmd.Stdin = strings.NewReader(stdin)
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
-}
-
 // RunOutput executes a command and returns stdout as a string.
 func RunOutput(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)

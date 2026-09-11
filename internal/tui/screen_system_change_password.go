@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/user"
 	"strconv"
 	"strings"
 
@@ -10,21 +9,14 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── ChangePasswordScreen ───────────────────────────────
-// Three-step flow opened as its own tab from
-// SSHKeysScreen. Lets the operator change the login
-// password for the user running the TUI.
-//
-// Targets the current real user (os/user.Current()), not
-// a hardcoded username — this matches the "change MY
-// password" expectation and avoids assuming the codebase
-// always runs as the admin user (vpn). Refuses to operate if running
-// as root (uid 0) so we never accidentally rewrite root's
-// password from a misconfigured launch.
+// ChangePasswordScreen changes the fixed vpn operator login password.
+// Application code owns the helper request; this screen owns its result.
 
 type changePwStep int
 
@@ -40,36 +32,36 @@ const (
 	changePwZoneButtons      = 0
 )
 
-type changePwDoneMsg struct{ err error }
+type changePwDoneMsg struct {
+	owner   *ChangePasswordScreen
+	attempt uint64
+	result  app.LoginPasswordResult
+}
+type closeLoginPasswordMsg struct {
+	owner   *ChangePasswordScreen
+	attempt uint64
+}
 
-func setUserPasswordCmd(
-	username string, newPassword installer.LoginPassword,
-) tea.Cmd {
-	return func() tea.Msg {
-		err := installer.SetUserPassword(
-			username, newPassword)
-		return changePwDoneMsg{err: err}
-	}
+func (s *ChangePasswordScreen) closeCommand() tea.Cmd {
+	attempt := s.attempt
+	return func() tea.Msg { return closeLoginPasswordMsg{owner: s, attempt: attempt} }
 }
 
 type ChangePasswordScreen struct {
 	ctx       *ScreenContext
 	step      changePwStep
-	username  string
-	loadErr   string
+	attempt   uint64
 	newInput  textinput.Model
 	confInput textinput.Model
 	focusZone int
 	btnIdx    int
 	inputErr  string
-	resultErr string
+	result    app.LoginPasswordResult
 }
 
 func NewChangePasswordScreen(
 	ctx *ScreenContext,
 ) *ChangePasswordScreen {
-	username, loadErr := currentUsername()
-
 	newIn := newUserPasswordInput()
 	confIn := newUserPasswordInput()
 	newIn.Focus()
@@ -77,28 +69,10 @@ func NewChangePasswordScreen(
 	return &ChangePasswordScreen{
 		ctx:       ctx,
 		step:      changePwStepInput,
-		username:  username,
-		loadErr:   loadErr,
 		newInput:  newIn,
 		confInput: confIn,
 		focusZone: changePwZoneInputNew,
 	}
-}
-
-// currentUsername returns the login name of the user
-// running this process, or an error string if it can't
-// be determined or if running as root.
-func currentUsername() (string, string) {
-	u, err := user.Current()
-	if err != nil {
-		return "", "cannot determine current user: " +
-			err.Error()
-	}
-	if u.Uid == "0" {
-		return "", "refusing to change root's password " +
-			"— run the TUI as a normal user"
-	}
-	return u.Username, ""
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -112,8 +86,15 @@ func (s *ChangePasswordScreen) HandleKey(
 	case changePwStepInput:
 		return s.handleInputKey(keyStr, msg)
 	case changePwStepWorking:
-		if keyStr == "ctrl+c" {
+		switch keyStr {
+		case "ctrl+c":
 			return s, tea.Quit
+		case "left":
+			return s, emitFocusSidebar
+		case "up", "shift+tab":
+			if s.ctx.HasTabs {
+				return s, emitFocusTabBar
+			}
 		}
 	case changePwStepResult:
 		return s.handleResultKey(keyStr)
@@ -126,31 +107,35 @@ func (s *ChangePasswordScreen) HandleMsg(
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case changePwDoneMsg:
-		s.step = changePwStepResult
-		if msg.err != nil {
-			s.resultErr = msg.err.Error()
-		} else {
-			s.resultErr = ""
+		if msg.owner != s || msg.attempt != s.attempt || s.step != changePwStepWorking {
+			return s, nil
 		}
+		s.step = changePwStepResult
+		s.result = msg.result
 		return s, nil
 
 	case tea.PasteMsg:
-		// Bracketed paste arrives as its own message
-		// type (not a sequence of KeyPressMsg). Route
-		// to whichever input is currently focused.
-		// Strip a single trailing newline since password
-		// managers often add one; embedded newlines are
-		// rejected by NewLoginPassword at submit anyway.
 		if s.step != changePwStepInput {
 			return s, nil
 		}
-		val := strings.TrimSuffix(
-			string(msg.Content), "\n")
+		// Accept the password manager's single trailing newline, but never
+		// silently normalize or truncate the password inside the masked input.
+		value := strings.TrimSuffix(msg.Content, "\n")
+		var input *textinput.Model
 		switch s.focusZone {
 		case changePwZoneInputNew:
-			s.newInput.SetValue(val)
+			input = &s.newInput
 		case changePwZoneInputConfirm:
-			s.confInput.SetValue(val)
+			input = &s.confInput
+		default:
+			return s, nil
+		}
+		input.SetValue(value)
+		if input.Value() != value {
+			input.Reset()
+			s.inputErr = "Paste rejected and field cleared: unsupported characters or more than 256 characters"
+		} else {
+			s.inputErr = ""
 		}
 		return s, nil
 	}
@@ -197,7 +182,11 @@ func (s *ChangePasswordScreen) HelpBindings() []key.Binding {
 		binds = append(binds, kQuit)
 		return binds
 	case changePwStepWorking:
-		return []key.Binding{kQuit}
+		bindings := []key.Binding{kSidebar}
+		if s.ctx.HasTabs {
+			bindings = append(bindings, kShiftTabBar)
+		}
+		return append(bindings, kQuit)
 	case changePwStepResult:
 		return resultBindings(s.ctx.HasTabs)
 	}
@@ -306,7 +295,7 @@ func (s *ChangePasswordScreen) handleInputKey(
 		if s.focusZone == changePwZoneButtons {
 			switch s.btnIdx {
 			case 0: // Cancel
-				return s, emitCloseTab
+				return s, s.closeCommand()
 			case 1: // Change
 				return s.submit()
 			}
@@ -333,8 +322,7 @@ func (s *ChangePasswordScreen) handleInputKey(
 }
 
 func (s *ChangePasswordScreen) submit() (Screen, tea.Cmd) {
-	if s.loadErr != "" {
-		s.inputErr = s.loadErr
+	if s.step != changePwStepInput {
 		return s, nil
 	}
 	newPw := s.newInput.Value()
@@ -348,11 +336,8 @@ func (s *ChangePasswordScreen) submit() (Screen, tea.Cmd) {
 		s.inputErr = "Passwords do not match"
 		return s, nil
 	}
-	// Validation policy (minimum length, no newline)
-	// lives in the constructor, shared with the
-	// privileged boundary — this screen just surfaces
-	// its error.
-	pw, err := installer.NewLoginPassword(newPw)
+	// Share password validation with installation and the helper boundary.
+	pw, err := loginpassword.New(newPw)
 	if err != nil {
 		s.inputErr = err.Error()
 		return s, nil
@@ -360,7 +345,14 @@ func (s *ChangePasswordScreen) submit() (Screen, tea.Cmd) {
 
 	s.inputErr = ""
 	s.step = changePwStepWorking
-	return s, setUserPasswordCmd(s.username, pw)
+	s.attempt++
+	attempt := s.attempt
+	results := s.ctx.loginPasswords().Change(pw)
+	s.newInput.Reset()
+	s.confInput.Reset()
+	return s, func() tea.Msg {
+		return changePwDoneMsg{owner: s, attempt: attempt, result: <-results}
+	}
 }
 
 func (s *ChangePasswordScreen) viewInput(w, h int) string {
@@ -368,24 +360,17 @@ func (s *ChangePasswordScreen) viewInput(w, h int) string {
 	p.title(theme.Header, "Change Login Password")
 	p.blank()
 
-	if s.loadErr != "" {
-		p.warn(s.loadErr)
-		return p.renderWithBottomButtons(
-			[]string{"Cancel"}, 0,
-			s.ctx.ContentFocused, h)
-	}
-
-	p.field("User:        ", s.username)
+	p.field("User:        ", paths.AdminUser)
 	p.blank()
 
 	p.dim("Use a password manager to generate and")
 	p.dim("store a strong password. Save it there")
-	p.dim("before submitting — this screen will not")
+	p.dim("before submitting. This screen will not")
 	p.dim("show it back to you.")
 	p.blank()
 	p.dim("Minimum length: " +
-		strconv.Itoa(installer.MinLoginPasswordLen) +
-		" characters.")
+		strconv.Itoa(loginpassword.MinLength) +
+		" bytes.")
 	p.blank()
 
 	isFocused := s.ctx.ContentFocused
@@ -394,17 +379,15 @@ func (s *ChangePasswordScreen) viewInput(w, h int) string {
 	confFocused := isFocused &&
 		s.focusZone == changePwZoneInputConfirm
 
-	// Live character count on both masked inputs (ruling xii:
-	// IA-3-U accepted — paste-overrun recovery outweighs the
-	// length leak; same treatment as auto_unlock's inputs).
+	// Match the shared validation length without revealing the masked value.
 	p.input("New Password:", s.newInput.View(), newFocused)
 	if len(s.newInput.Value()) > 0 {
-		p.dim(fmt.Sprintf("(%d chars)",
+		p.dim(fmt.Sprintf("(%d bytes)",
 			len(s.newInput.Value())))
 	}
 	p.input("Confirm:     ", s.confInput.View(), confFocused)
 	if len(s.confInput.Value()) > 0 {
-		p.dim(fmt.Sprintf("(%d chars)",
+		p.dim(fmt.Sprintf("(%d bytes)",
 			len(s.confInput.Value())))
 	}
 
@@ -426,6 +409,8 @@ func (s *ChangePasswordScreen) viewWorking(
 	p.title(theme.Header, "Changing password...")
 	p.blank()
 	p.line(" " + theme.Value.Render("Working..."))
+	p.dim("Closing the TUI does not cancel a change")
+	p.dim("already accepted by the helper.")
 	return p.renderWithBottomButtons(
 		[]string{"Working..."}, 0, false, h)
 }
@@ -439,7 +424,7 @@ func (s *ChangePasswordScreen) handleResultKey(
 	case "ctrl+c":
 		return s, tea.Quit
 	case "enter":
-		return s, emitCloseTab
+		return s, s.closeCommand()
 	case "left":
 		return s, emitFocusSidebar
 	case "up", "shift+tab":
@@ -457,15 +442,23 @@ func (s *ChangePasswordScreen) viewResult(
 ) string {
 	p := newPane(w)
 
-	if s.resultErr != "" {
-		p.title(theme.Warning, "Error")
-		p.warnWrap(s.resultErr)
-	} else {
-		p.title(theme.Success,
-			"Password changed successfully")
+	switch s.result.Outcome {
+	case app.LoginPasswordChanged:
+		p.title(theme.Success, "Password changed successfully")
 		p.blank()
 		p.dim("Make sure your password manager has")
 		p.dim("the new value saved.")
+	case app.LoginPasswordNotChanged:
+		p.title(theme.Warning, "Password not changed")
+		if s.result.Err != nil {
+			p.warnWrap(s.result.Err.Error())
+		}
+	default:
+		p.title(theme.Warning, "Password change not confirmed")
+		p.warnWrap("The password may have changed, and the request may still complete. Keep this session open. Verify the helper has finished, then check access from another login or console before changing it again.")
+		if s.result.Err != nil {
+			p.appendError(s.result.Err.Error())
+		}
 	}
 
 	return p.renderWithBottomButtons(

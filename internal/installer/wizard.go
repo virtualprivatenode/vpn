@@ -35,6 +35,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -575,7 +576,7 @@ func (m wizardModel) updatePassword(
 			m.pwErr = "Passwords do not match."
 			return m, nil
 		}
-		pw, err := NewLoginPassword(m.pwInput.Value())
+		pw, err := loginpassword.New(m.pwInput.Value())
 		if err != nil {
 			m.pwErr = err.Error() + "."
 			return m, nil
@@ -644,7 +645,7 @@ func (m wizardModel) viewPassword(p *wizPane) {
 	p.blank()
 	p.text("Use a password manager: generate it, store it " +
 		"there first. Minimum " +
-		fmt.Sprintf("%d", MinLoginPasswordLen) + " characters.")
+		fmt.Sprintf("%d", loginpassword.MinLength) + " bytes.")
 	p.blank()
 
 	p.input("Password:", m.pwInput.View(), m.pwFocus == 0)
