@@ -12,6 +12,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 )
 
 // Every verb on the menu carries a deadline: an operation with
@@ -359,6 +360,9 @@ func TestDirSizeValidation(t *testing.T) {
 }
 
 func TestSetUserPasswordValidation(t *testing.T) {
+	old := setLoginPassword
+	t.Cleanup(func() { setLoginPassword = old })
+	setLoginPassword = func(loginpassword.Password) error { t.Fatal("invalid request reached host operation"); return nil }
 	ctx := &verbCtx{}
 	long := strings.Repeat("a", 20)
 	cases := []helper.SetUserPasswordParams{
@@ -367,6 +371,7 @@ func TestSetUserPasswordValidation(t *testing.T) {
 		{User: "", Password: long},
 		{User: "vpn", Password: "short"}, // under the minimum
 		{User: "vpn", Password: "with\nnl" + long},
+		{User: "vpn", Password: long + "\x00suffix"},
 		{User: "vpn", Password: ""},
 	}
 	for _, c := range cases {
@@ -467,5 +472,34 @@ func TestDecodeStrict(t *testing.T) {
 	if err := decode(json.RawMessage(
 		`{"password_auth_disabled":true}`), &p); err != nil {
 		t.Errorf("rejected valid params: %v", err)
+	}
+}
+
+func TestLoginPasswordMarkerFollowsConfirmedChange(t *testing.T) {
+	oldSet, oldClear := setLoginPassword, clearPasswordPendingMarker
+	t.Cleanup(func() { setLoginPassword, clearPasswordPendingMarker = oldSet, oldClear })
+	for _, tc := range []struct {
+		name             string
+		setErr, clearErr error
+		cleared          bool
+	}{
+		{"success", nil, nil, true},
+		{"unconfirmed change", errors.New("process failed"), nil, false},
+		{"cleanup failure after success", nil, errors.New("remove failed"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cleared := false
+			setLoginPassword = func(p loginpassword.Password) error {
+				if p.Text() != "test password for marker" {
+					t.Error("password altered at helper boundary")
+				}
+				return tc.setErr
+			}
+			clearPasswordPendingMarker = func() error { cleared = true; return tc.clearErr }
+			_, err := verbSetUserPassword(&verbCtx{}, raw(t, helper.SetUserPasswordParams{User: "vpn", Password: "test password for marker"}))
+			if (err != nil) != (tc.setErr != nil) || cleared != tc.cleared {
+				t.Fatalf("changed password and marker outcome conflated: %v", err)
+			}
+		})
 	}
 }

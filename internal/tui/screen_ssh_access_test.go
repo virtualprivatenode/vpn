@@ -205,7 +205,7 @@ func TestSSHKeyTabsUseFingerprintAndRouteRemovalToOwner(t *testing.T) {
 
 func TestSSHBusyTabsSurviveCloseParentAndReplacement(t *testing.T) {
 	ctx, _ := sshScreenContext(t)
-	for _, screen := range []Screen{&SSHKeyAddScreen{ctx: ctx, step: sshAddStepWorking}, &SSHKeyDetailScreen{ctx: ctx, step: sshKeyDetailStepWorking}, &SSHPasswordAuthScreen{ctx: ctx, step: sshPwAuthStepWorking}} {
+	for _, screen := range []Screen{&ChangePasswordScreen{ctx: ctx, step: changePwStepWorking}, &SSHKeyAddScreen{ctx: ctx, step: sshAddStepWorking}, &SSHKeyDetailScreen{ctx: ctx, step: sshKeyDetailStepWorking}, &SSHPasswordAuthScreen{ctx: ctx, step: sshPwAuthStepWorking}} {
 		parent := NewSSHKeysScreen(ctx)
 		m := Model{nav: NewNavSidebar(), screenCtx: ctx, state: ctx.State, tabs: []openTab{{Kind: tabSSHKeys, Section: secSystem, Screen: parent}, {Kind: tabSSHKeyAdd, Section: secSystem, Parent: tabSSHKeys, Screen: screen}}}
 		m.nav.ActiveItem = secSystem

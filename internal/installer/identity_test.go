@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
 
@@ -121,7 +122,7 @@ func TestGenerateAdminPassword(t *testing.T) {
 	}
 	// The generated fallback must satisfy the same policy the
 	// interactive prompt enforces.
-	if _, err := NewLoginPassword(pw); err != nil {
+	if _, err := loginpassword.New(pw); err != nil {
 		t.Errorf("generated password fails validation: %v", err)
 	}
 	// Two draws must differ (sanity, not a randomness test).

@@ -602,7 +602,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case changePwDoneMsg:
-		return m.dispatchToTab(tabSSHChangePassword, msg)
+		return m.routeSSHResult(msg.owner, msg)
+	case closeLoginPasswordMsg:
+		if msg.owner == nil || msg.owner.attempt != msg.attempt || sshAccessBusy(msg.owner) {
+			return m, nil
+		}
+		return m.closeScreenTab(msg.owner)
 	case walletLNDReadyMsg:
 		return m.routeWalletCreation(msg.owner, msg)
 	case walletExecDoneMsg:

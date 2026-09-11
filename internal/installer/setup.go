@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -306,8 +308,7 @@ func RunInstall(opts InstallOptions) error {
 			// ledger-skipped the identity step. Re-apply THIS
 			// pass's generated password now, so the line printed
 			// below is one that works.
-			if err := SetUserPassword(
-				paths.AdminUser, dec.Password); err != nil {
+			if err := host.SetLoginPassword(dec.Password); err != nil {
 				return fmt.Errorf(
 					"re-apply admin password: %w", err)
 			}
@@ -487,7 +488,7 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 	if err != nil {
 		return err
 	}
-	pw, err := NewLoginPassword(gen)
+	pw, err := loginpassword.New(gen)
 	if err != nil {
 		return err
 	}

@@ -33,7 +33,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -164,9 +166,8 @@ type InstallDecisions struct {
 	// Empty means password-only access (operator's explicit
 	// choice, or nothing found under --unattended).
 	Keys []sshkeys.Key
-	// Password is the admin login password (validated at
-	// construction; 16-char minimum from commit 3).
-	Password LoginPassword
+	// Password is validated using the shared login-password policy.
+	Password loginpassword.Password
 	// GeneratedPassword is set only on the --unattended path
 	// (ruling vii: random generation survives only there);
 	// printed once at the end of the run, never logged.
@@ -257,8 +258,7 @@ func applyIdentityAccess(dec *InstallDecisions) error {
 			"admin access: no SSH keys configured (password login)")
 	}
 
-	if err := SetUserPassword(
-		paths.AdminUser, dec.Password); err != nil {
+	if err := host.SetLoginPassword(dec.Password); err != nil {
 		return fmt.Errorf("set admin password: %w", err)
 	}
 	dec.PasswordApplied = true

@@ -126,10 +126,8 @@ type DirSizeResult struct {
 	Size string `json:"size"`
 }
 
-// SetUserPasswordParams: change a login password. User must be
-// the admin user — no other account's password is manageable
-// through the helper. The password is re-validated root-side
-// against the same 16-character rule the client enforces.
+// SetUserPasswordParams changes only the vpn operator password. The helper
+// enforces the same loginpassword validation as installation and the TUI.
 type SetUserPasswordParams struct {
 	User     string `json:"user"`
 	Password string `json:"password"`
