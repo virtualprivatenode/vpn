@@ -475,7 +475,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case coTxListMsg:
 		return m.dispatchToTab(tabOpenChannel, msg)
 	case newAddressMsg:
-		return m.dispatchToTab(tabOCReceive, msg)
+		for _, tab := range m.tabs {
+			if msg.owner != nil && tab.Screen == msg.owner {
+				_, cmd := msg.owner.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
+	case receiveAddressQRMsg:
+		tabs := m.effectiveTabs()
+		if msg.owner == nil || m.activeTab <= 0 || m.activeTab >= len(tabs) ||
+			tabs[m.activeTab].Screen != msg.owner || msg.owner.attempt != msg.attempt ||
+			msg.owner.requesting || msg.owner.address == "" {
+			return m, nil
+		}
+		m.subview = svQR
+		m.urlTarget = msg.owner.address
+		m.qrLabel = "On-Chain Address"
+		return m, nil
 	case invoiceCreatedMsg:
 		return m.dispatchToTab(tabReceive, msg)
 	case invoiceCheckMsg, invoiceStatusMsg:

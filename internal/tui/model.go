@@ -153,8 +153,14 @@ type channelOpenResultMsg struct {
 	result  app.ChannelOpenResult
 }
 type newAddressMsg struct {
-	address string
+	owner   *OCReceiveScreen
+	attempt uint64
+	address app.OnChainReceiveAddress
 	err     error
+}
+type receiveAddressQRMsg struct {
+	owner   *OCReceiveScreen
+	attempt uint64
 }
 type invoiceCreatedMsg struct {
 	attempt *invoiceAttempt
