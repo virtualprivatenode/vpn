@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
@@ -51,6 +52,7 @@ type Screen interface {
 // chain — zero refresh plumbing.
 
 type ScreenContext struct {
+	AutoUnlock          autoUnlockChanges
 	LoginPasswords      loginPasswordChanges
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
@@ -222,4 +224,17 @@ func (c *ScreenContext) sshAccess() *app.SSHAccess {
 		return c.SSHAccess
 	}
 	return app.NewSSHAccess()
+}
+
+type autoUnlockChanges interface {
+	Enable(autounlock.Password) <-chan app.AutoUnlockResult
+	Disable() <-chan app.AutoUnlockResult
+	Close()
+}
+
+func (c *ScreenContext) autoUnlock() autoUnlockChanges {
+	if c.AutoUnlock == nil {
+		c.AutoUnlock = app.NewAutoUnlockChanges()
+	}
+	return c.AutoUnlock
 }

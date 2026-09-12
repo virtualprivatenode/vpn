@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/host"
@@ -79,8 +80,8 @@ var (
 	clearPasswordPendingMarker   = host.ClearPasswordPendingMarker
 	loadSystemConfig             = config.Load
 	saveSystemConfig             = config.Save
-	setupAutoUnlock              = installer.SetupAutoUnlock
-	disableAutoUnlock            = installer.DisableAutoUnlock
+	setupAutoUnlock              = host.SetupAutoUnlock
+	disableAutoUnlock            = host.DisableAutoUnlock
 	publicIPv4                   = system.PublicIPv4
 	p2pUpgradeSteps              = installer.UpgradeP2PToHybridSteps
 	syncthingInstallSteps        = installer.SyncthingInstallSteps
@@ -247,31 +248,16 @@ func verbSetUserPassword(_ *verbCtx, params json.RawMessage) (any, error) {
 	return nil, nil
 }
 
-// validateWalletPassword bounds the auto-unlock payload. LND
-// enforces its own minimum at wallet creation; here we only
-// refuse shapes that would corrupt the password file protocol.
-func validateWalletPassword(pw string) error {
-	if pw == "" {
-		return errors.New("wallet password is empty")
-	}
-	if len(pw) > 512 {
-		return errors.New("wallet password is implausibly long")
-	}
-	if strings.ContainsAny(pw, "\n\r") {
-		return errors.New("wallet password has a line break")
-	}
-	return nil
-}
-
 func verbStageWalletPassword(_ *verbCtx, params json.RawMessage) (any, error) {
 	var p helper.StageWalletPasswordParams
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	if err := validateWalletPassword(p.Password); err != nil {
+	password, err := autounlock.NewPassword(p.Password)
+	if err != nil {
 		return nil, err
 	}
-	return setupAutoUnlock(p.Password)
+	return setupAutoUnlock(password)
 }
 
 func verbRemoveWalletPassword(_ *verbCtx, _ json.RawMessage) (any, error) {

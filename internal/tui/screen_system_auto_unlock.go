@@ -8,33 +8,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
-
-// ── AutoUnlockScreen ──────────────────────────────────
-// Standalone screen for configuring LND auto-unlock.
-// Two modes, determined by current cfg.AutoUnlock state
-// at construction:
-//
-//   enable mode  — cfg.AutoUnlock == false
-//                  Two masked password inputs + Confirm
-//                  button. SetupAutoUnlock writes the
-//                  wallet password file and rewrites
-//                  the LND service.
-//
-//   disable mode — cfg.AutoUnlock == true
-//                  Single confirm screen. DisableAutoUnlock
-//                  removes the password file and reverts
-//                  the LND service to its initial form.
-//
-// Entry points:
-//   1. 'u' hotkey on the LND service row in System home
-//   2. Auto-launched after wallet creation completes
-//      (stage 2; the wallet creation flow swaps its tab
-//      into this screen via the wallet finalization handler
-//      in update.go)
 
 type autoUnlockMode int
 
@@ -46,10 +24,10 @@ const (
 type autoUnlockState int
 
 const (
-	auState_form    autoUnlockState = iota // entering passwords / confirm
-	auState_running                        // installer call in flight
-	auState_doneOK                         // success — Done button
-	auState_doneErr                        // failure — Done button + error
+	auStateForm    autoUnlockState = iota // entering passwords / confirm
+	auStateRunning                        // application observation in flight
+	auStateDoneOK                         // completed host result
+	auStateDoneErr                        // failed or unknown result
 )
 
 const (
@@ -58,36 +36,39 @@ const (
 	auZoneButtons = 2 // Cancel/Confirm buttons
 )
 
-// Messages emitted by the auto-unlock command runners.
-// Both unique to this screen so they don't collide with
-// any other async flow.
-type autoUnlockSetupDoneMsg struct {
-	result installer.AutoUnlockResult
-	err    error
-}
-type autoUnlockDisableDoneMsg struct {
-	result installer.AutoUnlockResult
-	err    error
+type autoUnlockDoneMsg struct {
+	owner   *AutoUnlockScreen
+	attempt uint64
+	result  app.AutoUnlockResult
 }
 
+type closeAutoUnlockMsg struct {
+	owner   *AutoUnlockScreen
+	attempt uint64
+}
+
+// AutoUnlockScreen owns password input, confirmation and the result of one
+// enable/disable attempt. The application observes the independent root change.
 type AutoUnlockScreen struct {
-	ctx  *ScreenContext
-	mode autoUnlockMode
+	ctx         *ScreenContext
+	mode        autoUnlockMode
+	attempt     uint64
+	observation app.AutoUnlockObservation
 
 	// Form / interaction state
 	state     autoUnlockState
 	focusZone int
 	btnIdx    int // 0 = Cancel/Skip, 1 = Confirm/Disable
 
-	// Enable mode — two masked inputs
+	// Enable mode uses two masked password inputs.
 	pw1 textinput.Model
 	pw2 textinput.Model
 
 	// Inline error string (e.g. "Passwords do not match")
 	errMsg string
 
-	// Final classified result of installer call (after running).
-	result installer.AutoUnlockResult
+	// Final verified host result, available only after successful observation.
+	result autounlock.Result
 }
 
 func NewAutoUnlockScreen(
@@ -101,7 +82,7 @@ func NewAutoUnlockScreen(
 	s := &AutoUnlockScreen{
 		ctx:    ctx,
 		mode:   mode,
-		state:  auState_form,
+		state:  auStateForm,
 		btnIdx: 1, // default focus on Confirm
 	}
 
@@ -143,20 +124,26 @@ func (s *AutoUnlockScreen) Init() tea.Cmd {
 func (s *AutoUnlockScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// Running state: block all keys (background work
-	// in flight). Mirrors InstallProgressScreen behavior.
-	if s.state == auState_running {
-		if keyStr == "ctrl+c" {
+	// Navigation keeps the owning tab reachable while the operation runs.
+	if s.state == auStateRunning {
+		switch keyStr {
+		case "ctrl+c":
 			return s, tea.Quit
+		case "left":
+			return s, emitFocusSidebar
+		case "up", "shift+tab":
+			if s.ctx.HasTabs {
+				return s, emitFocusTabBar
+			}
 		}
 		return s, nil
 	}
 
 	// Done states
-	if s.state == auState_doneOK ||
-		s.state == auState_doneErr {
-		if s.state == auState_doneOK &&
-			s.result.Outcome == installer.AutoUnlockDisabled {
+	if s.state == auStateDoneOK ||
+		s.state == auStateDoneErr {
+		if s.state == auStateDoneOK &&
+			s.result.Outcome == autounlock.Disabled {
 			switch keyStr {
 			case "ctrl+c":
 				return s, tea.Quit
@@ -176,7 +163,7 @@ func (s *AutoUnlockScreen) HandleKey(
 					s.resetToEnableForm()
 					return s, s.pw1.Focus()
 				}
-				return s, emitCloseTab
+				return s, s.closeCommand()
 			case "up", "shift+tab":
 				if s.ctx.HasTabs {
 					return s, emitFocusTabBar
@@ -190,7 +177,7 @@ func (s *AutoUnlockScreen) HandleKey(
 		case "ctrl+c":
 			return s, tea.Quit
 		case "enter":
-			return s, emitCloseTab
+			return s, s.closeCommand()
 		case "left":
 			return s, emitFocusSidebar
 		case "up", "shift+tab":
@@ -203,7 +190,7 @@ func (s *AutoUnlockScreen) HandleKey(
 		return s, nil
 	}
 
-	// Form state — split by mode
+	// Form state is determined by the current setting.
 	if s.mode == autoUnlockDisable {
 		return s.handleDisableKey(keyStr, msg)
 	}
@@ -211,7 +198,7 @@ func (s *AutoUnlockScreen) HandleKey(
 }
 
 // ── Disable mode key handling ───────────────────────────
-// No inputs — focus is always on the buttons.
+// Disable mode has no inputs; focus stays on the buttons.
 
 func (s *AutoUnlockScreen) handleDisableKey(
 	keyStr string, msg tea.KeyPressMsg,
@@ -237,11 +224,10 @@ func (s *AutoUnlockScreen) handleDisableKey(
 		return s, nil
 	case "enter":
 		if s.btnIdx == 0 {
-			return s, emitCloseTab
+			return s, s.closeCommand()
 		}
 		// Disable
-		s.state = auState_running
-		return s, disableAutoUnlockCmd()
+		return s, s.startOperation(autounlock.Password{})
 	case "backspace":
 		return s, emitFocusParent
 	}
@@ -354,7 +340,7 @@ func (s *AutoUnlockScreen) handleEnableKey(
 		}
 		// Buttons zone
 		if s.btnIdx == 0 {
-			return s, emitCloseTab
+			return s, s.closeCommand()
 		}
 		return s.tryConfirm()
 
@@ -365,7 +351,7 @@ func (s *AutoUnlockScreen) handleEnableKey(
 
 // passthroughInput forwards a key press to whichever
 // input currently has focus. Returns the resulting cmd.
-// Also clears any existing error message — the user is
+// Clear the prior error because the user is
 // editing, so the error is no longer current.
 func (s *AutoUnlockScreen) passthroughInput(
 	msg tea.KeyPressMsg,
@@ -382,12 +368,15 @@ func (s *AutoUnlockScreen) passthroughInput(
 }
 
 // tryConfirm validates the two password inputs and, if
-// they pass, kicks off the SetupAutoUnlock command. On
+// they pass, starts the owned application operation. On
 // validation failure, sets errMsg and refocuses the
 // first input.
 func (s *AutoUnlockScreen) tryConfirm() (
 	Screen, tea.Cmd,
 ) {
+	if s.state != auStateForm {
+		return s, nil
+	}
 	pw1 := s.pw1.Value()
 	pw2 := s.pw2.Value()
 
@@ -404,9 +393,13 @@ func (s *AutoUnlockScreen) tryConfirm() (
 		return s, nil
 	}
 
-	s.state = auState_running
-	s.errMsg = ""
-	return s, setupAutoUnlockCmd(pw1)
+	password, err := autounlock.NewPassword(pw1)
+	if err != nil {
+		s.errMsg = err.Error()
+		s.refocusFirstInput()
+		return s, nil
+	}
+	return s, s.startOperation(password)
 }
 
 func (s *AutoUnlockScreen) refocusFirstInput() {
@@ -416,9 +409,10 @@ func (s *AutoUnlockScreen) refocusFirstInput() {
 }
 
 func (s *AutoUnlockScreen) resetToEnableForm() {
+	s.attempt++
 	s.mode = autoUnlockEnable
-	s.state = auState_form
-	s.result = installer.AutoUnlockResult{}
+	s.state = auStateForm
+	s.result = autounlock.Result{}
 	s.errMsg = ""
 	s.pw1 = newAutoUnlockPwInput()
 	s.pw2 = newAutoUnlockPwInput()
@@ -433,101 +427,101 @@ func (s *AutoUnlockScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch m := msg.(type) {
-	case autoUnlockSetupDoneMsg:
-		if m.err != nil {
-			logger.TUI("configure auto-unlock helper: %v", m.err)
-			s.state = auState_doneErr
-			s.result = installer.AutoUnlockResult{
-				Outcome:    installer.AutoUnlockRepairRequired,
-				FailedStep: "complete privileged operation",
+	case autoUnlockDoneMsg:
+		if m.owner != s || m.attempt != s.attempt || s.state != auStateRunning {
+			return s, nil
+		}
+		s.observation = m.result.Observation
+		s.result = m.result.Transition
+		if m.result.Observation != app.AutoUnlockObserved {
+			s.state = auStateDoneErr
+			if m.result.Err != nil {
+				logger.TUI("auto-unlock observation: %v", m.result.Err)
+			}
+			if m.result.Observation == app.AutoUnlockNotStarted && m.result.Err != nil {
+				s.errMsg = m.result.Err.Error()
 			}
 			return s, nil
 		}
-		s.result = m.result
-		switch m.result.Outcome {
-		case installer.AutoUnlockEnabled:
+		switch s.result.Outcome {
+		case autounlock.Enabled, autounlock.StillEnabled:
 			s.ctx.Cfg.AutoUnlock = true
-			s.state = auState_doneOK
+			s.state = auStateDoneOK
 			return s, func() tea.Msg { return refreshStatusMsg{} }
-		case installer.AutoUnlockVerificationFailed:
-			s.state = auState_form
-			s.pw1.SetValue("")
-			s.pw2.SetValue("")
+		case autounlock.Disabled:
+			s.ctx.Cfg.AutoUnlock = false
+			s.state = auStateDoneOK
+			s.btnIdx = 0
+			return s, func() tea.Msg { return refreshStatusMsg{} }
+		case autounlock.VerificationFailed, autounlock.VerificationTimedOut:
+			s.state = auStateForm
 			s.refocusFirstInput()
-			if m.result.Detail != "" {
-				s.errMsg = m.result.Detail
+			if s.result.Outcome == autounlock.VerificationTimedOut {
+				s.errMsg = "LND did not become ready within 120 seconds. VPN could not determine whether the password was correct. LND has been returned to the locked state."
+			} else if s.result.Detail != "" {
+				s.errMsg = s.result.Detail
 			} else {
 				s.errMsg = "VPN could not verify that password. LND is locked. Check the password and try again."
 			}
-			return s, nil
-		case installer.AutoUnlockVerificationTimedOut:
-			s.state = auState_form
-			s.pw1.SetValue("")
-			s.pw2.SetValue("")
-			s.refocusFirstInput()
-			s.errMsg = "LND did not become ready within 120 seconds. VPN could not determine whether the password was correct. LND has been returned to the locked state."
-			return s, nil
 		default:
-			s.state = auState_doneErr
-			return s, nil
+			s.state = auStateDoneErr
 		}
-	case autoUnlockDisableDoneMsg:
-		if m.err != nil {
-			logger.TUI("disable auto-unlock helper: %v", m.err)
-			s.state = auState_doneErr
-			s.result = installer.AutoUnlockResult{
-				Outcome:    installer.AutoUnlockRepairRequired,
-				FailedStep: "complete privileged operation",
-			}
-			return s, nil
-		}
-		s.result = m.result
-		switch m.result.Outcome {
-		case installer.AutoUnlockDisabled:
-			s.ctx.Cfg.AutoUnlock = false
-			s.state = auState_doneOK
-			s.btnIdx = 0
-			return s, func() tea.Msg { return refreshStatusMsg{} }
-		case installer.AutoUnlockStillEnabled:
-			s.ctx.Cfg.AutoUnlock = true
-			s.state = auState_doneOK
-			return s, func() tea.Msg { return refreshStatusMsg{} }
-		default:
-			s.state = auState_doneErr
-			return s, nil
-		}
+		return s, nil
 	case tea.PasteMsg:
 		if s.mode != autoUnlockEnable ||
-			s.state != auState_form {
+			s.state != auStateForm {
 			return s, nil
 		}
-		val := strings.TrimSuffix(
-			string(m.Content), "\n")
+		// Only the password manager's one trailing LF may be removed. Compare
+		// the original value with the widget result before accepting masked input.
+		value := strings.TrimSuffix(m.Content, "\n")
+		var input *textinput.Model
 		switch s.focusZone {
 		case auZoneInput1:
-			s.pw1.SetValue(val)
+			input = &s.pw1
 		case auZoneInput2:
-			s.pw2.SetValue(val)
+			input = &s.pw2
+		default:
+			return s, nil
 		}
+		input.SetValue(value)
+		if input.Value() != value {
+			input.Reset()
+			s.errMsg = "Paste rejected and field cleared: unsupported characters or more than 256 characters"
+		} else {
+			s.errMsg = ""
+		}
+
 		return s, nil
 	}
 	return s, nil
 }
 
-// ── tea.Cmd factories ───────────────────────────────────
-
-func setupAutoUnlockCmd(password string) tea.Cmd {
-	return func() tea.Msg {
-		result, err := installer.SetupAutoUnlock(password)
-		return autoUnlockSetupDoneMsg{result: result, err: err}
+func (s *AutoUnlockScreen) startOperation(password autounlock.Password) tea.Cmd {
+	s.state = auStateRunning
+	s.attempt++
+	s.errMsg = ""
+	s.result = autounlock.Result{}
+	s.pw1.Reset()
+	s.pw2.Reset()
+	var results <-chan app.AutoUnlockResult
+	if s.mode == autoUnlockEnable {
+		results = s.ctx.autoUnlock().Enable(password)
+	} else {
+		results = s.ctx.autoUnlock().Disable()
 	}
+	attempt := s.attempt
+	return func() tea.Msg { return autoUnlockDoneMsg{owner: s, attempt: attempt, result: <-results} }
 }
 
-func disableAutoUnlockCmd() tea.Cmd {
-	return func() tea.Msg {
-		result, err := installer.DisableAutoUnlock()
-		return autoUnlockDisableDoneMsg{result: result, err: err}
-	}
+func (s *AutoUnlockScreen) closeCommand() tea.Cmd {
+	attempt := s.attempt
+	return func() tea.Msg { return closeAutoUnlockMsg{owner: s, attempt: attempt} }
+}
+
+func autoUnlockBusy(screen Screen) bool {
+	s, ok := screen.(*AutoUnlockScreen)
+	return ok && s.state == auStateRunning
 }
 
 // ── View ────────────────────────────────────────────────
@@ -536,11 +530,11 @@ func (s *AutoUnlockScreen) View(
 	w, h int,
 ) string {
 	switch s.state {
-	case auState_running:
+	case auStateRunning:
 		return s.viewRunning(w, h)
-	case auState_doneOK:
+	case auStateDoneOK:
 		return s.viewDone(w, h)
-	case auState_doneErr:
+	case auStateDoneErr:
 		return s.viewError(w, h)
 	}
 	if s.mode == autoUnlockDisable {
@@ -668,7 +662,7 @@ func (s *AutoUnlockScreen) viewDone(
 	isFocused := s.ctx.ContentFocused
 	p := newPane(w)
 
-	if s.result.Outcome == installer.AutoUnlockStillEnabled {
+	if s.result.Outcome == autounlock.StillEnabled {
 		p.title(theme.Header,
 			"Auto-Unlock Still Enabled")
 		p.line(" " + theme.Warning.Render(
@@ -703,7 +697,7 @@ func (s *AutoUnlockScreen) viewDone(
 	}
 
 	buttons := []string{"Done"}
-	if s.result.Outcome == installer.AutoUnlockDisabled {
+	if s.result.Outcome == autounlock.Disabled {
 		buttons = []string{"Done", "Re-enable"}
 	}
 	return p.renderWithBottomButtons(
@@ -716,12 +710,23 @@ func (s *AutoUnlockScreen) viewError(
 	isFocused := s.ctx.ContentFocused
 	p := newPane(w)
 
-	p.title(theme.Header, "Repair Required")
-	p.blank()
-	p.warnWrap("VPN could not prove the auto-unlock state due to a system failure. Do not assume LND is online or that auto-unlock is correctly configured.")
-	if s.result.FailedStep != "" {
+	switch s.observation {
+	case app.AutoUnlockUnknown:
+		p.title(theme.Header, "Auto-Unlock Change Not Confirmed")
 		p.blank()
-		p.warnWrap("Failed step: " + s.result.FailedStep)
+		p.warnWrap("The change may have completed, or the helper may still finish it. Do not assume LND is online or that auto-unlock is correctly configured. Have your administrator check the final state before retrying.")
+	case app.AutoUnlockNotStarted:
+		p.title(theme.Header, "Auto-Unlock Change Not Started")
+		p.blank()
+		p.warnWrap("The request was not sent to the helper. Reopen the TUI before trying again.")
+	default:
+		p.title(theme.Header, "Repair Required")
+		p.blank()
+		p.warnWrap("VPN could not prove the auto-unlock state due to a system failure. Do not assume LND is online or that auto-unlock is correctly configured.")
+		if s.result.FailedStep != "" {
+			p.blank()
+			p.warnWrap("Failed step: " + s.result.FailedStep)
+		}
 	}
 
 	return p.renderWithBottomButtons(
@@ -731,13 +736,17 @@ func (s *AutoUnlockScreen) viewError(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *AutoUnlockScreen) HelpBindings() []key.Binding {
-	if s.state == auState_running {
-		return []key.Binding{kQuit}
+	if s.state == auStateRunning {
+		bindings := []key.Binding{kSidebar}
+		if s.ctx.HasTabs {
+			bindings = append(bindings, kShiftTabBar)
+		}
+		return append(bindings, kQuit)
 	}
-	if s.state == auState_doneOK ||
-		s.state == auState_doneErr {
-		if s.state == auState_doneOK &&
-			s.result.Outcome == installer.AutoUnlockDisabled {
+	if s.state == auStateDoneOK ||
+		s.state == auStateDoneErr {
+		if s.state == auStateDoneOK &&
+			s.result.Outcome == autounlock.Disabled {
 			return actionButtonBindings(s.btnIdx, s.ctx.HasTabs)
 		}
 		return resultBindings(s.ctx.HasTabs)

@@ -142,31 +142,6 @@ type StageWalletPasswordParams struct {
 	Password string `json:"password"`
 }
 
-// AutoUnlockOutcome is the classified end state of an auto-unlock change.
-// Helper transport success means the root side finished observing and
-// classifying the node; the outcome says whether the requested setting was
-// applied, safely rolled back, or needs operator repair. Keeping these states
-// structured prevents the TUI from parsing privileged error text.
-type AutoUnlockOutcome string
-
-const (
-	AutoUnlockEnabled              AutoUnlockOutcome = "enabled"
-	AutoUnlockDisabled             AutoUnlockOutcome = "disabled"
-	AutoUnlockVerificationFailed   AutoUnlockOutcome = "verification_failed"
-	AutoUnlockVerificationTimedOut AutoUnlockOutcome = "verification_timed_out"
-	AutoUnlockStillEnabled         AutoUnlockOutcome = "still_enabled"
-	AutoUnlockRepairRequired       AutoUnlockOutcome = "repair_required"
-)
-
-// AutoUnlockResult carries no credential material. FailedStep is a bounded,
-// operator-facing stage name for logs and the repair-required screen; Detail
-// is used only for a safely classified retry state.
-type AutoUnlockResult struct {
-	Outcome    AutoUnlockOutcome `json:"outcome"`
-	FailedStep string            `json:"failed_step,omitempty"`
-	Detail     string            `json:"detail,omitempty"`
-}
-
 // RebuildSSHConfigParams: rewrite the SSH hardening drop-in.
 // The template lives on the root side; the only caller-chosen
 // value is the password-auth flag.

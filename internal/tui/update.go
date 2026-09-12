@@ -238,10 +238,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshStatusMsg:
 		return m, fetchStatus(m.cfg, m.state, m.lndClient)
 	case openTabMsg:
-		if msg.Kind == tabWalletCreate {
-			// One wallet belongs to this node, even when opened from another section.
+		walletKind := msg.Kind
+		if walletKind == tabAutoUnlock && m.screenCtx.walletCreationOwner != nil {
+			// A created wallet can still need acknowledgement or credential staging.
+			// Finish that owning flow before opening its auto-unlock successor.
+			walletKind = tabWalletCreate
+		}
+		if walletKind == tabWalletCreate || walletKind == tabAutoUnlock {
+			// Each wallet workflow retains one owning tab across all entry sections.
 			for _, tab := range m.tabs {
-				if tab.Kind != tabWalletCreate {
+				if tab.Kind != walletKind {
 					continue
 				}
 				m.nav.ActiveItem, m.nav.Cursor = tab.Section, tab.Section
@@ -253,6 +259,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.activateTab()
 					}
 				}
+			}
+			if walletKind != msg.Kind {
+				return m, nil
 			}
 		}
 		if msg.Kind == tabSyncthingDevice {
@@ -326,7 +335,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.Section == sec {
 					m.activeTab = i
 					m.rememberTabPosition()
-					if msg.Replace && (walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t) || m.syncthingTabBusy(t)) {
+					if msg.Replace && (autoUnlockBusy(t.Screen) || walletCreationBusy(t.Screen) || onChainSendBusy(t.Screen) || channelOpenBusy(t.Screen) || m.sshTabBusy(t) || m.helperTabBusy(t) || m.syncthingTabBusy(t)) {
 						return m, nil
 					}
 					if msg.Replace &&
@@ -560,10 +569,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case autoUnlockSetupDoneMsg:
-		return m.dispatchToTab(tabAutoUnlock, msg)
-	case autoUnlockDisableDoneMsg:
-		return m.dispatchToTab(tabAutoUnlock, msg)
+	case autoUnlockDoneMsg:
+		for _, tab := range m.tabs {
+			if tab.Screen == msg.owner && msg.owner != nil {
+				_, cmd := msg.owner.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
+	case closeAutoUnlockMsg:
+		if msg.owner == nil || msg.owner.attempt != msg.attempt || autoUnlockBusy(msg.owner) {
+			return m, nil
+		}
+		return m.closeScreenTab(msg.owner)
 	case refreshSSHKeysMsg:
 		var cmds []tea.Cmd
 		for _, tab := range m.tabs {
@@ -1005,7 +1023,7 @@ func (m Model) closeTab(
 
 	closingTab := tabs[tabIdx]
 	// Keep submitted operations reachable until their bounded calls return.
-	if walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) || m.syncthingTabBusy(closingTab) {
+	if autoUnlockBusy(closingTab.Screen) || walletCreationBusy(closingTab.Screen) || onChainSendBusy(closingTab.Screen) || channelOpenBusy(closingTab.Screen) || channelCloseBusy(closingTab.Screen) || m.sshTabBusy(closingTab) || m.helperTabBusy(closingTab) || m.syncthingTabBusy(closingTab) {
 		return m, nil
 	}
 

@@ -1,4 +1,4 @@
-package installer
+package host
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 
+	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 )
@@ -368,7 +369,7 @@ func assertEnabled(t *testing.T, f *autoUnlockFixture) {
 func TestEnableAutoUnlockProvesAndPublishes(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockEnabled {
+	if result.Outcome != autounlock.Enabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertEnabled(t, f)
@@ -382,7 +383,7 @@ func TestEnableAutoUnlockAcceptsRPCActiveDuringChainSync(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	f.rpcOnly = true
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockEnabled {
+	if result.Outcome != autounlock.Enabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertEnabled(t, f)
@@ -398,7 +399,7 @@ func TestEnableAutoUnlockAcceptsRPCActiveDuringChainSync(t *testing.T) {
 func TestEnableWrongPasswordReturnsToLockedRetryState(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	result := enableAutoUnlock("wrong", f.ops())
-	if result.Outcome != AutoUnlockVerificationFailed || result.Detail != "" {
+	if result.Outcome != autounlock.VerificationFailed || result.Detail != "" {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -426,7 +427,7 @@ func TestEnableRecoversFailedPasswordRejectionResidue(t *testing.T) {
 	f.execMainStatus = "1"
 
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockEnabled {
+	if result.Outcome != autounlock.Enabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertEnabled(t, f)
@@ -439,7 +440,7 @@ func TestEnablePostReadinessProofTimeoutIsInconclusiveAndLocked(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	f.holdEnabled = true
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockVerificationFailed {
+	if result.Outcome != autounlock.VerificationFailed {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -455,7 +456,7 @@ func TestEnableClassifiesSystemdReadinessTimeout(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	f.timeoutOnStart = true
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockVerificationTimedOut {
+	if result.Outcome != autounlock.VerificationTimedOut {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -467,7 +468,7 @@ func TestEnableSlowGracefulStopDoesNotConsumeStartupWindow(t *testing.T) {
 	f.enabledStartAdvance = 119 * time.Second
 	started := f.now
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockEnabled {
+	if result.Outcome != autounlock.Enabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	if elapsed := f.now.Sub(started); elapsed < 418*time.Second {
@@ -485,7 +486,7 @@ func TestEnableRejectsLateCandidateStartSuccess(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	f.enabledStartAdvance = 121 * time.Second
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockVerificationTimedOut {
+	if result.Outcome != autounlock.VerificationTimedOut {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -496,7 +497,7 @@ func TestEnableHasSeparateBoundedPostReadinessProof(t *testing.T) {
 	f.enabledStartAdvance = 119 * time.Second
 	f.walletStateFailuresRemaining = 2
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockEnabled {
+	if result.Outcome != autounlock.Enabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	if elapsed := f.now.Sub(time.Unix(1_700_000_000, 0)); elapsed != 121*time.Second {
@@ -510,7 +511,7 @@ func TestEnableRollbackStopFailureRetainsCandidatePassword(t *testing.T) {
 	f.holdEnabled = true
 	f.failOn["stop-lnd"] = 2
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockRepairRequired {
+	if result.Outcome != autounlock.RepairRequired {
 		t.Fatalf("outcome = %+v", result)
 	}
 	if !f.art.password {
@@ -528,7 +529,7 @@ func TestEnableRollbackRemovalFailureStillStartsLockedPlainLND(t *testing.T) {
 	// rollback after the candidate invocation has stopped.
 	f.failOn["remove-password"] = 2
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockRepairRequired {
+	if result.Outcome != autounlock.RepairRequired {
 		t.Fatalf("outcome = %+v", result)
 	}
 	if f.pid == 0 || !equalStrings(f.args, expectedLNDArgs(false)) ||
@@ -545,7 +546,7 @@ func TestEnablePublicationFailureRollsBackDisabled(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	f.failOn["save-enabled"] = 1
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockVerificationFailed || result.Detail == "" {
+	if result.Outcome != autounlock.VerificationFailed || result.Detail == "" {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -565,7 +566,7 @@ func TestEnableRecoversRecognizableInterruptedAttemptWithoutMarker(t *testing.T)
 	f.args = expectedLNDArgs(true)
 	f.password = "correct"
 	result := enableAutoUnlock("correct", f.ops())
-	if result.Outcome != AutoUnlockEnabled {
+	if result.Outcome != autounlock.Enabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertEnabled(t, f)
@@ -578,7 +579,7 @@ func TestEnableRollbackFailureRequiresRepair(t *testing.T) {
 	f := newAutoUnlockFixture(false)
 	f.failOn["write-unit-plain"] = 2
 	result := enableAutoUnlock("wrong", f.ops())
-	if result.Outcome != AutoUnlockRepairRequired ||
+	if result.Outcome != autounlock.RepairRequired ||
 		result.FailedStep != "automatic recovery after password rejection" {
 		t.Fatalf("outcome = %+v", result)
 	}
@@ -588,20 +589,20 @@ func TestEnableFailureInjectionConvergesToDisabledState(t *testing.T) {
 	tests := []struct {
 		name        string
 		inject      func(*autoUnlockFixture)
-		wantOutcome AutoUnlockOutcome
+		wantOutcome autounlock.Outcome
 	}{
-		{"write password", func(f *autoUnlockFixture) { f.failOn["write-password"] = 1 }, AutoUnlockVerificationFailed},
-		{"write unit", func(f *autoUnlockFixture) { f.failOn["write-unit-enabled"] = 1 }, AutoUnlockVerificationFailed},
-		{"validate candidate", func(f *autoUnlockFixture) { f.failOn["validate"] = 2 }, AutoUnlockVerificationFailed},
-		{"reload candidate", func(f *autoUnlockFixture) { f.failOn["daemon-reload"] = 2 }, AutoUnlockVerificationFailed},
-		{"stop before candidate", func(f *autoUnlockFixture) { f.failOn["stop-lnd"] = 1 }, AutoUnlockVerificationFailed},
-		{"start candidate", func(f *autoUnlockFixture) { f.failOn["start-lnd"] = 1 }, AutoUnlockVerificationFailed},
-		{"read candidate process", func(f *autoUnlockFixture) { f.failOn["process-args"] = 2 }, AutoUnlockVerificationFailed},
-		{"remove verification drop-in", func(f *autoUnlockFixture) { f.failOn["remove-drop"] = 1 }, AutoUnlockVerificationFailed},
-		{"reload final policy", func(f *autoUnlockFixture) { f.failOn["daemon-reload"] = 3 }, AutoUnlockVerificationFailed},
-		{"recheck process", func(f *autoUnlockFixture) { f.failOn["process-args"] = 3 }, AutoUnlockVerificationFailed},
-		{"recheck state", func(f *autoUnlockFixture) { f.failOn["wallet-state"] = 2 }, AutoUnlockVerificationFailed},
-		{"publish enabled config", func(f *autoUnlockFixture) { f.failOn["save-enabled"] = 1 }, AutoUnlockVerificationFailed},
+		{"write password", func(f *autoUnlockFixture) { f.failOn["write-password"] = 1 }, autounlock.VerificationFailed},
+		{"write unit", func(f *autoUnlockFixture) { f.failOn["write-unit-enabled"] = 1 }, autounlock.VerificationFailed},
+		{"validate candidate", func(f *autoUnlockFixture) { f.failOn["validate"] = 2 }, autounlock.VerificationFailed},
+		{"reload candidate", func(f *autoUnlockFixture) { f.failOn["daemon-reload"] = 2 }, autounlock.VerificationFailed},
+		{"stop before candidate", func(f *autoUnlockFixture) { f.failOn["stop-lnd"] = 1 }, autounlock.VerificationFailed},
+		{"start candidate", func(f *autoUnlockFixture) { f.failOn["start-lnd"] = 1 }, autounlock.VerificationFailed},
+		{"read candidate process", func(f *autoUnlockFixture) { f.failOn["process-args"] = 2 }, autounlock.VerificationFailed},
+		{"remove verification drop-in", func(f *autoUnlockFixture) { f.failOn["remove-drop"] = 1 }, autounlock.VerificationFailed},
+		{"reload final policy", func(f *autoUnlockFixture) { f.failOn["daemon-reload"] = 3 }, autounlock.VerificationFailed},
+		{"recheck process", func(f *autoUnlockFixture) { f.failOn["process-args"] = 3 }, autounlock.VerificationFailed},
+		{"recheck state", func(f *autoUnlockFixture) { f.failOn["wallet-state"] = 2 }, autounlock.VerificationFailed},
+		{"publish enabled config", func(f *autoUnlockFixture) { f.failOn["save-enabled"] = 1 }, autounlock.VerificationFailed},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -619,7 +620,7 @@ func TestEnableFailureInjectionConvergesToDisabledState(t *testing.T) {
 func TestDisableAutoUnlockDeletesPasswordAndPublishes(t *testing.T) {
 	f := newAutoUnlockFixture(true)
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockDisabled {
+	if result.Outcome != autounlock.Disabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -632,7 +633,7 @@ func TestDisableFailureBeforeDeletionRestoresEnabledState(t *testing.T) {
 	f := newAutoUnlockFixture(true)
 	f.failOn["validate"] = 1
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockStillEnabled {
+	if result.Outcome != autounlock.StillEnabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertEnabled(t, f)
@@ -642,7 +643,7 @@ func TestDisableRemovalFailureWithPasswordPresentRestoresEnabled(t *testing.T) {
 	f := newAutoUnlockFixture(true)
 	f.failOn["remove-password"] = 1
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockStillEnabled {
+	if result.Outcome != autounlock.StillEnabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertEnabled(t, f)
@@ -652,7 +653,7 @@ func TestDisableRemovalErrorAfterUnlinkFinishesDisabled(t *testing.T) {
 	f := newAutoUnlockFixture(true)
 	f.after["remove-password"] = true
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockDisabled {
+	if result.Outcome != autounlock.Disabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -663,7 +664,7 @@ func TestDisableRollbackFailureRequiresRepair(t *testing.T) {
 	f.password = "wrong"
 	f.failOn["validate"] = 1
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockRepairRequired {
+	if result.Outcome != autounlock.RepairRequired {
 		t.Fatalf("outcome = %+v", result)
 	}
 }
@@ -675,7 +676,7 @@ func TestDisableResumesAfterPasswordCommitPoint(t *testing.T) {
 	f.args = expectedLNDArgs(false)
 	f.wallet = lnrpc.WalletState_LOCKED
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockDisabled {
+	if result.Outcome != autounlock.Disabled {
 		t.Fatalf("outcome = %+v", result)
 	}
 	assertDisabled(t, f)
@@ -685,7 +686,7 @@ func TestDisablePublicationFailureAfterDeletionRequiresRepair(t *testing.T) {
 	f := newAutoUnlockFixture(true)
 	f.failOn["save-disabled"] = 1
 	result := disableAutoUnlockTransition(f.ops())
-	if result.Outcome != AutoUnlockRepairRequired {
+	if result.Outcome != autounlock.RepairRequired {
 		t.Fatalf("outcome = %+v", result)
 	}
 	if f.art.password {
@@ -716,7 +717,7 @@ func TestDisableFailureInjectionBeforeDeletionRestoresEnabled(t *testing.T) {
 			f := newAutoUnlockFixture(true)
 			test.inject(f)
 			result := disableAutoUnlockTransition(f.ops())
-			if result.Outcome != AutoUnlockStillEnabled {
+			if result.Outcome != autounlock.StillEnabled {
 				t.Fatalf("outcome = %+v", result)
 			}
 			assertEnabled(t, f)
@@ -743,7 +744,7 @@ func TestDisableFailureInjectionAfterDeletionNeverRecreatesPassword(t *testing.T
 			f := newAutoUnlockFixture(true)
 			test.inject(f)
 			result := disableAutoUnlockTransition(f.ops())
-			if result.Outcome != AutoUnlockRepairRequired {
+			if result.Outcome != autounlock.RepairRequired {
 				t.Fatalf("outcome = %+v", result)
 			}
 			if f.art.password {
@@ -923,14 +924,5 @@ func TestLoadedUnitRequiresNativeNotification(t *testing.T) {
 		status, autoUnlockUnitPlain, "on-failure", false,
 	); err == nil || !strings.Contains(err.Error(), "Type=simple") {
 		t.Fatalf("non-notify service type error = %v", err)
-	}
-}
-
-func TestVerificationDropInBoundsNativeReadiness(t *testing.T) {
-	if lndVerificationDropIn != `[Service]
-Restart=no
-TimeoutStartSec=120
-` {
-		t.Fatalf("unexpected verification drop-in:\n%s", lndVerificationDropIn)
 	}
 }

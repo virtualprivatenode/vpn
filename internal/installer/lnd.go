@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -428,53 +428,10 @@ func parseLNDBitcoindRPCPassword(content string) (string, error) {
 	return password, nil
 }
 
-// lndServiceUnit renders the LND systemd unit. withUnlock adds
-// LND's --wallet-unlock-password-file flag, pointing at the
-// root-staged password file, so the wallet unlocks without an
-// operator on every service start. Everything else about the
-// two variants is identical by construction — they come from
-// this one template. Pinned LND natively notifies systemd once
-// locked-wallet RPC is available or an auto-unlocked wallet has
-// reached RPC_ACTIVE, before chain synchronization. The extended
-// normal-start timeout follows LND's upstream unit guidance for
-// occasional database work; auto-unlock verification temporarily
-// overrides it with the product's bounded one-attempt window.
-// Pure — unit-tested.
-func lndServiceUnit(username string, withUnlock bool) string {
-	unlockFlag := ""
-	if withUnlock {
-		unlockFlag = " --wallet-unlock-password-file=" +
-			paths.LNDWalletPassword
-	}
-	return fmt.Sprintf(`[Unit]
-Description=LND Lightning Network Daemon
-After=bitcoind.service tor.service
-Wants=bitcoind.service
-
-[Service]
-Type=notify
-User=%s
-Group=%s
-SupplementaryGroups=debian-tor
-UMask=0077
-ExecStart=/usr/local/bin/lnd --configfile=/etc/lnd/lnd.conf%s
-Restart=on-failure
-RestartSec=30
-TimeoutStartSec=1200
-TimeoutStopSec=300
-PrivateTmp=true
-ProtectSystem=full
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
-`, username, username, unlockFlag)
-}
-
 // writeLNDService writes the LND unit in the requested variant.
 func writeLNDService(username string, withUnlock bool) error {
 	return system.SudoWriteFile(paths.LNDService,
-		[]byte(lndServiceUnit(username, withUnlock)), 0644)
+		[]byte(host.LNDServiceUnit(username, withUnlock)), 0644)
 }
 
 // writeLNDServiceFromConfig writes the LND unit that matches the
@@ -513,38 +470,4 @@ func startLND() error {
 		return err
 	}
 	return system.SudoRun("systemctl", "restart", "lnd")
-}
-
-// SetupAutoUnlock enables and synchronously proves wallet auto-unlock. As root
-// it runs the bounded transition directly; from the unprivileged TUI it asks
-// the typed helper operation. The password crosses only the root-owned local
-// socket and is written to a file the admin user cannot read.
-func SetupAutoUnlock(password string) (AutoUnlockResult, error) {
-	if os.Geteuid() == 0 {
-		ops, err := productionAutoUnlockOps()
-		if err != nil {
-			return repairRequired("initialize auto-unlock operation", err), nil
-		}
-		return enableAutoUnlock(password, ops), nil
-	}
-	var result AutoUnlockResult
-	err := helper.Call(helper.VerbStageWalletPassword,
-		helper.StageWalletPasswordParams{Password: password}, &result)
-	return result, err
-}
-
-// DisableAutoUnlock starts and proves the plain locked LND invocation before
-// durably removing the password. Root performs the transition directly; the
-// TUI requests the helper's typed operation.
-func DisableAutoUnlock() (AutoUnlockResult, error) {
-	if os.Geteuid() == 0 {
-		ops, err := productionAutoUnlockOps()
-		if err != nil {
-			return repairRequired("initialize auto-unlock operation", err), nil
-		}
-		return disableAutoUnlockTransition(ops), nil
-	}
-	var result AutoUnlockResult
-	err := helper.Call(helper.VerbRemoveWalletPassword, nil, &result)
-	return result, err
 }

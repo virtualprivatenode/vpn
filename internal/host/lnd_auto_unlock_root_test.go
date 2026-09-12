@@ -1,14 +1,15 @@
-package installer
+package host
 
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 )
 
 func TestRootAutoUnlockProtectedFileReplacementAndRemoval(t *testing.T) {
-	requireRootTestEnvironment(t)
+	requireAutoUnlockRoot(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "wallet_password")
 	// The repository's sandboxed root runner can map only UID/GID 0. The
@@ -40,7 +41,7 @@ func TestRootAutoUnlockProtectedFileReplacementAndRemoval(t *testing.T) {
 }
 
 func TestRootAutoUnlockPasswordPublicationLeavesNoStage(t *testing.T) {
-	requireRootTestEnvironment(t)
+	requireAutoUnlockRoot(t)
 	dir := t.TempDir()
 	canonical := filepath.Join(dir, "wallet_password")
 	stage := filepath.Join(dir, ".vpn-wallet-password.stage")
@@ -68,10 +69,13 @@ func TestRootAutoUnlockPasswordPublicationLeavesNoStage(t *testing.T) {
 }
 
 func TestRootAutoUnlockStageClassificationAndCleanup(t *testing.T) {
-	requireRootTestEnvironment(t)
+	requireAutoUnlockRoot(t)
 	dir := t.TempDir()
 	stage := filepath.Join(dir, ".vpn-wallet-password.stage")
 	if err := os.WriteFile(stage, []byte("interrupted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stage, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	exists, err := passwordStageExistsAt(stage, 0, 0)
@@ -93,10 +97,16 @@ func TestRootAutoUnlockStageClassificationAndCleanup(t *testing.T) {
 }
 
 func TestRootAutoUnlockRefusesSymlinkDirectoryBoundary(t *testing.T) {
-	requireRootTestEnvironment(t)
+	requireAutoUnlockRoot(t)
 	root := t.TempDir()
 	realDir := filepath.Join(root, "real")
 	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateExactDir(realDir, 0o755, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	linkDir := filepath.Join(root, "link")
@@ -109,11 +119,17 @@ func TestRootAutoUnlockRefusesSymlinkDirectoryBoundary(t *testing.T) {
 }
 
 func TestRootAutoUnlockProtectedFileRefusesUnsafeDestination(t *testing.T) {
-	requireRootTestEnvironment(t)
+	requireAutoUnlockRoot(t)
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
-	if err := os.WriteFile(target, []byte("do not replace"), 0o600); err != nil {
+	if err := os.WriteFile(target, []byte("do not replace"), 0o400); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, err := readExactFile(target, 0o400, 0, 0); err != nil || !exists {
+		t.Fatalf("invalid positive file fixture: exists=%v, err=%v", exists, err)
 	}
 	link := filepath.Join(dir, "wallet_password")
 	if err := os.Symlink(target, link); err != nil {
@@ -126,4 +142,19 @@ func TestRootAutoUnlockProtectedFileRefusesUnsafeDestination(t *testing.T) {
 	if err != nil || string(data) != "do not replace" {
 		t.Fatalf("symlink target changed: %q, %v", data, err)
 	}
+}
+
+func requireAutoUnlockRoot(t *testing.T) {
+	t.Helper()
+	required := os.Getenv("VPN_REQUIRE_ROOT_TESTS")
+	if required != "" && required != "1" {
+		t.Fatal("VPN_REQUIRE_ROOT_TESTS must be unset or 1")
+	}
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		return
+	}
+	if required == "1" {
+		t.Fatal("auto-unlock filesystem tests require Linux root")
+	}
+	t.Skip("auto-unlock filesystem tests require Linux root")
 }
