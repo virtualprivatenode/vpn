@@ -4,42 +4,47 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── OCReceiveScreen ────────────────────────────────────
-// Displays a fresh on-chain address. Two buttons:
-// "New Address" (generates another) and "Show QR"
-// (opens fullscreen QR overlay).
-
-type ocRecvStep int
-
-const (
-	ocRecvWaiting ocRecvStep = iota // fetching address
-	ocRecvReady                     // address visible
-)
-
+// OCReceiveScreen retains its last address until an explicit request succeeds.
+// Closing the tab discards observation, not addresses already derived by LND.
 type OCReceiveScreen struct {
-	ctx     *ScreenContext
-	step    ocRecvStep
-	address string
-	errMsg  string
-	btnIdx  int // 0=New Address, 1=Show QR
+	ctx        *ScreenContext
+	addresses  app.OnChainReceiveClient
+	attempt    uint64
+	requesting bool
+	address    string
+	errMsg     string
+	btnIdx     int // 0=Show QR, 1=New Address or Retry; only Retry without an address
 }
 
 func NewOCReceiveScreen(
 	ctx *ScreenContext,
 ) *OCReceiveScreen {
 	return &OCReceiveScreen{
-		ctx:  ctx,
-		step: ocRecvWaiting,
+		ctx: ctx,
 	}
 }
 
 // ── Screen interface ────────────────────────────────────
 
 func (s *OCReceiveScreen) Init() tea.Cmd {
-	return getNewAddressCmd(s.ctx.LndClient)
+	if s.attempt != 0 {
+		return nil
+	}
+	return s.requestAddress()
+}
+
+func (s *OCReceiveScreen) requestAddress() tea.Cmd {
+	if s.requesting {
+		return nil
+	}
+	s.attempt++
+	s.requesting = true
+	s.errMsg = ""
+	return getNewAddressCmd(s)
 }
 
 func (s *OCReceiveScreen) HandleKey(
@@ -55,7 +60,7 @@ func (s *OCReceiveScreen) HandleKey(
 		}
 		return s, emitFocusSidebar
 	case "right":
-		if s.step == ocRecvReady && s.btnIdx < 1 {
+		if !s.requesting && s.address != "" && s.btnIdx < 1 {
 			s.btnIdx++
 		}
 		return s, nil
@@ -69,26 +74,20 @@ func (s *OCReceiveScreen) HandleKey(
 	case "backspace":
 		return s, emitFocusParent
 	case "enter":
-		if s.step != ocRecvReady {
+		if s.requesting {
 			return s, nil
+		}
+		if s.address == "" {
+			return s, s.requestAddress()
 		}
 		switch s.btnIdx {
 		case 0: // Show QR
-			if s.address == "" {
-				return s, nil
-			}
-			addr := s.address
+			attempt := s.attempt
 			return s, func() tea.Msg {
-				return showQRMsg{
-					URL:   addr,
-					Label: "On-Chain Address",
-				}
+				return receiveAddressQRMsg{owner: s, attempt: attempt}
 			}
 		case 1: // New Address
-			s.address = ""
-			s.errMsg = ""
-			s.step = ocRecvWaiting
-			return s, getNewAddressCmd(s.ctx.LndClient)
+			return s, s.requestAddress()
 		}
 		return s, nil
 	}
@@ -100,12 +99,16 @@ func (s *OCReceiveScreen) HandleMsg(
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case newAddressMsg:
+		if msg.owner != s || msg.attempt != s.attempt || !s.requesting {
+			return s, nil
+		}
+		s.requesting = false
 		if msg.err != nil {
 			s.errMsg = msg.err.Error()
 			return s, nil
 		}
-		s.address = msg.address
-		s.step = ocRecvReady
+		s.address = msg.address.Text()
+		s.btnIdx = 0
 	}
 	return s, nil
 }
@@ -113,59 +116,39 @@ func (s *OCReceiveScreen) HandleMsg(
 func (s *OCReceiveScreen) View(
 	w, h int,
 ) string {
-	if s.step == ocRecvWaiting {
-		return s.viewWaiting(w, h)
-	}
-	return s.viewReady(w, h)
-}
-
-func (s *OCReceiveScreen) viewWaiting(
-	w, h int,
-) string {
 	p := newPane(w)
 	p.title(theme.Header, "⛓ Receive On-Chain")
-	p.dim("Generating address...")
+	if s.address != "" {
+		p.labelLine("Address:")
+		p.monoWrap(s.address)
+		p.blank()
+		p.dim("Send Bitcoin to this address.")
+		p.dim("Earlier addresses remain valid.")
+	}
 
+	if s.requesting || s.attempt == 0 {
+		p.blank()
+		p.dim("Generating address...")
+		return p.renderWithBottomButtons([]string{"Generating..."}, 0, false, h)
+	}
+
+	buttons := []string{"Show QR", "New Address"}
 	if s.errMsg != "" {
 		p.blank()
 		p.appendError(s.errMsg)
+		p.dim("Retry requests another address.")
+		buttons[1] = "Retry"
+	}
+	if s.address == "" {
+		buttons = []string{"Retry"}
 	}
 
 	return p.renderWithBottomButtons(
-		[]string{"Generating..."}, 0, false, h)
-}
-
-func (s *OCReceiveScreen) viewReady(
-	w, h int,
-) string {
-	p := newPane(w)
-	p.title(theme.Header, "⛓ Receive On-Chain")
-
-	p.labelLine("Address:")
-	p.monoWrap(s.address)
-	p.blank()
-	p.dim("Send Bitcoin to this address.")
-	p.dim("Funds appear after 1 confirmation.")
-
-	if s.ctx.Status != nil && !s.ctx.Status.btcSynced {
-		p.blank()
-		p.line(" " + theme.Warn.Render(
-			"Funds will not appear until IBD is complete."))
-	}
-
-	if s.errMsg != "" {
-		p.blank()
-		p.appendError(s.errMsg)
-	}
-
-	return p.renderWithBottomButtons(
-		[]string{"Show QR", "New Address"},
-		s.btnIdx,
-		s.ctx.ContentFocused, h)
+		buttons, s.btnIdx, s.ctx.ContentFocused, h)
 }
 
 func (s *OCReceiveScreen) HelpBindings() []key.Binding {
-	if s.step == ocRecvReady {
+	if !s.requesting {
 		return tabButtonBindings(s.ctx.HasTabs)
 	}
 	binds := []key.Binding{kSidebar}

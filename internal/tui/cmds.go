@@ -232,19 +232,15 @@ func fetchPaymentHistoryCmd(
 
 // ── On-chain queries & fund-moving ───────────────────────
 
-func getNewAddressCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
+func getNewAddressCmd(owner *OCReceiveScreen) tea.Cmd {
+	client := owner.addresses
+	if client == nil && owner.ctx.LndClient != nil {
+		client = owner.ctx.LndClient
+	}
+	network, previous, attempt := owner.ctx.Cfg.Network, owner.address, owner.attempt
 	return func() tea.Msg {
-		if client == nil {
-			return newAddressMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		addr, err := client.GetNewAddress()
-		if err != nil {
-			return newAddressMsg{err: err}
-		}
-		return newAddressMsg{address: addr.Address}
+		address, err := app.CreateOnChainAddress(client, network, previous)
+		return newAddressMsg{owner: owner, attempt: attempt, address: address, err: err}
 	}
 }
 
