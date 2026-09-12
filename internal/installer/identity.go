@@ -23,7 +23,7 @@ package installer
 //
 // This file owns enumeration (pure parts unit-tested) and the
 // step's apply function; the wizard screens that collect the
-// operator's decisions live in wizard.go.
+// operator's decisions live in internal/tui/install.
 
 import (
 	"fmt"

@@ -74,8 +74,15 @@ refuses with a full report before starting durable installation work if the box
 is not one it can trust. It then walks you through access setup and hardware
 fit, installs Bitcoin Core and LND with every download after Tor
 routed through Tor and verified before install, and drops you
-straight into the TUI. If a step fails or you interrupt, run it
-again — when the installer can prove that it is resuming the same recognizable
+straight into the TUI. During interactive installation, Ctrl+C requests a stop
+after the active step and its progress record finish; keep the terminal open
+while it stops. The installer retains its lock until that work settles. This
+does not kill an active subprocess or undo changes. If the last step finishes,
+the installer still publishes completion. Forced process death can leave
+unrecorded work that a later run must repeat.
+
+If a step fails or installation stops, inspect the reported result before
+running it again. When the installer can prove that it is resuming the same recognizable
 fresh-install lifecycle, it continues from the incomplete work. A completed
 base installation reports already installed and stops; optional add-ons and
 later settings remain available through the TUI. Mainnet and testnet4 remain
@@ -127,10 +134,14 @@ mainnet value.
 shows every SSH key it finds on the box — with fingerprints and
 comments, and provider control lines excluded — for you to
 confirm, replace, or extend before they are copied. You also set
-a login password (16 characters minimum) as the provider console
+a login password (16 bytes minimum) as the provider console
 fallback; whether password login over SSH stays enabled is
 preserved exactly as the installer OBSERVED it on your box —
 installing never silently changes it.
+
+Password paste preserves spaces and accepts one trailing newline. Input that
+would be altered or exceed the field's 128-character limit is rejected and
+cleared, rather than silently changing the password.
 
 ### Wallet Creation
 

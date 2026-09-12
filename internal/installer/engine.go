@@ -10,13 +10,9 @@ import (
 
 // ── Install engine core ──────────────────────────────────
 //
-// The step model, resume planner, and step executor — with no
-// rendering. Front-ends are thin: the initial-install TUI
-// (setup.go) and the unattended runner (below) both drive the
-// same runner, so ledger recording, skip decisions, and the
-// log trail cannot diverge between them, and a failed or
-// interrupted run reaches /var/log/vpn.log identically from
-// either.
+// The interactive session and unattended loop use the same
+// step runner for resume decisions, ledger recording, and
+// logging. The TUI observes progress without executing steps.
 //
 // Resume rules (one place, ruled 2026-07-16):
 //
@@ -263,11 +259,8 @@ type RunResult struct {
 	Err      error // the failed step's error
 }
 
-// classifyRun folds a front-end's final state into a
-// RunResult. Pure — the TUI passes its flags, tests pass
-// theirs. An exit after done-and-not-failed is COMPLETE even
-// if the operator left with ctrl+c instead of enter: the steps
-// all ran; how the render loop was dismissed is irrelevant.
+// classifyRun describes execution progress. RunComplete means every step
+// finished; terminal lifecycle publication remains a separate requirement.
 func classifyRun(
 	steps []InstallStep, done, failed bool, current int,
 ) RunResult {
@@ -341,4 +334,15 @@ func RunInstallUnattended(
 		}
 	}
 	return classifyRun(steps, true, false, total), nil
+}
+
+// willRun suppresses a decision screen only when the planner proves its
+// step will be skipped. An absent key conservatively keeps the screen.
+func (r *stepRunner) willRun(key string) bool {
+	for i, s := range r.steps {
+		if s.Key == key {
+			return r.plan[i].Run
+		}
+	}
+	return true
 }

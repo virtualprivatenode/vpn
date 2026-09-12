@@ -170,7 +170,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			})
 
 		output, err := captureRunInstallOutput(t, func() error {
-			return RunInstall(InstallOptions{})
+			return RunInstall(InstallOptions{}, unexpectedInstallFrontend(t))
 		})
 		if err != nil {
 			t.Fatalf("completed install refused: %v", err)
@@ -229,7 +229,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 					return SSHObservation{}, errors.New("unexpected preflight")
 				})
 
-			if err := RunInstall(InstallOptions{}); err == nil {
+			if err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t)); err == nil {
 				t.Fatal("unsafe or conflicting installation state accepted")
 			}
 			if *preflightCalls != 0 || *initializeCalls != 0 {
@@ -252,7 +252,7 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 				return SSHObservation{}, checkArchitecture("arm64")
 			})
 
-		err := RunInstall(InstallOptions{})
+		err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t))
 		if err == nil || !strings.Contains(err.Error(), "amd64 only") {
 			t.Fatalf("unsupported architecture error=%v", err)
 		}
@@ -425,3 +425,11 @@ func TestShellWrapperNetworkFlags(t *testing.T) {
 // (TestCheckOSRelease*), against the preflight's exactly-13 rule.
 // The NeedsInstall tests died with NeedsInstall itself: commit 6
 // replaced state-sniffing with explicit dispatch (IA-1-8).
+
+func unexpectedInstallFrontend(t *testing.T) InstallFrontend {
+	t.Helper()
+	return func(InstallView, *InstallSession) (bool, error) {
+		t.Error("early exit reached interactive frontend")
+		return false, nil
+	}
+}
