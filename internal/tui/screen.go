@@ -133,6 +133,7 @@ func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
 // OnChainContext holds wallet data and the selection shared by home and send.
 // Prepared sends own copies of their reviewed inputs.
 type OnChainContext struct {
+	txRevision   uint64
 	Utxos        []lndrpc.UTXO
 	Selection    app.CoinSelection
 	OnChainTxs   []lndrpc.OnChainTx
