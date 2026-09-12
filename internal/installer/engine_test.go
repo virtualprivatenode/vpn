@@ -405,14 +405,14 @@ func TestWillRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.willRun(steps, "identity.access") {
+	if r.willRun("identity.access") {
 		t.Error("recorded step reported as will-run")
 	}
-	if !r.willRun(steps, "btc.install") {
+	if !r.willRun("btc.install") {
 		t.Error("unrecorded step reported as skip")
 	}
 	// Unknown key: conservative side is "will run" (screen shows).
-	if !r.willRun(steps, "no.such.key") {
+	if !r.willRun("no.such.key") {
 		t.Error("unknown key reported as skip")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/tui"
+	installui "github.com/virtualprivatenode/vpn/internal/tui/install"
 )
 
 var version = "dev"
@@ -33,7 +34,7 @@ func main() {
 
 	switch cmd {
 	case cmdInstall:
-		if err := installer.RunInstall(opts); err != nil {
+		if err := installer.RunInstall(opts, installui.Run); err != nil {
 			fmt.Fprintf(os.Stderr, "\n  Failed: %v\n", err)
 			os.Exit(1)
 		}

@@ -39,6 +39,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -433,7 +435,7 @@ func FormatPreflightReport(results []PreflightResult) string {
 		}
 		failed++
 		fmt.Fprintf(&b, "    [FAIL] %s\n", r.Name)
-		for _, line := range wrapText(r.Err.Error(), 56) {
+		for _, line := range strings.Split(ansi.Wordwrap(r.Err.Error(), 56, ""), "\n") {
 			fmt.Fprintf(&b, "           %s\n", line)
 		}
 	}
@@ -442,24 +444,4 @@ func FormatPreflightReport(results []PreflightResult) string {
 			"system has been changed.\n")
 	}
 	return b.String()
-}
-
-// wrapText word-wraps s to width columns. Words longer than width
-// get their own line, unbroken. Pure — unit-tested.
-func wrapText(s string, width int) []string {
-	words := strings.Fields(s)
-	if len(words) == 0 {
-		return nil
-	}
-	var lines []string
-	cur := words[0]
-	for _, w := range words[1:] {
-		if len(cur)+1+len(w) <= width {
-			cur += " " + w
-			continue
-		}
-		lines = append(lines, cur)
-		cur = w
-	}
-	return append(lines, cur)
 }

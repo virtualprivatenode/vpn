@@ -252,35 +252,6 @@ func TestFormatPreflightReportWithFailure(t *testing.T) {
 	}
 }
 
-// ── wrapText ─────────────────────────────────────────────
-
-func TestWrapText(t *testing.T) {
-	lines := wrapText("aa bb cc dd", 5)
-	want := []string{"aa bb", "cc dd"}
-	if len(lines) != len(want) {
-		t.Fatalf("got %d lines %v, want %v", len(lines), lines, want)
-	}
-	for i := range want {
-		if lines[i] != want[i] {
-			t.Errorf("line %d: got %q, want %q", i, lines[i], want[i])
-		}
-	}
-	if got := wrapText("", 10); got != nil {
-		t.Errorf("empty input: got %v, want nil", got)
-	}
-	// A word longer than the width gets its own unbroken line.
-	long := wrapText("short averyverylongword end", 6)
-	found := false
-	for _, l := range long {
-		if l == "averyverylongword" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("long word split or lost: %v", long)
-	}
-}
-
 // ── check names are stable report labels ─────────────────
 
 func TestPreflightCheckNamesNonEmpty(t *testing.T) {

@@ -43,11 +43,9 @@ func SyncthingVersionStr() string { return syncthingVersion }
 // implicit flow.
 //
 // The step model, resume planner, and step runner live in
-// engine.go; the ledger in ledger.go; the interactive front-end
-// (wizard screens + step renderer) in wizard.go. Front-ends are
-// thin: they render what the runner reports and make no skip or
-// record decisions of their own, so the TUI and the unattended
-// runner cannot diverge.
+// engine.go; the ledger in ledger.go; the interactive session
+// in interactive.go; and presentation in internal/tui/install.
+// The TUI submits choices and observes the engine's progress.
 
 // InstallOptions carries the `vpn install` command line.
 type InstallOptions struct {
@@ -105,7 +103,7 @@ func productionInstallStartupDependencies() installStartupDependencies {
 var newInstallStartupDependencies = productionInstallStartupDependencies
 
 // RunInstall is the `sudo vpn install` entry point.
-func RunInstall(opts InstallOptions) error {
+func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	if os.Geteuid() != 0 {
 		return errors.New(
 			"the installer must run as root — run: sudo vpn install")
@@ -146,6 +144,10 @@ func RunInstall(opts InstallOptions) error {
 		!opts.Unattended && passwordPending() {
 		return errors.New(
 			"an interrupted unattended install still owes password delivery — resume with: sudo vpn install --unattended")
+	}
+
+	if !opts.Unattended && frontend == nil {
+		return errors.New("interactive installation requires a frontend")
 	}
 
 	// Preflight is read-only and precedes every durable initialization.
@@ -253,9 +255,12 @@ func RunInstall(opts InstallOptions) error {
 		res, err = RunInstallUnattended(
 			steps, appVersion, ledger, paths.InstallStateFile)
 	} else {
-		res, openConsole, err = runInstallWizard(
-			cfg, steps, dec, appVersion, ledger,
-			persistDbCache, completeInteractive)
+		runner, runnerErr := newStepRunner(steps, appVersion, ledger, paths.InstallStateFile)
+		if runnerErr != nil {
+			return runnerErr
+		}
+		session := newInstallSession(runner, dec, persistDbCache, completeInteractive)
+		res, openConsole, err = runInstallInteractive(session, installView(session), frontend)
 	}
 	if err != nil {
 		return err

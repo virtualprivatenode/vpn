@@ -132,24 +132,6 @@ func TestGenerateAdminPassword(t *testing.T) {
 	}
 }
 
-// ── pasteFirstLine ───────────────────────────────────────
-
-func TestPasteFirstLine(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"secret-password", "secret-password"},
-		{"  padded  ", "padded"},
-		{"line1\nline2\n", "line1"},
-		{"key data comment\n", "key data comment"},
-		{"\n", ""},
-	}
-	for _, tt := range cases {
-		if got := pasteFirstLine(tt.in); got != tt.want {
-			t.Errorf("pasteFirstLine(%q) = %q, want %q",
-				tt.in, got, tt.want)
-		}
-	}
-}
-
 func TestClassifyAuthorizedKeysReportsMalformedKeys(t *testing.T) {
 	keys, excluded := classifyAuthorizedKeys("ssh-ed25519 YQ== malformed\nssh-dss YQ== obsolete\n" + testKeyA + "\n")
 	if len(keys) != 1 || excluded != 2 {
