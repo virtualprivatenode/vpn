@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
@@ -121,19 +122,19 @@ func withConfigVerbTestDeps(t *testing.T) {
 
 func TestAutoUnlockVerbsReturnStructuredTransitionResults(t *testing.T) {
 	withConfigVerbTestDeps(t)
-	wantEnable := installer.AutoUnlockResult{
-		Outcome: installer.AutoUnlockVerificationFailed,
+	wantEnable := autounlock.Result{
+		Outcome: autounlock.VerificationFailed,
 	}
-	setupAutoUnlock = func(password string) (installer.AutoUnlockResult, error) {
-		if password != "correct horse" {
+	setupAutoUnlock = func(password autounlock.Password) (autounlock.Result, error) {
+		if password.Text() != "correct horse" {
 			t.Fatalf("password = %q", password)
 		}
 		return wantEnable, nil
 	}
-	wantDisable := installer.AutoUnlockResult{
-		Outcome: installer.AutoUnlockStillEnabled,
+	wantDisable := autounlock.Result{
+		Outcome: autounlock.StillEnabled,
 	}
-	disableAutoUnlock = func() (installer.AutoUnlockResult, error) {
+	disableAutoUnlock = func() (autounlock.Result, error) {
 		return wantDisable, nil
 	}
 
@@ -145,6 +146,19 @@ func TestAutoUnlockVerbsReturnStructuredTransitionResults(t *testing.T) {
 	got, err = verbRemoveWalletPassword(&verbCtx{}, nil)
 	if err != nil || got != wantDisable {
 		t.Fatalf("disable result = %#v, %v", got, err)
+	}
+}
+
+func TestWalletPasswordRefusedBeforeHostDispatch(t *testing.T) {
+	withConfigVerbTestDeps(t)
+	setupAutoUnlock = func(autounlock.Password) (autounlock.Result, error) {
+		t.Fatal("invalid wallet password reached privileged operation")
+		return autounlock.Result{}, nil
+	}
+	for _, password := range []string{"", strings.Repeat("x", 513), "a\nb", "a\rb"} {
+		if _, err := verbStageWalletPassword(&verbCtx{}, raw(t, helper.StageWalletPasswordParams{Password: password})); err == nil {
+			t.Fatal("invalid wallet password accepted by helper")
+		}
 	}
 }
 
@@ -379,22 +393,6 @@ func TestSetUserPasswordValidation(t *testing.T) {
 			t.Errorf("accepted user=%q pwlen=%d",
 				c.User, len(c.Password))
 		}
-	}
-}
-
-func TestWalletPasswordValidation(t *testing.T) {
-	if err := validateWalletPassword(""); err == nil {
-		t.Error("accepted empty wallet password")
-	}
-	if err := validateWalletPassword(
-		strings.Repeat("x", 513)); err == nil {
-		t.Error("accepted oversized wallet password")
-	}
-	if err := validateWalletPassword("a\nb"); err == nil {
-		t.Error("accepted wallet password with newline")
-	}
-	if err := validateWalletPassword("correct horse"); err != nil {
-		t.Errorf("rejected a normal wallet password: %v", err)
 	}
 }
 

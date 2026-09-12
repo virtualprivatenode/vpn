@@ -1,4 +1,4 @@
-package installer
+package host
 
 import (
 	"context"
@@ -17,8 +17,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -100,33 +100,19 @@ type autoUnlockOps struct {
 	sleep            func(time.Duration)
 }
 
-// AutoUnlockResult is the structured, credential-free result returned through
-// the privileged helper. Expected recovery outcomes are data, not error text.
-type AutoUnlockResult = helper.AutoUnlockResult
-type AutoUnlockOutcome = helper.AutoUnlockOutcome
-
-const (
-	AutoUnlockEnabled              = helper.AutoUnlockEnabled
-	AutoUnlockDisabled             = helper.AutoUnlockDisabled
-	AutoUnlockVerificationFailed   = helper.AutoUnlockVerificationFailed
-	AutoUnlockVerificationTimedOut = helper.AutoUnlockVerificationTimedOut
-	AutoUnlockStillEnabled         = helper.AutoUnlockStillEnabled
-	AutoUnlockRepairRequired       = helper.AutoUnlockRepairRequired
-)
-
-func repairRequired(stage string, cause ...error) AutoUnlockResult {
+func repairRequired(stage string, cause ...error) autounlock.Result {
 	if len(cause) > 0 && cause[0] != nil {
 		logger.System("auto-unlock: %s: %v", stage, cause[0])
 	} else {
 		logger.System("auto-unlock: %s", stage)
 	}
-	return AutoUnlockResult{
-		Outcome:    AutoUnlockRepairRequired,
+	return autounlock.Result{
+		Outcome:    autounlock.RepairRequired,
 		FailedStep: stage,
 	}
 }
 
-func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
+func enableAutoUnlock(password string, ops autoUnlockOps) autounlock.Result {
 	cfg, err := ops.loadConfig()
 	if err != nil {
 		return repairRequired("read node configuration", err)
@@ -180,9 +166,9 @@ func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
 
 	runtimeTransitioned := false
 	failWithRecoveryStage := func(
-		outcome AutoUnlockOutcome, stage, recoveryStage, detail string,
+		outcome autounlock.Outcome, stage, recoveryStage, detail string,
 		cause error,
-	) AutoUnlockResult {
+	) autounlock.Result {
 		if cause != nil {
 			logger.System("auto-unlock: %s: %v", stage, cause)
 		} else {
@@ -194,11 +180,11 @@ func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
 			return repairRequired(recoveryStage,
 				fmt.Errorf("recovery failed: %w", err))
 		}
-		return AutoUnlockResult{Outcome: outcome, Detail: detail}
+		return autounlock.Result{Outcome: outcome, Detail: detail}
 	}
 	fail := func(
-		outcome AutoUnlockOutcome, stage, detail string, cause error,
-	) AutoUnlockResult {
+		outcome autounlock.Outcome, stage, detail string, cause error,
+	) autounlock.Result {
 		return failWithRecoveryStage(
 			outcome, stage, "automatic return to locked state", detail,
 			cause,
@@ -206,22 +192,22 @@ func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
 	}
 
 	if err := ops.writePassword(password); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"write candidate wallet password",
 			"VPN could not store the password safely. The previous disabled setting was restored.", err)
 	}
 	if err := ops.writeUnit(autoUnlockUnitEnabled); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"install auto-unlock unit",
 			"VPN could not install auto-unlock safely. The previous disabled setting was restored.", err)
 	}
 	if err := ops.validateUnit(); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"validate auto-unlock unit",
 			"VPN could not validate the auto-unlock service. The previous disabled setting was restored.", err)
 	}
 	if err := reloadAndVerifyUnit(ops, autoUnlockUnitEnabled, "no", true); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"load one-attempt auto-unlock unit",
 			"VPN could not load auto-unlock safely. The previous disabled setting was restored.", err)
 	}
@@ -233,13 +219,13 @@ func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
 	)
 	if invocation == invocationExited {
 		return failWithRecoveryStage(
-			AutoUnlockVerificationFailed,
+			autounlock.VerificationFailed,
 			"verify candidate wallet password",
 			"automatic recovery after password rejection", "", verifyErr,
 		)
 	}
 	if invocation == invocationStartTimedOut {
-		return fail(AutoUnlockVerificationTimedOut,
+		return fail(autounlock.VerificationTimedOut,
 			"wait for LND to become ready", "", verifyErr)
 	}
 	if transitionErr != nil || verifyErr != nil ||
@@ -248,7 +234,7 @@ func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
 		if transitionErr != nil {
 			cause = transitionErr
 		}
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"verify candidate LND",
 			"VPN could not verify auto-unlock because a system operation failed. LND has been returned to the locked state.", cause)
 	}
@@ -257,37 +243,37 @@ func enableAutoUnlock(password string, ops autoUnlockOps) AutoUnlockResult {
 	// changes only the policy PID 1 applies to a future failure; the verified
 	// LND invocation stays online and is checked again below.
 	if err := ops.removeVerifyDrop(); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"remove one-attempt restart policy",
 			"VPN verified the password but could not finish auto-unlock safely. LND has been returned to the locked state.", err)
 	}
 	if err := reloadAndVerifyUnit(ops, autoUnlockUnitEnabled, "on-failure", false); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"restore normal restart policy",
 			"VPN verified the password but could not finish auto-unlock safely. LND has been returned to the locked state.", err)
 	}
 	if err := verifySameReadyInvocation(ops, before.invocationID); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"recheck verified LND invocation",
 			"VPN could not prove that LND stayed ready. LND has been returned to the locked state.", err)
 	}
 
 	cfg.AutoUnlock = true
 	if err := ops.saveConfig(cfg); err != nil {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"publish enabled setting",
 			"VPN verified the password but could not publish auto-unlock safely. LND has been returned to the locked state.", err)
 	}
 	published, err := ops.loadConfig()
 	if err != nil || !published.AutoUnlock {
-		return fail(AutoUnlockVerificationFailed,
+		return fail(autounlock.VerificationFailed,
 			"confirm enabled setting",
 			"VPN could not confirm the auto-unlock setting. LND has been returned to the locked state.", err)
 	}
-	return AutoUnlockResult{Outcome: AutoUnlockEnabled}
+	return autounlock.Result{Outcome: autounlock.Enabled}
 }
 
-func disableAutoUnlockTransition(ops autoUnlockOps) AutoUnlockResult {
+func disableAutoUnlockTransition(ops autoUnlockOps) autounlock.Result {
 	cfg, err := ops.loadConfig()
 	if err != nil {
 		return repairRequired("read node configuration", err)
@@ -309,7 +295,7 @@ func disableAutoUnlockTransition(ops autoUnlockOps) AutoUnlockResult {
 		if err := finishDisabledAfterPasswordRemoval(ops, cfg); err != nil {
 			return repairRequired("finish interrupted disable", err)
 		}
-		return AutoUnlockResult{Outcome: AutoUnlockDisabled}
+		return autounlock.Result{Outcome: autounlock.Disabled}
 	}
 
 	if err := ops.writeVerifyDrop(); err != nil {
@@ -372,7 +358,7 @@ func disableAutoUnlockTransition(ops autoUnlockOps) AutoUnlockResult {
 	if durabilityErr != nil {
 		return repairRequired("confirm durable wallet password removal", durabilityErr)
 	}
-	return AutoUnlockResult{Outcome: AutoUnlockDisabled}
+	return autounlock.Result{Outcome: autounlock.Disabled}
 }
 
 func normalizeDisabledUnit(ops autoUnlockOps) error {
@@ -497,7 +483,7 @@ func restoreDisabled(
 
 func restoreEnabledResult(
 	ops autoUnlockOps, cfg *config.AppConfig, failedStage string, cause error,
-) AutoUnlockResult {
+) autounlock.Result {
 	if cause != nil {
 		logger.System("auto-unlock: %s: %v", failedStage, cause)
 	} else {
@@ -507,7 +493,7 @@ func restoreEnabledResult(
 		return repairRequired(failedStage,
 			fmt.Errorf("recovery failed: %w", err))
 	}
-	return AutoUnlockResult{Outcome: AutoUnlockStillEnabled}
+	return autounlock.Result{Outcome: autounlock.StillEnabled}
 }
 
 func restoreEnabled(ops autoUnlockOps, cfg *config.AppConfig) error {
@@ -932,7 +918,7 @@ type autoUnlockFS struct {
 }
 
 func productionAutoUnlockOps() (autoUnlockOps, error) {
-	identity, err := user.Lookup(lndUser)
+	identity, err := user.Lookup("lnd")
 	if err != nil {
 		return autoUnlockOps{}, fmt.Errorf("resolve lnd user: %w", err)
 	}
@@ -966,7 +952,7 @@ func productionAutoUnlockOps() (autoUnlockOps, error) {
 		},
 		unitStatus:  readLNDUnitStatus,
 		processArgs: readProcessArgs,
-		walletState: readLNDWalletState,
+		walletState: ReadLNDWalletState,
 		now:         time.Now,
 		sleep:       time.Sleep,
 	}, nil
@@ -982,9 +968,9 @@ func (fs *autoUnlockFS) inspectArtifacts() (autoUnlockArtifacts, error) {
 		return out, errors.New("LND unit is missing")
 	}
 	switch string(unit) {
-	case lndServiceUnit(lndUser, false):
+	case LNDServiceUnit("lnd", false):
 		out.unit = autoUnlockUnitPlain
-	case lndServiceUnit(lndUser, true):
+	case LNDServiceUnit("lnd", true):
 		out.unit = autoUnlockUnitEnabled
 	default:
 		out.unit = autoUnlockUnitUnknown
@@ -1020,9 +1006,9 @@ func (fs *autoUnlockFS) writeUnit(unit autoUnlockUnit) error {
 	var content string
 	switch unit {
 	case autoUnlockUnitPlain:
-		content = lndServiceUnit(lndUser, false)
+		content = LNDServiceUnit("lnd", false)
 	case autoUnlockUnitEnabled:
-		content = lndServiceUnit(lndUser, true)
+		content = LNDServiceUnit("lnd", true)
 	default:
 		return errors.New("refusing to write unknown LND unit variant")
 	}
@@ -1312,7 +1298,8 @@ func readProcessArgs(pid int) ([]string, error) {
 	return parts, nil
 }
 
-func readLNDWalletState() (lnrpc.WalletState, error) {
+// ReadLNDWalletState uses the root-owned TLS certificate for a bounded State RPC.
+func ReadLNDWalletState() (lnrpc.WalletState, error) {
 	conn, err := directLNDConn()
 	if err != nil {
 		return lnrpc.WalletState_WAITING_TO_START, err
@@ -1490,4 +1477,31 @@ func syncDir(path string) error {
 		return fmt.Errorf("sync directory %s: %w", path, err)
 	}
 	return nil
+}
+
+// SetupAutoUnlock runs the verified transition independently of the observing TUI.
+func SetupAutoUnlock(password autounlock.Password) (autounlock.Result, error) {
+	if os.Geteuid() != 0 {
+		return autounlock.Result{}, errors.New("auto-unlock changes require the root helper")
+	}
+	if password.Text() == "" {
+		return autounlock.Result{}, errors.New("wallet password was not validated")
+	}
+	ops, err := productionAutoUnlockOps()
+	if err != nil {
+		return repairRequired("initialize auto-unlock operation", err), nil
+	}
+	return enableAutoUnlock(password.Text(), ops), nil
+}
+
+// DisableAutoUnlock proves a locked invocation before durably removing the secret.
+func DisableAutoUnlock() (autounlock.Result, error) {
+	if os.Geteuid() != 0 {
+		return autounlock.Result{}, errors.New("auto-unlock changes require the root helper")
+	}
+	ops, err := productionAutoUnlockOps()
+	if err != nil {
+		return repairRequired("initialize auto-unlock operation", err), nil
+	}
+	return disableAutoUnlockTransition(ops), nil
 }
