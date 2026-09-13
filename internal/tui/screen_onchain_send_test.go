@@ -31,9 +31,11 @@ func onChainScreen(t *testing.T) (*OnChainSendScreen, *screenOnChainClient) {
 	t.Helper()
 	coin := lndrpc.UTXO{Txid: strings.Repeat("a", 64), AmountSats: 10000}
 	client := &screenOnChainClient{coins: []lndrpc.UTXO{coin}}
-	ocCtx := &OnChainContext{Utxos: client.coins}
+	ocCtx := &OnChainContext{OnChainSnapshot: app.OnChainSnapshot{Utxos: freshStatus(client.coins)}, reader: &onChainTestReader{}}
 	ocCtx.Selection.Toggle(coin)
 	s := NewOnChainSendScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}}, ocCtx)
+	s.ctx.OnChain = ocCtx
+	ocCtx.scope = s.ctx.onChainScope()
 	s.client = client
 	addr, err := btcutil.NewAddressWitnessPubKeyHash(make([]byte, 20), &chaincfg.MainNetParams)
 	if err != nil {
@@ -99,8 +101,8 @@ func TestOnChainSelectionRefreshAndRenewedConfirmation(t *testing.T) {
 	original := client.coins[0]
 	other := lndrpc.UTXO{Txid: strings.Repeat("b", 64), AmountSats: 20000}
 	s.validateAndConfirm()
-	m := Model{ocCtx: s.ocCtx}
-	m.Update(utxoListMsg{utxos: []lndrpc.UTXO{other, original}})
+	m := Model{screenCtx: s.ctx}
+	publishOnChain(t, &m, app.OnChainSnapshot{Utxos: freshStatus([]lndrpc.UTXO{other, original})})
 	if !s.ocCtx.Selection.Contains(original) || s.ocCtx.Selection.Contains(other) {
 		t.Fatal("refresh substituted selected coin")
 	}
@@ -110,7 +112,7 @@ func TestOnChainSelectionRefreshAndRenewedConfirmation(t *testing.T) {
 		t.Fatal("selection edit bypassed review")
 	}
 	s.validateAndConfirm()
-	m.Update(utxoListMsg{utxos: nil})
+	publishOnChain(t, &m, app.OnChainSnapshot{Utxos: freshStatus([]lndrpc.UTXO(nil))})
 	s.confirmBtnIdx = 1
 	_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
 	client.coins = nil
@@ -136,7 +138,7 @@ func TestOnChainResultsRespectAttemptAndTabOwnership(t *testing.T) {
 	if _, cmd := current.HandleMsg(oldMsg); cmd != nil || current.step != ocStepBroadcast {
 		t.Fatal("old result reached replacement screen")
 	}
-	m := Model{nav: NewNavSidebar(), ocCtx: current.ocCtx, screenCtx: current.ctx,
+	m := Model{nav: NewNavSidebar(), screenCtx: current.ctx,
 		tabs: []openTab{{Kind: tabOnChain, Section: secOnChain, Screen: current}}}
 	m.nav.ActiveItem = secOnChain
 	m.activeTab = 1
@@ -157,6 +159,25 @@ func TestOnChainResultsRespectAttemptAndTabOwnership(t *testing.T) {
 	m = updated.(Model)
 	if current.step != ocStepResult || current.result.State != app.OnChainBroadcast || cmd == nil {
 		t.Fatal("hidden on-chain tab lost its result")
+	}
+	listReads, statusRequests := 0, 0
+	for _, command := range cmd().(tea.BatchMsg) {
+		switch message := command().(type) {
+		case refreshOnChainMsg:
+			read := statusUpdate(&m, message)
+			if read == nil {
+				t.Fatal("send completion did not reach list admission")
+			}
+			statusUpdate(&m, read())
+			listReads++
+		case refreshStatusMsg:
+			statusRequests++
+		default:
+			t.Fatalf("unexpected send-completion command %T", message)
+		}
+	}
+	if listReads != 1 || statusRequests != 1 {
+		t.Fatal("send completion omitted a refresh")
 	}
 	if _, duplicate := m.Update(msg); duplicate != nil {
 		t.Fatal("duplicate result triggered wallet refresh again")

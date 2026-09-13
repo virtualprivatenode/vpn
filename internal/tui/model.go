@@ -190,11 +190,6 @@ type paymentHistoryMsg struct {
 	err     error
 }
 
-type utxoListMsg struct {
-	utxos []lndrpc.UTXO
-	err   error
-}
-
 type onChainSendAttempt struct{ prepared app.PreparedOnChainSend }
 
 type sendCoinsResultMsg struct {
@@ -205,13 +200,6 @@ type sendCoinsResultMsg struct {
 type feeTiersMsg struct {
 	tiers [4]feeTier
 	err   error
-}
-
-type onChainTxMsg struct {
-	owner    *OnChainContext
-	revision uint64
-	txs      []lndrpc.OnChainTx
-	err      error
 }
 
 type channelCloseResultMsg struct {
@@ -270,7 +258,6 @@ type Model struct {
 
 	// L16: shared context for screen components
 	screenCtx *ScreenContext
-	ocCtx     *OnChainContext
 
 	// L16: section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
@@ -331,13 +318,13 @@ func NewModel(
 		LndClient:       client,
 		Version:         version,
 	}
-	m.ocCtx = &OnChainContext{}
+	m.screenCtx.OnChain = &OnChainContext{reader: app.NewOnChainReader()}
 	m.sectionScreens[secChannels] =
 		NewChannelsHomeScreen(m.screenCtx)
 	m.sectionScreens[secWallet] =
 		NewWalletHomeScreen(m.screenCtx)
 	m.sectionScreens[secOnChain] =
-		NewOnChainHomeScreen(m.screenCtx, m.ocCtx)
+		NewOnChainHomeScreen(m.screenCtx, m.screenCtx.OnChain)
 	m.sectionScreens[secAddons] =
 		NewAddonsHomeScreen(m.screenCtx)
 	m.sectionScreens[secSystem] =
@@ -365,6 +352,10 @@ func (m Model) pollInterval() time.Duration {
 		m.state.WalletKnown && m.state.WalletExists {
 		return 5 * time.Second
 	}
+	if m.nav.ActiveSection() == secOnChain && m.screenCtx.OnChain != nil &&
+		(m.screenCtx.OnChain.Utxos.Err != nil || m.screenCtx.OnChain.OnChainTxs.Err != nil) {
+		return 5 * time.Second
+	}
 	return 60 * time.Second
 }
 
@@ -376,6 +367,7 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		m.screenCtx.OnChain.reader.Close()
 		m.statusCollector.Close()
 		if m.screenCtx.AutoUnlock != nil {
 			m.screenCtx.AutoUnlock.Close()

@@ -114,7 +114,7 @@ func TestExistingWalletFormsBlockSubmissionAndRecover(t *testing.T) {
 		s.openLabelPopup()
 		s.labelInput.SetValue("retained draft")
 		s.HandleKey("tab", tea.KeyPressMsg{Code: tea.KeyTab})
-		wantTxid := s.ocCtx.Utxos[0].Txid
+		wantTxid := s.ocCtx.Utxos.Value[0].Txid
 		exerciseUnavailableWalletAction(t, s.ctx, s, tabMain, secOnChain, func() {
 			if len(client.requests) != 1 || client.requests[0].Txid.String() != wantTxid || client.requests[0].Label != "retained draft" || s.labelPending || s.labelEditing {
 				t.Fatal("label draft or owned completion was lost")

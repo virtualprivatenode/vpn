@@ -1,6 +1,7 @@
 package lndrpc
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -73,6 +74,10 @@ type TxOutput struct {
 func (c *Client) ListUnspent(
 	minConfs, maxConfs int32,
 ) ([]UTXO, error) {
+	return c.ListUnspentContext(context.Background(), minConfs, maxConfs)
+}
+
+func (c *Client) ListUnspentContext(parent context.Context, minConfs, maxConfs int32) ([]UTXO, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
@@ -87,7 +92,7 @@ func (c *Client) ListUnspent(
 
 	walletClient := walletrpc.NewWalletKitClient(conn)
 
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := walletClient.ListUnspent(ctx,
@@ -178,11 +183,15 @@ func buildSendCoinsRequest(input SendCoinsRequest) (*lnrpc.SendCoinsRequest, err
 // ── Get on-chain transactions ────────────────────────────
 
 func (c *Client) GetTransactions() ([]OnChainTx, error) {
+	return c.GetTransactionsContext(context.Background())
+}
+
+func (c *Client) GetTransactionsContext(parent context.Context) ([]OnChainTx, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.GetTransactions(ctx,
@@ -193,10 +202,16 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 	}
 
 	// Get channel funding txids for labeling
-	chanTxids := c.getChannelFundingTxids()
+	chanTxids, err := c.getChannelFundingTxids(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Get closed channel txids
-	closeTxids := c.getClosedChannelTxids()
+	closeTxids, err := c.getClosedChannelTxids(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var txs []OnChainTx
 	for _, t := range resp.GetTransactions() {
@@ -356,27 +371,58 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 
 // getChannelFundingTxids returns a map of funding txid →
 // peer alias for all open and pending channels.
-func (c *Client) getChannelFundingTxids() map[string]string {
+func (c *Client) getChannelFundingTxids(parent context.Context) (map[string]string, error) {
 	result := make(map[string]string)
 	rpc := c.rpc()
 	if rpc == nil {
-		return result
+		return nil, errNotConnected
 	}
 
 	// Open channels
-	ctx, cancel := c.callCtx(10 * time.Second)
+	ctx, cancel := c.callCtxFrom(parent, 10*time.Second)
 	defer cancel()
 	chResp, err := rpc.ListChannels(ctx,
 		&lnrpc.ListChannelsRequest{})
-	if err == nil {
-		for _, ch := range chResp.GetChannels() {
+	if err != nil {
+		return nil, fmt.Errorf("read channel funding metadata: %w", err)
+	}
+	for _, ch := range chResp.GetChannels() {
+		cp := ch.GetChannelPoint()
+		txid := chanPointTxid(cp)
+		if txid != "" {
+			alias := c.getPeerAliasContext(parent,
+				ch.GetRemotePubkey())
+			if alias == "" {
+				pk := ch.GetRemotePubkey()
+				if len(pk) > 12 {
+					alias = pk[:12] + ".."
+				} else {
+					alias = pk
+				}
+			}
+			result[txid] = alias
+		}
+	}
+
+	// Pending channels
+	ctx2, cancel2 := c.callCtxFrom(parent, 10*time.Second)
+	defer cancel2()
+	pendResp, err := rpc.PendingChannels(ctx2,
+		&lnrpc.PendingChannelsRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("read pending funding metadata: %w", err)
+	}
+	for _, pc := range pendResp.
+		GetPendingOpenChannels() {
+		ch := pc.GetChannel()
+		if ch != nil {
 			cp := ch.GetChannelPoint()
 			txid := chanPointTxid(cp)
 			if txid != "" {
-				alias := c.getPeerAlias(
-					ch.GetRemotePubkey())
+				alias := c.getPeerAliasContext(parent,
+					ch.GetRemoteNodePub())
 				if alias == "" {
-					pk := ch.GetRemotePubkey()
+					pk := ch.GetRemoteNodePub()
 					if len(pk) > 12 {
 						alias = pk[:12] + ".."
 					} else {
@@ -388,58 +434,29 @@ func (c *Client) getChannelFundingTxids() map[string]string {
 		}
 	}
 
-	// Pending channels
-	ctx2, cancel2 := c.callCtx(10 * time.Second)
-	defer cancel2()
-	pendResp, err := rpc.PendingChannels(ctx2,
-		&lnrpc.PendingChannelsRequest{})
-	if err == nil {
-		for _, pc := range pendResp.
-			GetPendingOpenChannels() {
-			ch := pc.GetChannel()
-			if ch != nil {
-				cp := ch.GetChannelPoint()
-				txid := chanPointTxid(cp)
-				if txid != "" {
-					alias := c.getPeerAlias(
-						ch.GetRemoteNodePub())
-					if alias == "" {
-						pk := ch.GetRemoteNodePub()
-						if len(pk) > 12 {
-							alias = pk[:12] + ".."
-						} else {
-							alias = pk
-						}
-					}
-					result[txid] = alias
-				}
-			}
-		}
-	}
-
-	return result
+	return result, parent.Err()
 }
 
 // getClosedChannelTxids returns a map of closing txid →
 // peer alias for all closed channels.
-func (c *Client) getClosedChannelTxids() map[string]string {
+func (c *Client) getClosedChannelTxids(parent context.Context) (map[string]string, error) {
 	result := make(map[string]string)
 	rpc := c.rpc()
 	if rpc == nil {
-		return result
+		return nil, errNotConnected
 	}
 
-	ctx, cancel := c.callCtx(10 * time.Second)
+	ctx, cancel := c.callCtxFrom(parent, 10*time.Second)
 	defer cancel()
 
 	resp, err := rpc.ClosedChannels(ctx,
 		&lnrpc.ClosedChannelsRequest{})
 	if err != nil {
-		return result
+		return nil, fmt.Errorf("read closed channel metadata: %w", err)
 	}
 
 	for _, ch := range resp.GetChannels() {
-		alias := c.getPeerAlias(
+		alias := c.getPeerAliasContext(parent,
 			ch.GetRemotePubkey())
 		if alias == "" {
 			pk := ch.GetRemotePubkey()
@@ -466,7 +483,7 @@ func (c *Client) getClosedChannelTxids() map[string]string {
 		}
 	}
 
-	return result
+	return result, parent.Err()
 }
 
 // chanPointTxid extracts the txid from a channel point

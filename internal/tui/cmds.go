@@ -244,38 +244,10 @@ func getNewAddressCmd(owner *OCReceiveScreen) tea.Cmd {
 	}
 }
 
-func listUnspentCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return utxoListMsg{err: fmt.Errorf(
-				"LND not connected")}
-		}
-		utxos, err := client.ListUnspent(0, 999999)
-		return utxoListMsg{utxos: utxos, err: err}
-	}
-}
-
 func sendCoinsCmd(client app.OnChainSendClient, attempt *onChainSendAttempt) tea.Cmd {
 	prepared := attempt.prepared
 	return func() tea.Msg {
 		return sendCoinsResultMsg{attempt: attempt, result: app.SendOnChain(client, prepared)}
-	}
-}
-
-func fetchOnChainTxCmd(
-	client *lndrpc.Client, owner *OnChainContext,
-) tea.Cmd {
-	owner.txRevision++
-	revision := owner.txRevision
-	return func() tea.Msg {
-		if client == nil {
-			return onChainTxMsg{owner: owner, revision: revision, err: fmt.Errorf(
-				"LND not connected")}
-		}
-		txs, err := client.GetTransactions()
-		return onChainTxMsg{owner: owner, revision: revision, txs: txs, err: err}
 	}
 }
 

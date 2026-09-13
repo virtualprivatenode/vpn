@@ -12,27 +12,12 @@ import (
 
 // ── UtxoDetailScreen ───────────────────────────────────
 // View-only tab showing a single UTXO's details.
-// No buttons — navigate away via backspace (parent).
+// Backspace returns to the parent.
 
-type UtxoDetailScreen struct {
-	ctx   *ScreenContext
-	utxo  lndrpc.UTXO
-	date  string // pre-resolved from tx list
-	label string // pre-resolved from tx list
-}
+type UtxoDetailScreen struct{ onChainDetail }
 
-func NewUtxoDetailScreen(
-	ctx *ScreenContext,
-	utxo lndrpc.UTXO,
-	txDate string,
-	txLabel string,
-) *UtxoDetailScreen {
-	return &UtxoDetailScreen{
-		ctx:   ctx,
-		utxo:  utxo,
-		date:  txDate,
-		label: txLabel,
-	}
+func NewUtxoDetailScreen(ctx *ScreenContext, outpoint string) *UtxoDetailScreen {
+	return &UtxoDetailScreen{onChainDetail: newOnChainDetail(ctx, outpoint)}
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -71,9 +56,28 @@ func (s *UtxoDetailScreen) HandleMsg(
 func (s *UtxoDetailScreen) View(
 	w, h int,
 ) string {
-	u := s.utxo
 	p := newPane(w)
 	p.title(theme.Header, "UTXO Detail")
+	u, notice, found := s.record()
+	if notice != "" {
+		p.warnWrap(notice).blank()
+	}
+	if !found {
+		p.labelLine("Outpoint:").monoWrap(s.key)
+		return p.render()
+	}
+	tx, _, txFound := onChainDetailRecord(s.owner.OnChainTxs, func(tx lndrpc.OnChainTx) bool { return tx.Txid == u.Txid })
+	date, label := "unavailable", "unavailable"
+	if txFound {
+		date, label = formatDateShort(tx.Timestamp), tx.Label
+		if label == "" {
+			label = "none"
+		}
+		if !s.owner.OnChainTxs.Fresh() {
+			date += " (stale)"
+			label += " (stale)"
+		}
+	}
 
 	p.field("Amount:    ",
 		formatSats(u.AmountSats)+" sats")
@@ -84,7 +88,7 @@ func (s *UtxoDetailScreen) View(
 	}
 	p.field("Confs:     ", confStr)
 
-	dateStr := s.date
+	dateStr := date
 	if u.Confirmations == 0 {
 		dateStr = "unconfirmed"
 	}
@@ -100,16 +104,18 @@ func (s *UtxoDetailScreen) View(
 	p.monoWrap(u.Address)
 	p.blank()
 
-	if s.label != "" {
-		p.field("Label:     ", s.label)
-	} else {
-		p.field("Label:     ",
-			theme.Dim.Render("none"))
-	}
+	p.field("Label:     ", label)
 
 	return p.render()
 }
 
 func (s *UtxoDetailScreen) HelpBindings() []key.Binding {
 	return viewDetailBindings(s.ctx.HasTabs)
+}
+
+func (s *UtxoDetailScreen) record() (lndrpc.UTXO, string, bool) {
+	if !s.current() {
+		return lndrpc.UTXO{}, previousOnChainDetail, false
+	}
+	return onChainDetailRecord(s.owner.Utxos, func(u lndrpc.UTXO) bool { return fmt.Sprintf("%s:%d", u.Txid, u.Vout) == s.key })
 }

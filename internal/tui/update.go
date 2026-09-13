@@ -110,11 +110,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				requestStatusCmd,
 				fetchPaymentHistoryCmd(m.lndClient),
+				m.visibleOnChainCmd(),
 				fetchWalletStateCmd(m.screenCtx),
 				fetchKeyVerificationStateCmd())
 		}
 		return m, tea.Batch(
 			requestStatusCmd,
+			m.visibleOnChainCmd(),
 			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd())
 	case tea.KeyPressMsg:
@@ -308,8 +310,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.Kind == tabUtxoDetail || msg.Kind == tabOnChainTx {
+			if msg.Key == "" || onChainDetailKey(msg.Screen, msg.Kind) != msg.Key || m.nav.ActiveSection() != secOnChain {
+				return m, nil
+			}
+			for i, tab := range m.effectiveTabs() {
+				if tab.Kind == msg.Kind && tab.Key == msg.Key {
+					m.setTabScreen(i, msg.Screen)
+					m.activeTab = i
+					m.rememberTabPosition()
+					m.focusTabBar()
+					m.tabCursorX = 0
+					return m, nil
+				}
+			}
+		}
 		// Dedup by kind + index if Index is set
-		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index != 0 {
+		if msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index != 0 {
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
 				if t.Kind == msg.Kind &&
@@ -327,7 +344,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Dedup flow tabs by kind + section
-		if msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index == 0 {
+		if msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index == 0 {
 			sec := m.nav.ActiveSection()
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
@@ -404,6 +421,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.state.WalletKnown = false
+			if m.screenCtx.OnChain != nil {
+				m.screenCtx.OnChain.OnChainSnapshot = m.screenCtx.OnChain.Unavailable(msg.err)
+			}
 			if m.screenCtx.Status != nil {
 				snapshot := m.screenCtx.Status.WalletUnavailable(msg.err)
 				m.screenCtx.Status = &snapshot
@@ -411,6 +431,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger.TUI("read live wallet state: %v", msg.err)
 			return m, nil
 		}
+		recovered := !m.state.WalletKnown || m.state.WalletExists != msg.state.WalletExists
 		if m.state.WalletExists != msg.state.WalletExists {
 			m.screenCtx.invalidateWalletObservations()
 		}
@@ -420,7 +441,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.HasLND() && m.screenCtx.walletCreationOwner == nil {
 			m.lndClient = lndrpc.New()
 			m.screenCtx.LndClient = m.lndClient
-			return m, requestStatusCmd
+			return m, tea.Batch(requestStatusCmd, m.visibleOnChainCmd())
+		}
+		if recovered {
+			return m, m.visibleOnChainCmd()
 		}
 		return m, nil
 	case keyVerificationStateMsg:
@@ -513,16 +537,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
-	case utxoListMsg:
-		if msg.err == nil {
-			m.ocCtx.Utxos = msg.utxos
-		}
-		return m, nil
-	case onChainTxMsg:
-		if msg.owner != nil && msg.owner == m.ocCtx && msg.revision == m.ocCtx.txRevision && msg.err == nil {
-			m.ocCtx.OnChainTxs = msg.txs
-		}
-		return m, nil
+	case refreshOnChainMsg:
+		return m, m.admitOnChain()
+	case onChainResultMsg:
+		return m, m.completeOnChain(msg)
 	case sendCoinsResultMsg:
 		return m.dispatchToTab(tabOnChain, msg)
 	case channelCloseResultMsg, channelCloseFeesMsg:
@@ -553,7 +571,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, nil
 		}
-		m.ocCtx.SendFeeTiers = msg.tiers
+		m.screenCtx.OnChain.SendFeeTiers = msg.tiers
 		// Keep each screen update and batch the resulting commands.
 		var cmds []tea.Cmd
 		for _, kind := range []tabKind{
@@ -671,9 +689,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		if m.statusActive != nil {
-			return m, tea.Batch(requestStatusCmd, tickEveryCmd(m.pollInterval()))
+			return m, tea.Batch(requestStatusCmd, m.visibleOnChainCmd(), tickEveryCmd(m.pollInterval()))
 		}
 		cmds := []tea.Cmd{
+			m.visibleOnChainCmd(),
 			requestStatusCmd,
 			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd(),
@@ -920,9 +939,7 @@ func (m Model) previewSection(
 		return m,
 			fetchPaymentHistoryCmd(m.lndClient)
 	case secOnChain:
-		return m, tea.Batch(
-			listUnspentCmd(m.lndClient),
-			fetchOnChainTxCmd(m.lndClient, m.ocCtx))
+		return m, requestOnChainCmd
 	}
 	return m, nil
 }

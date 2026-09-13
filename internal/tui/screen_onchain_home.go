@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -100,7 +99,7 @@ func (s *OnChainHomeScreen) HandleKey(
 		return s.handleShiftTab()
 	case "space":
 		if s.focusZone == ocHomeZoneUtxos &&
-			s.utxoCursor < len(s.ocCtx.Utxos) {
+			s.utxoCursor < len(s.ocCtx.Utxos.Value) {
 			s.toggleSelection(s.utxoCursor)
 			s.utxoChanged = true
 		}
@@ -156,7 +155,7 @@ func (s *OnChainHomeScreen) handleRight() (
 			s.btnIdx++
 		}
 	case ocHomeZoneUtxos:
-		if s.utxoCursor < len(s.ocCtx.Utxos) &&
+		if s.utxoCursor < len(s.ocCtx.Utxos.Value) &&
 			!s.pencilFocused {
 			s.pencilFocused = true
 		}
@@ -173,9 +172,9 @@ func (s *OnChainHomeScreen) handleUp() (
 			s.txCursor--
 		} else {
 			s.focusZone = ocHomeZoneUtxos
-			if len(s.ocCtx.Utxos) > 0 {
+			if len(s.ocCtx.Utxos.Value) > 0 {
 				s.utxoCursor =
-					len(s.ocCtx.Utxos) - 1
+					len(s.ocCtx.Utxos.Value) - 1
 			}
 		}
 	case ocHomeZoneUtxos:
@@ -200,25 +199,25 @@ func (s *OnChainHomeScreen) handleDown() (
 ) {
 	switch s.focusZone {
 	case ocHomeZoneButtons:
-		if len(s.ocCtx.Utxos) > 0 {
+		if len(s.ocCtx.Utxos.Value) > 0 {
 			s.focusZone = ocHomeZoneUtxos
 			s.utxoCursor = 0
 			s.pencilFocused = false
-		} else if len(s.ocCtx.OnChainTxs) > 0 {
+		} else if len(s.ocCtx.OnChainTxs.Value) > 0 {
 			s.focusZone = ocHomeZoneTxs
 			s.txCursor = 0
 		}
 	case ocHomeZoneUtxos:
-		if s.utxoCursor < len(s.ocCtx.Utxos)-1 {
+		if s.utxoCursor < len(s.ocCtx.Utxos.Value)-1 {
 			s.utxoCursor++
 			s.pencilFocused = false
-		} else if len(s.ocCtx.OnChainTxs) > 0 {
+		} else if len(s.ocCtx.OnChainTxs.Value) > 0 {
 			s.focusZone = ocHomeZoneTxs
 			s.txCursor = 0
 			s.pencilFocused = false
 		}
 	case ocHomeZoneTxs:
-		if s.txCursor < len(s.ocCtx.OnChainTxs)-1 {
+		if s.txCursor < len(s.ocCtx.OnChainTxs.Value)-1 {
 			s.txCursor++
 		}
 	}
@@ -230,16 +229,16 @@ func (s *OnChainHomeScreen) handleTab() (
 ) {
 	switch s.focusZone {
 	case ocHomeZoneButtons:
-		if len(s.ocCtx.Utxos) > 0 {
+		if len(s.ocCtx.Utxos.Value) > 0 {
 			s.focusZone = ocHomeZoneUtxos
 			s.utxoCursor = 0
 			s.pencilFocused = false
-		} else if len(s.ocCtx.OnChainTxs) > 0 {
+		} else if len(s.ocCtx.OnChainTxs.Value) > 0 {
 			s.focusZone = ocHomeZoneTxs
 			s.txCursor = 0
 		}
 	case ocHomeZoneUtxos:
-		if len(s.ocCtx.OnChainTxs) > 0 {
+		if len(s.ocCtx.OnChainTxs.Value) > 0 {
 			s.focusZone = ocHomeZoneTxs
 			s.txCursor = 0
 			s.pencilFocused = false
@@ -256,7 +255,7 @@ func (s *OnChainHomeScreen) handleShiftTab() (
 	switch s.focusZone {
 	case ocHomeZoneTxs:
 		s.focusZone = ocHomeZoneUtxos
-		if len(s.ocCtx.Utxos) > 0 {
+		if len(s.ocCtx.Utxos.Value) > 0 {
 			s.utxoCursor = 0
 		} else {
 			s.focusZone = ocHomeZoneButtons
@@ -288,7 +287,7 @@ func (s *OnChainHomeScreen) handleEnter() (
 			return s.openReceive()
 		}
 	case ocHomeZoneUtxos:
-		if s.utxoCursor < len(s.ocCtx.Utxos) {
+		if s.utxoCursor < len(s.ocCtx.Utxos.Value) {
 			if s.pencilFocused {
 				s.openLabelPopup()
 				return s, nil
@@ -296,7 +295,7 @@ func (s *OnChainHomeScreen) handleEnter() (
 			return s.openUtxoDetail()
 		}
 	case ocHomeZoneTxs:
-		if s.txCursor < len(s.ocCtx.OnChainTxs) {
+		if s.txCursor < len(s.ocCtx.OnChainTxs.Value) {
 			return s.openTxDetail()
 		}
 	}
@@ -351,21 +350,13 @@ func (s *OnChainHomeScreen) openSend() (
 func (s *OnChainHomeScreen) openUtxoDetail() (
 	Screen, tea.Cmd,
 ) {
-	u := s.ocCtx.Utxos[s.utxoCursor]
-	label := u.Address
-	if len(label) > 14 {
-		label = label[:12] + ".."
-	}
-	txDate := s.utxoDate(u.Txid)
-	txLabel := s.utxoTxLabel(u.Txid)
-	screen := NewUtxoDetailScreen(
-		s.ctx, u, txDate, txLabel)
-	idx := s.utxoCursor
+	u := s.ocCtx.Utxos.Value[s.utxoCursor]
+	key := fmt.Sprintf("%s:%d", u.Txid, u.Vout)
+	screen := NewUtxoDetailScreen(s.ctx, key)
 	return s, func() tea.Msg {
 		return openTabMsg{
 			Kind:        tabUtxoDetail,
-			Label:       label,
-			Index:       idx,
+			Key:         key,
 			Screen:      screen,
 			FocusTabBar: true,
 		}
@@ -375,22 +366,13 @@ func (s *OnChainHomeScreen) openUtxoDetail() (
 func (s *OnChainHomeScreen) openTxDetail() (
 	Screen, tea.Cmd,
 ) {
-	tx := s.ocCtx.OnChainTxs[s.txCursor]
-	label := tx.Label
-	if len(label) > 14 {
-		label = label[:12] + ".."
-	}
-	var pfc []lndrpc.PendingForceCloseChannel
-	if s.ctx.Status != nil {
-		pfc = s.ctx.Status.Channels.Value.Pending.PendingForceCloseChannels
-	}
-	screen := NewOnChainTxScreen(s.ctx, tx, pfc)
-	idx := s.txCursor
+	tx := s.ocCtx.OnChainTxs.Value[s.txCursor]
+	key := tx.Txid
+	screen := NewOnChainTxScreen(s.ctx, key)
 	return s, func() tea.Msg {
 		return openTabMsg{
 			Kind:        tabOnChainTx,
-			Label:       label,
-			Index:       idx,
+			Key:         key,
 			Screen:      screen,
 			FocusTabBar: true,
 		}
@@ -514,13 +496,14 @@ func (s *OnChainHomeScreen) HandleMsg(
 		case app.TransactionLabelSaved:
 			// Publish only the acknowledged label. Invalidate older history reads
 			// before requesting a fresh snapshot, so they cannot undo this result.
-			for i := range s.ocCtx.OnChainTxs {
-				if s.ocCtx.OnChainTxs[i].Txid == s.labelTxid {
-					s.ocCtx.OnChainTxs[i].Label = s.labelInput.Value()
+			for i := range s.ocCtx.OnChainTxs.Value {
+				if s.ocCtx.OnChainTxs.Value[i].Txid == s.labelTxid {
+					s.ocCtx.OnChainTxs.Value[i].Label = s.labelInput.Value()
 				}
 			}
 			s.closeLabelPopup()
-			return s, fetchOnChainTxCmd(s.ctx.LndClient, s.ocCtx)
+			s.ocCtx.revision++
+			return s, requestOnChainCmd
 		case app.TransactionLabelNotSaved:
 			s.labelErr = "Label was not saved."
 			if msg.result.Err != nil {
@@ -578,16 +561,15 @@ func (s *OnChainHomeScreen) View(
 	headerLines = append(headerLines, "")
 
 	isFocused := s.ctx.ContentFocused
-	utxos := s.ocCtx.Utxos
-	txs := s.ocCtx.OnChainTxs
+	utxos := s.ocCtx.Utxos.Value
+	txs := s.ocCtx.OnChainTxs.Value
 
 	headerLines = append(headerLines,
 		" "+theme.Label.Render("Balance:  ")+
 			theme.Value.Render(
 				onChainBalanceText(status))+
 			theme.Dim.Render(
-				fmt.Sprintf("  (%d UTXOs)",
-					len(utxos))))
+				s.utxoCountText()))
 
 	if status.Bitcoin.Fresh() && !status.Bitcoin.Value.Synced {
 		headerLines = append(headerLines, "")
@@ -609,7 +591,7 @@ func (s *OnChainHomeScreen) View(
 
 	sendLabel := "Send"
 	if s.ocCtx.Selection.Len() > 0 {
-		total, err := s.ocCtx.Selection.Total(s.ocCtx.Utxos)
+		total, err := s.ocCtx.Selection.Total(s.ocCtx.Utxos.Value)
 		if err != nil {
 			sendLabel = "Send Selected (unavailable)"
 		} else {
@@ -642,7 +624,7 @@ func (s *OnChainHomeScreen) View(
 	var utxoHeaderLines []string
 	utxoHeaderLines = append(utxoHeaderLines,
 		centerPad(
-			theme.Header.Render("UTXOs"), w))
+			theme.Header.Render(onChainListTitle("UTXOs", s.ocCtx.Utxos)), w))
 
 	utxoHdr := " " +
 		hdrStyle.Render(pad("Date", uDateW)) +
@@ -663,7 +645,7 @@ func (s *OnChainHomeScreen) View(
 
 	if len(utxos) == 0 {
 		utxoMidLines = append(utxoMidLines,
-			" "+theme.Dim.Render("No UTXOs found."))
+			" "+theme.Dim.Render(onChainEmptyText(s.ocCtx.Utxos, "No UTXOs found.")))
 	} else {
 		for i, u := range utxos {
 			isSelected := isFocused &&
@@ -785,7 +767,7 @@ func (s *OnChainHomeScreen) View(
 	var txHeaderLines []string
 	txHeaderLines = append(txHeaderLines,
 		centerPad(
-			theme.Header.Render("Transactions"), w))
+			theme.Header.Render(onChainListTitle("Transactions", s.ocCtx.OnChainTxs)), w))
 
 	txHdr := " " +
 		hdrStyle.Render(pad("Date", tDateW)) +
@@ -811,7 +793,7 @@ func (s *OnChainHomeScreen) View(
 	if len(txs) == 0 {
 		txMidLines = append(txMidLines,
 			" "+theme.Dim.Render(
-				"No on-chain transactions."))
+				onChainEmptyText(s.ocCtx.OnChainTxs, "No on-chain transactions.")))
 	} else {
 		for i, tx := range txs {
 			isSelected := isFocused &&
@@ -919,10 +901,10 @@ func (s *OnChainHomeScreen) View(
 // ── Label popup ─────────────────────────────────────────
 
 func (s *OnChainHomeScreen) openLabelPopup() {
-	if s.utxoCursor < 0 || s.utxoCursor >= len(s.ocCtx.Utxos) {
+	if s.utxoCursor < 0 || s.utxoCursor >= len(s.ocCtx.Utxos.Value) {
 		return
 	}
-	s.labelTxid = s.ocCtx.Utxos[s.utxoCursor].Txid
+	s.labelTxid = s.ocCtx.Utxos.Value[s.utxoCursor].Txid
 	s.labelErr = ""
 	txLabel := s.utxoTxLabel(s.labelTxid)
 	contentW := tuiWidth - 2 - 12 - 1 // nav width=12
@@ -1082,10 +1064,10 @@ func (s *OnChainHomeScreen) labelPopupBindings() []key.Binding {
 // ── Coin control ────────────────────────────────────────
 
 func (s *OnChainHomeScreen) toggleSelection(idx int) {
-	if idx < 0 || idx >= len(s.ocCtx.Utxos) {
+	if idx < 0 || idx >= len(s.ocCtx.Utxos.Value) {
 		return
 	}
-	s.ocCtx.Selection.Toggle(s.ocCtx.Utxos[idx])
+	s.ocCtx.Selection.Toggle(s.ocCtx.Utxos.Value[idx])
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -1093,7 +1075,7 @@ func (s *OnChainHomeScreen) toggleSelection(idx int) {
 func (s *OnChainHomeScreen) utxoDate(
 	txid string,
 ) string {
-	for _, tx := range s.ocCtx.OnChainTxs {
+	for _, tx := range s.ocCtx.OnChainTxs.Value {
 		if tx.Txid == txid {
 			return formatDateShort(tx.Timestamp)
 		}
@@ -1104,7 +1086,7 @@ func (s *OnChainHomeScreen) utxoDate(
 func (s *OnChainHomeScreen) utxoTxLabel(
 	txid string,
 ) string {
-	for _, tx := range s.ocCtx.OnChainTxs {
+	for _, tx := range s.ocCtx.OnChainTxs.Value {
 		if tx.Txid == txid {
 			return tx.Label
 		}
@@ -1113,11 +1095,11 @@ func (s *OnChainHomeScreen) utxoTxLabel(
 }
 
 func (s *OnChainHomeScreen) computeTxBalances() []int64 {
-	txs := s.ocCtx.OnChainTxs
+	txs := s.ocCtx.OnChainTxs.Value
 	if len(txs) == 0 {
 		return nil
 	}
-	if s.ctx.Status == nil || !s.ctx.Status.Balance.Fresh() {
+	if !s.ocCtx.OnChainTxs.Fresh() || s.ctx.Status == nil || !s.ctx.Status.Balance.Fresh() {
 		return nil
 	}
 	bal := parseBalance(s.ctx.Status.Balance.Value.TotalBalance)
@@ -1130,7 +1112,7 @@ func (s *OnChainHomeScreen) computeTxBalances() []int64 {
 }
 
 func (s *OnChainHomeScreen) clampCursors() {
-	utxos := s.ocCtx.Utxos
+	utxos := s.ocCtx.Utxos.Value
 	if len(utxos) == 0 {
 		s.utxoCursor = 0
 	} else if s.utxoCursor >= len(utxos) {
@@ -1140,7 +1122,7 @@ func (s *OnChainHomeScreen) clampCursors() {
 		s.utxoCursor = 0
 	}
 
-	txs := s.ocCtx.OnChainTxs
+	txs := s.ocCtx.OnChainTxs.Value
 	if len(txs) == 0 {
 		s.txCursor = 0
 	} else if s.txCursor >= len(txs) {

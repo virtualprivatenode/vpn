@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -24,17 +25,19 @@ func (c *labelSaveClient) SetTransactionLabel(request lndrpc.TransactionLabelReq
 func labelModel() (Model, *OnChainHomeScreen, *labelSaveClient) {
 	theme.Init(true)
 	ctx := &ScreenContext{ContentFocused: true, State: &RuntimeState{WalletKnown: true, WalletExists: true}}
-	oc := &OnChainContext{
-		Utxos: []lndrpc.UTXO{{Txid: strings.Repeat("01", 32)}, {Txid: strings.Repeat("02", 32)}},
-		OnChainTxs: []lndrpc.OnChainTx{
+	oc := &OnChainContext{reader: &onChainTestReader{}, OnChainSnapshot: app.OnChainSnapshot{
+		Utxos: freshStatus([]lndrpc.UTXO{{Txid: strings.Repeat("01", 32)}, {Txid: strings.Repeat("02", 32)}}),
+		OnChainTxs: freshStatus([]lndrpc.OnChainTx{
 			{Txid: strings.Repeat("01", 32), Label: "first"},
 			{Txid: strings.Repeat("02", 32), Label: "second"},
-		},
-	}
+		}),
+	}}
+	ctx.OnChain = oc
+	oc.scope = ctx.onChainScope()
 	client := &labelSaveClient{result: lndrpc.TransactionLabelResult{Submitted: true}}
 	s := NewOnChainHomeScreen(ctx, oc)
 	s.labels = client
-	m := Model{nav: NewNavSidebar(), screenCtx: ctx, ocCtx: oc}
+	m := Model{nav: NewNavSidebar(), screenCtx: ctx}
 	m.sectionScreens[secOnChain] = s
 	return m, s, client
 }
@@ -53,14 +56,13 @@ func saveLabel(t *testing.T, s *OnChainHomeScreen, text string) tea.Cmd {
 func TestLabelEditKeepsTargetAcrossUTXORefresh(t *testing.T) {
 	for _, disappear := range []bool{false, true} {
 		m, s, client := labelModel()
-		target := s.ocCtx.Utxos[0].Txid
+		target := s.ocCtx.Utxos.Value[0].Txid
 		s.openLabelPopup()
-		utxos := []lndrpc.UTXO{s.ocCtx.Utxos[1], s.ocCtx.Utxos[0]}
+		utxos := []lndrpc.UTXO{s.ocCtx.Utxos.Value[1], s.ocCtx.Utxos.Value[0]}
 		if disappear {
 			utxos = nil
 		}
-		updated, _ := m.Update(utxoListMsg{utxos: utxos})
-		m = updated.(Model)
+		publishOnChain(t, &m, app.OnChainSnapshot{Utxos: freshStatus(utxos), OnChainTxs: s.ocCtx.OnChainTxs})
 		// An unavailable dashboard or empty UTXO list must not hide the editor.
 		if view := s.View(67, 28); !strings.Contains(view, "Transaction:") || !strings.Contains(view, "Save") {
 			t.Fatal("refresh or unavailable status hid the editor")
@@ -86,7 +88,7 @@ func TestLabelEditKeepsTargetAcrossUTXORefresh(t *testing.T) {
 		_, refresh := m.Update(message)
 		if refresh == nil || s.labelPending || s.labelEditing || len(client.requests) != 1 ||
 			client.requests[0].Txid.String() != target || client.requests[0].Label != " intended " ||
-			s.ocCtx.OnChainTxs[0].Label != " intended " || s.ocCtx.OnChainTxs[1].Label != "second" {
+			s.ocCtx.OnChainTxs.Value[0].Label != " intended " || s.ocCtx.OnChainTxs.Value[1].Label != "second" {
 			t.Fatalf("save changed target/text or lost hidden completion: %+v", client.requests)
 		}
 		if _, duplicate := m.Update(message); duplicate != nil {
@@ -123,7 +125,7 @@ func TestLabelEditFailureAndExplicitRetry(t *testing.T) {
 	client.result = lndrpc.TransactionLabelResult{Submitted: true}
 	current := saveLabel(t, s, "corrected label")
 	_, refresh := m.Update(current())
-	if refresh == nil || s.labelEditing || s.ocCtx.OnChainTxs[0].Label != "corrected label" || len(client.requests) != 3 {
+	if refresh == nil || s.labelEditing || s.ocCtx.OnChainTxs.Value[0].Label != "corrected label" || len(client.requests) != 3 {
 		t.Fatal("explicit retry did not finish the intended edit")
 	}
 }
@@ -131,7 +133,7 @@ func TestLabelEditFailureAndExplicitRetry(t *testing.T) {
 func TestLabelEditorValidatesBytesWithoutTruncatingText(t *testing.T) {
 	m, s, client := labelModel()
 	label := strings.Repeat("é", 250)
-	s.ocCtx.OnChainTxs[0].Label = label
+	s.ocCtx.OnChainTxs.Value[0].Label = label
 	s.openLabelPopup()
 	if s.labelInput.Value() != label {
 		t.Fatal("existing valid label was truncated")
@@ -150,30 +152,30 @@ func TestLabelEditorValidatesBytesWithoutTruncatingText(t *testing.T) {
 
 func TestLabelResultCannotReachReplacementScreenOrRevertHistory(t *testing.T) {
 	m, s, _ := labelModel()
-	oldRead := fetchOnChainTxCmd(nil, m.ocCtx)().(onChainTxMsg)
-	oldRead.err = nil
-	oldRead.txs = []lndrpc.OnChainTx{{Txid: s.ocCtx.Utxos[0].Txid, Label: "obsolete"}}
+	reader := m.screenCtx.OnChain.reader.(*onChainTestReader)
+	reader.next = app.OnChainSnapshot{OnChainTxs: freshStatus([]lndrpc.OnChainTx{{Txid: s.ocCtx.Utxos.Value[0].Txid, Label: "obsolete"}})}
+	oldRead := statusUpdate(&m, requestOnChainCmd())()
 	s.openLabelPopup()
 	result := saveLabel(t, s, "acknowledged")()
 	_, refresh := m.Update(result)
 	if refresh == nil {
 		t.Fatal("successful label save did not refresh history")
 	}
-	m.Update(oldRead)
-	if s.ocCtx.OnChainTxs[0].Label != "acknowledged" {
-		t.Fatal("pre-save read undid the acknowledged label")
+	if statusUpdate(&m, refresh()) != nil {
+		t.Fatal("label refresh bypassed active read")
 	}
-	failed := refresh().(onChainTxMsg)
-	m.Update(failed)
-	if s.ocCtx.OnChainTxs[0].Label != "acknowledged" {
-		t.Fatal("failed refresh erased the acknowledged label")
+	follow := statusUpdate(&m, oldRead)
+	if s.ocCtx.OnChainTxs.Value[0].Label != "acknowledged" || follow == nil {
+		t.Fatal("pre-save read undid the acknowledged label or lost follow-up")
 	}
-	current := failed
-	current.err = nil
-	current.txs = []lndrpc.OnChainTx{{Txid: s.labelTxid, Label: "external change"}}
-	m.Update(current)
-	if s.ocCtx.OnChainTxs[0].Label != "external change" {
-		t.Fatal("current daemon observation cannot supersede the local acknowledgement")
+	reader.next = app.OnChainSnapshot{}.Unavailable(errors.New("read failed"))
+	statusUpdate(&m, follow())
+	if s.ocCtx.OnChainTxs.Value[0].Label != "acknowledged" || s.ocCtx.OnChainTxs.Fresh() {
+		t.Fatal("failed refresh erased the acknowledged label or hid failure")
+	}
+	publishOnChain(t, &m, app.OnChainSnapshot{Utxos: s.ocCtx.Utxos, OnChainTxs: freshStatus([]lndrpc.OnChainTx{{Txid: s.labelTxid, Label: "external change"}})})
+	if s.ocCtx.OnChainTxs.Value[0].Label != "external change" {
+		t.Fatal("current daemon observation cannot supersede local acknowledgement")
 	}
 	s.openLabelPopup()
 	s.labelInput.SetValue("another draft")
@@ -193,12 +195,5 @@ func TestLabelResultCannotReachReplacementScreenOrRevertHistory(t *testing.T) {
 	saveLabel(t, replacement, "replacement")
 	if _, cmd := m.Update(result); cmd != nil || !replacement.labelPending || len(replacementClient.requests) != 0 {
 		t.Fatal("old owner reached the replacement screen")
-	}
-	foreign := current
-	foreign.owner = &OnChainContext{}
-	foreign.txs = nil
-	m.Update(foreign)
-	if len(m.ocCtx.OnChainTxs) != 1 {
-		t.Fatal("foreign history owner replaced current state")
 	}
 }
