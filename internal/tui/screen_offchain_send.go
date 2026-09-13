@@ -434,17 +434,17 @@ func (s *SendScreen) viewInput(w, h int) string {
 		return p.render()
 	}
 	if s.ctx.Status == nil ||
-		!s.ctx.Status.lndResponding {
+		!s.ctx.Status.Node.Fresh() {
 		p.dim("Waiting for LND...")
 		return p.render()
 	}
 
 	var totalLocal int64
-	for _, ch := range s.ctx.Status.channels {
+	for _, ch := range s.ctx.Status.Channels.Value.Channels {
 		totalLocal += ch.LocalBalance
 	}
 	p.field("Spendable: ",
-		formatSats(totalLocal)+" sats")
+		channelAmountText(s.ctx.Status, totalLocal))
 	p.blank()
 
 	isFocused := s.ctx.ContentFocused

@@ -193,7 +193,7 @@ func (s *ChannelsHomeScreen) openChannel() (
 	}
 	// Zero balance: show educational message
 	if s.ctx.Status != nil &&
-		s.ctx.Status.lndBalance == "0" {
+		s.ctx.Status.Balance.Fresh() && s.ctx.Status.Balance.Value.TotalBalance == "0" {
 		s.zeroBalanceMsg = true
 		// Highlight Fund Wallet (index 1) by default so
 		// pressing enter or down lands on the action
@@ -306,7 +306,7 @@ func (s *ChannelsHomeScreen) View(
 			w, h, s.ctx.ContentFocused)
 	}
 
-	if status == nil || !status.lndResponding {
+	if status == nil {
 		return renderWaitingForLND(w, h)
 	}
 
@@ -321,7 +321,7 @@ func (s *ChannelsHomeScreen) View(
 		p.dim("  on-chain Bitcoin. Send Bitcoin to your")
 		p.dim("  on-chain address first, then return")
 		p.dim("  here to open a channel.")
-		if !status.btcSynced {
+		if status.Bitcoin.Fresh() && !status.Bitcoin.Value.Synced {
 			p.blank()
 			p.line("  " + theme.Warn.Render(
 				"Bitcoin Core is syncing. If you have"))
@@ -336,7 +336,7 @@ func (s *ChannelsHomeScreen) View(
 	}
 
 	isFocused := s.ctx.ContentFocused
-	channels := status.channels
+	channels := status.Channels.Value.Channels
 
 	// ── Fixed header ─────────────────────────────
 	var headerLines []string
@@ -399,7 +399,7 @@ func (s *ChannelsHomeScreen) View(
 
 	if chanCount == 0 {
 		midLines = append(midLines,
-			theme.Dim.Render(" No channels yet."))
+			theme.Dim.Render(" "+observationText(status.Channels, "No channels yet.")))
 	} else {
 		for i, ch := range channels {
 			if i > 0 {
@@ -484,12 +484,12 @@ func (s *ChannelsHomeScreen) View(
 			midLines = append(midLines, line)
 		}
 
-		if status.pendingOpen > 0 {
+		if status.Channels.Value.Pending.PendingOpen > 0 {
 			midLines = append(midLines, "")
 			midLines = append(midLines,
 				" "+theme.Dim.Render(
 					fmt.Sprintf("%d pending",
-						status.pendingOpen)))
+						status.Channels.Value.Pending.PendingOpen)))
 		}
 	}
 
@@ -539,7 +539,7 @@ func (s *ChannelsHomeScreen) channels() []channelInfo {
 	if s.ctx.Status == nil {
 		return nil
 	}
-	return s.ctx.Status.channels
+	return s.ctx.Status.Channels.Value.Channels
 }
 
 func (s *ChannelsHomeScreen) clampCursor() {

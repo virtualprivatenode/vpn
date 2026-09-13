@@ -255,7 +255,7 @@ func (s *WalletHomeScreen) View(
 			w, h, s.ctx.ContentFocused)
 	}
 
-	if status == nil || !status.lndResponding {
+	if status == nil {
 		return renderWaitingForLND(w, h)
 	}
 
@@ -404,6 +404,8 @@ func (s *WalletHomeScreen) View(
 				entry.Status != "SETTLED") ||
 				isFailed {
 				balStr = fmt.Sprintf("%*s", balW, "—")
+			} else if i >= len(balances) {
+				balStr = fmt.Sprintf("%*s", balW, "N/A")
 			} else {
 				bal := balances[i]
 				balStr = fmt.Sprintf("%*s",
@@ -505,12 +507,13 @@ func (s *WalletHomeScreen) HelpBindings() []key.Binding {
 // ── Helpers ─────────────────────────────────────────────
 
 func (s *WalletHomeScreen) computeBalances() []int64 {
+	if s.ctx.Status == nil || !s.ctx.Status.Channels.Fresh() {
+		return nil
+	}
 	balances := make([]int64, len(s.entries))
 	var runBal int64
-	if s.ctx.Status != nil {
-		for _, ch := range s.ctx.Status.channels {
-			runBal += ch.LocalBalance
-		}
+	for _, ch := range s.ctx.Status.Channels.Value.Channels {
+		runBal += ch.LocalBalance
 	}
 	for i := 0; i < len(s.entries); i++ {
 		balances[i] = runBal

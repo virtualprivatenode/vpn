@@ -2,7 +2,11 @@
 
 package system
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseSourceIPStandardVPS(t *testing.T) {
 	output := "1.1.1.1 via 10.0.0.1 dev eth0 src 203.0.113.50 uid 0"
@@ -78,5 +82,42 @@ func TestParseSourceIPMultipleSpaces(t *testing.T) {
 	got := ParseSourceIP(output)
 	if got != "203.0.113.50" {
 		t.Errorf("got %q, want 203.0.113.50", got)
+	}
+}
+
+func TestMemoryUnavailableIsNotFullUsage(t *testing.T) {
+	for _, raw := range []string{"", "MemTotal: 1000 kB", "MemTotal: 1000 kB\nMemAvailable: 2000 kB", "MemTotal: 1000 kB\nMemAvailable: broken"} {
+		if _, err := parseMemory(raw); err == nil {
+			t.Fatalf("invalid memory observation accepted: %q", raw)
+		}
+	}
+	info, err := parseMemory("MemTotal: 1000 kB\nMemAvailable: 0 kB")
+	if err != nil || info.Percent != "100%" {
+		t.Fatal("genuine zero available memory rejected")
+	}
+}
+
+func TestServiceReadDistinguishesInactiveAndFailedQuery(t *testing.T) {
+	dir := t.TempDir()
+	// Deliberately return a plausible state with a failed process exit as well
+	// as successful states, proving the adapter preserves the process boundary.
+	script := "#!/bin/sh\nprintf '%s\\n' \"$STATUS_TEST_OUTPUT\"\nexit \"$STATUS_TEST_EXIT\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	for _, tc := range []struct {
+		output, exit   string
+		active, failed bool
+	}{
+		{"active", "0", true, false}, {"inactive", "0", false, false},
+		{"failed", "0", false, false}, {"active", "1", false, true}, {"", "0", false, true},
+	} {
+		t.Setenv("STATUS_TEST_OUTPUT", tc.output)
+		t.Setenv("STATUS_TEST_EXIT", tc.exit)
+		active, err := ReadServiceActive(t.Context(), "lnd")
+		if active != tc.active || (err != nil) != tc.failed {
+			t.Fatalf("output=%q exit=%s: active=%v err=%v", tc.output, tc.exit, active, err)
+		}
 	}
 }

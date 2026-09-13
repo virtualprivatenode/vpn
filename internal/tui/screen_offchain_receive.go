@@ -523,7 +523,7 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 		return p.render()
 	}
 	if s.ctx.Status == nil ||
-		!s.ctx.Status.lndResponding {
+		!s.ctx.Status.Node.Fresh() {
 		p.dim("Waiting for LND...")
 		return p.render()
 	}

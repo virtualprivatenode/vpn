@@ -551,7 +551,7 @@ func (s *OnChainSendScreen) handleSendCoinsResult(msg sendCoinsResultMsg) (Scree
 	}
 	// Refresh wallet facts even if the RPC outcome is unknown. Never retry here.
 	return s, tea.Batch(listUnspentCmd(s.ctx.LndClient), fetchOnChainTxCmd(s.ctx.LndClient, s.ocCtx),
-		fetchStatus(s.ctx.Cfg, s.ctx.State, s.ctx.LndClient))
+		requestStatusCmd)
 }
 
 func (s *OnChainSendScreen) handleFeeTiers(msg feeTiersMsg) (Screen, tea.Cmd) {
@@ -652,16 +652,10 @@ func (s *OnChainSendScreen) viewInput(
 	lines = append(lines, "")
 
 	// Balance
-	onchain := "0"
-	if s.ctx.Status != nil &&
-		s.ctx.Status.lndBalance != "" {
-		onchain = s.ctx.Status.lndBalance
-	}
 	lines = append(lines,
 		" "+theme.Label.Render("Balance:  ")+
 			theme.Value.Render(
-				formatSats(parseBalance(onchain))+
-					" sats"))
+				onChainBalanceText(s.ctx.Status)))
 	lines = append(lines, "")
 
 	// ── Address input (step 0) ──────────────────

@@ -104,18 +104,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.ResumeMsg:
-		m.fetchInFlight = true
 		if m.cfg.HasLND() && m.state.WalletKnown &&
 			m.state.WalletExists &&
 			m.lndClient != nil {
 			return m, tea.Batch(
-				fetchStatus(m.cfg, m.state, m.lndClient),
+				requestStatusCmd,
 				fetchPaymentHistoryCmd(m.lndClient),
 				fetchWalletStateCmd(m.screenCtx),
 				fetchKeyVerificationStateCmd())
 		}
 		return m, tea.Batch(
-			fetchStatus(m.cfg, m.state, m.lndClient),
+			requestStatusCmd,
 			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd())
 	case tea.KeyPressMsg:
@@ -236,7 +235,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subview = svFullURL
 		return m, nil
 	case refreshStatusMsg:
-		return m, fetchStatus(m.cfg, m.state, m.lndClient)
+		cmd := m.admitStatus()
+		return m, cmd
 	case openTabMsg:
 		walletKind := msg.Kind
 		if walletKind == tabAutoUnlock && m.screenCtx.walletCreationOwner != nil {
@@ -383,15 +383,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case svcActionDoneMsg:
 		m.routeToSectionScreen(secSystem, msg)
-		return m, fetchStatus(m.cfg, m.state, m.lndClient)
+		return m, requestStatusCmd
 	case pkgUpdateDoneMsg:
 		m.routeToSectionScreen(secSystem, msg)
-		return m, fetchStatus(m.cfg, m.state, m.lndClient)
-	case statusMsg:
-		m.fetchInFlight = false
-		m.status = &msg
-		m.screenCtx.Status = m.status
-		return m, nil
+		return m, requestStatusCmd
+	case statusResultMsg:
+		cmd := m.completeStatus(msg)
+		return m, cmd
 	case latestVersionMsg:
 		m.latestVersion = string(msg)
 		m.screenCtx.LatestVersion = string(msg)
@@ -415,7 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.HasLND() && m.screenCtx.walletCreationOwner == nil {
 			m.lndClient = lndrpc.New()
 			m.screenCtx.LndClient = m.lndClient
-			return m, fetchStatus(m.cfg, m.state, m.lndClient)
+			return m, requestStatusCmd
 		}
 		return m, nil
 	case keyVerificationStateMsg:
@@ -665,12 +663,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tickMsg:
-		if m.fetchInFlight {
-			return m, tickEveryCmd(m.pollInterval())
+		if m.statusActive != nil {
+			return m, tea.Batch(requestStatusCmd, tickEveryCmd(m.pollInterval()))
 		}
-		m.fetchInFlight = true
 		cmds := []tea.Cmd{
-			fetchStatus(m.cfg, m.state, m.lndClient),
+			requestStatusCmd,
 			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd(),
 			tickEveryCmd(m.pollInterval()),
@@ -911,7 +908,7 @@ func (m Model) previewSection(
 	switch sec {
 	case secChannels:
 		return m,
-			fetchStatus(m.cfg, m.state, m.lndClient)
+			requestStatusCmd
 	case secWallet:
 		return m,
 			fetchPaymentHistoryCmd(m.lndClient)

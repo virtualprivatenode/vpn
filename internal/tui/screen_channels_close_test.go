@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -27,7 +28,7 @@ func (c *screenCloseClient) CloseChannel(req lndrpc.ChannelCloseRequest) lndrpc.
 }
 func closeScreenFixture(point string) (*ChannelDetailScreen, *screenCloseClient) {
 	ctx := &ScreenContext{Cfg: config.Default(), HasTabs: true, ContentFocused: true}
-	ch := channelInfo{ChannelPoint: point, PeerAlias: "same peer", RemotePubkey: strings.Repeat("a", 66), Capacity: 30000, LocalBalance: 20000, Active: true}
+	ch := channelInfo{Channel: lndrpc.Channel{ChannelPoint: point, PeerAlias: "same peer", RemotePubkey: strings.Repeat("a", 66), Capacity: 30000, LocalBalance: 20000, Active: true}}
 	detail := NewChannelDetailScreen(ctx, ch)
 	detail.launchClose()
 	c := &screenCloseClient{result: lndrpc.ChannelCloseResult{Submitted: true, ClosingTxid: strings.Repeat("c", 64)}}
@@ -136,10 +137,10 @@ func TestChannelCloseBackRequiresNewReview(t *testing.T) {
 	}
 }
 func TestChannelTabIdentitySurvivesReorderAndRemoval(t *testing.T) {
-	a := channelInfo{ChannelPoint: strings.Repeat("a", 64) + ":0", RemotePubkey: strings.Repeat("c", 66), PeerAlias: "same peer", Capacity: 30000}
+	a := channelInfo{Channel: lndrpc.Channel{ChannelPoint: strings.Repeat("a", 64) + ":0", RemotePubkey: strings.Repeat("c", 66), PeerAlias: "same peer", Capacity: 30000}}
 	b := a
 	b.ChannelPoint = strings.Repeat("b", 64) + ":0"
-	ctx := &ScreenContext{Cfg: config.Default(), Status: &statusMsg{channels: []channelInfo{a, b}}}
+	ctx := &ScreenContext{Cfg: config.Default(), Status: &statusSnapshot{Channels: app.Observation[app.ChannelStatus]{Value: app.ChannelStatus{Channels: []channelInfo{a, b}}, ObservedAt: time.Now()}}}
 	home := NewChannelsHomeScreen(ctx)
 	home.focusZone = chanHomeZoneList
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx}
@@ -157,12 +158,12 @@ func TestChannelTabIdentitySurvivesReorderAndRemoval(t *testing.T) {
 	if len(m.tabs) != 2 || m.tabs[1].Key != a.ChannelPoint {
 		t.Fatal("row zero reused a different channel")
 	}
-	ctx.Status.channels = []channelInfo{b, a}
+	ctx.Status.Channels.Value.Channels = []channelInfo{b, a}
 	open(0)
 	if len(m.tabs) != 2 || m.effectiveTabs()[m.activeTab].Screen != first {
 		t.Fatal("reorder changed channel tab identity")
 	}
-	ctx.Status.channels = []channelInfo{a}
+	ctx.Status.Channels.Value.Channels = []channelInfo{a}
 	m.activateTab()
 	stale := first.(*ChannelDetailScreen)
 	if !stale.unavailable {

@@ -44,12 +44,8 @@ type Screen interface {
 }
 
 // ── ScreenContext ────────────────────────────────────────
-// Pointer semantics — screens always see current data.
-// Model owns the single instance; screens store a
-// *ScreenContext on creation. When Model updates
-// m.status on a new statusMsg, every screen's View()
-// automatically sees current data through the pointer
-// chain — zero refresh plumbing.
+// Model publishes one application snapshot through this shared context. Screens
+// read the current observation when rendering; no screen owns a second copy.
 
 type ScreenContext struct {
 	AutoUnlock          autoUnlockChanges
@@ -66,7 +62,7 @@ type ScreenContext struct {
 	Cfg                 *config.AppConfig
 	State               *RuntimeState
 	LndClient           *lndrpc.Client
-	Status              *statusMsg
+	Status              *statusSnapshot
 	HasTabs             bool   // varies by section; Model sets before calling View/HelpBindings
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
@@ -191,8 +187,7 @@ type showFullURLMsg struct {
 }
 
 // refreshStatusMsg tells Model to re-fetch node status.
-// Distinct from statusMsg which carries actual status
-// data.
+// statusResultMsg carries a completed observation and its request identity.
 type refreshStatusMsg struct{}
 
 // ── Message emitters ────────────────────────────────────

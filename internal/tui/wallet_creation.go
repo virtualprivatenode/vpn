@@ -71,7 +71,7 @@ func (m Model) continueWalletCreation(owner *WalletCreateScreen) (Model, tea.Cmd
 		m.releaseWalletCreation(owner)
 		screen := NewAutoUnlockScreen(m.screenCtx)
 		m.tabs[i].Kind, m.tabs[i].Label, m.tabs[i].Screen = tabAutoUnlock, "Auto-Unlock", screen
-		return m, tea.Batch(fetchStatus(m.cfg, m.state, m.lndClient), screen.Init())
+		return m, tea.Batch(requestStatusCmd, screen.Init())
 	}
 	return m, nil
 }

@@ -85,11 +85,11 @@ func (s *ChannelHistoryScreen) HandleMsg(
 			var waiting []lndrpc.WaitingCloseChannel
 			var pending []lndrpc.PendingForceCloseChannel
 			if s.ctx.Status != nil {
-				channels = s.ctx.Status.channels
+				channels = s.ctx.Status.Channels.Value.Channels
 				waiting =
-					s.ctx.Status.waitingCloseChannels
+					s.ctx.Status.Channels.Value.Pending.WaitingCloseChannels
 				pending =
-					s.ctx.Status.pendingForceCloseChannels
+					s.ctx.Status.Channels.Value.Pending.PendingForceCloseChannels
 			}
 			s.entries = buildChannelHistoryEntries(
 				channels, waiting, pending,

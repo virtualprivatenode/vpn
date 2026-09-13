@@ -778,18 +778,12 @@ func (s *ChannelOpenScreen) viewInput(
 		return p.render()
 	}
 	if s.ctx.Status == nil ||
-		!s.ctx.Status.lndResponding {
+		!s.ctx.Status.Node.Fresh() {
 		p.dim("Waiting for LND...")
 		return p.render()
 	}
 
-	balText := "unknown"
-	if s.ctx.Status.lndBalance != "" {
-		balText = formatSats(
-			parseBalance(s.ctx.Status.lndBalance)) +
-			" sats"
-	}
-	p.field("On-Chain Balance: ", balText)
+	p.field("On-Chain Balance: ", onChainBalanceText(s.ctx.Status))
 	p.blank()
 
 	isFocused := s.ctx.ContentFocused

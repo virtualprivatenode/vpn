@@ -108,7 +108,7 @@ func (s *NodeInfoScreen) buttons() []string {
 	if s.ctx.Status == nil {
 		return nil
 	}
-	clearnet, tor := classifyURIs(s.ctx.Status.lndURIs)
+	clearnet, tor := classifyURIs(s.ctx.Status.Node.Value.URIs)
 	var out []string
 	if len(clearnet) > 0 {
 		out = append(out, "Show QR (Clearnet)")
@@ -116,7 +116,7 @@ func (s *NodeInfoScreen) buttons() []string {
 	if len(tor) > 0 {
 		out = append(out, "Show QR (Tor)")
 	}
-	if len(s.ctx.Status.lndURIs) > 0 {
+	if len(s.ctx.Status.Node.Value.URIs) > 0 {
 		out = append(out, "Copy URIs")
 	}
 	return out
@@ -132,7 +132,7 @@ func (s *NodeInfoScreen) buttonAction(
 	if s.ctx.Status == nil {
 		return nil
 	}
-	clearnet, tor := classifyURIs(s.ctx.Status.lndURIs)
+	clearnet, tor := classifyURIs(s.ctx.Status.Node.Value.URIs)
 	buttons := s.buttons()
 	if idx < 0 || idx >= len(buttons) {
 		return nil
@@ -162,7 +162,7 @@ func (s *NodeInfoScreen) buttonAction(
 			}
 		}
 	case "Copy URIs":
-		return showNodeURIsCmd(s.ctx.Status.lndURIs)
+		return showNodeURIsCmd(s.ctx.Status.Node.Value.URIs)
 	}
 	return nil
 }
@@ -211,9 +211,7 @@ func (s *NodeInfoScreen) HandleKey(
 func (s *NodeInfoScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
-	// No async messages routed to this screen —
-	// live data comes through ctx.Status pointer
-	// updates done by Model on statusMsg.
+	// Model publishes application observations through ctx.Status.
 	//
 	// No defensive clamp on buttonIdx either. If the
 	// button count changes under us (user toggles
@@ -235,7 +233,7 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	p := newPane(w)
 	p.title(theme.Header, "Node Info")
 
-	if status == nil || !status.lndResponding {
+	if status == nil {
 		p.dim("Waiting for LND...")
 		// No buttons — user navigates away via arrow
 		// keys like any other non-flow screen.
@@ -252,8 +250,8 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	// margin. That is a deliberate trade for label
 	// alignment over symmetric breathing room.
 	p.labelLine("Pubkey:")
-	if status.lndPubkey != "" {
-		p.mono(status.lndPubkey)
+	if status.Node.Value.Pubkey != "" {
+		p.mono(status.Node.Value.Pubkey)
 	} else {
 		p.dim("(unavailable)")
 	}
@@ -266,16 +264,16 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	const labelW = 20
 
 	// ── Identity group ────────────────────────────
-	alias := status.lndAlias
+	alias := status.Node.Value.Alias
 	if alias == "" {
 		alias = "(none)"
 	}
-	p.fieldAligned("Alias:", alias, labelW)
+	p.fieldAligned("Alias:", observationText(status.Node, alias), labelW)
 	p.fieldAligned("P2P Mode:",
 		p2pModeLabel(cfg.P2PMode), labelW)
-	if status.lndVersion != "" {
+	if nodeVersion(status) != "" {
 		p.fieldAligned("LND Version:",
-			status.lndVersion, labelW)
+			nodeVersion(status), labelW)
 	}
 	p.blank()
 
@@ -286,7 +284,7 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	// and commitment fees).
 	var totalCap, totalLocal, totalRemote int64
 	activeCount := 0
-	for _, ch := range status.channels {
+	for _, ch := range status.Channels.Value.Channels {
 		if ch.Pending {
 			continue
 		}
@@ -298,11 +296,11 @@ func (s *NodeInfoScreen) View(w, h int) string {
 		}
 	}
 	p.fieldAligned("Peers:",
-		fmt.Sprintf("%d", status.lndPeers), labelW)
+		observationText(status.Node, fmt.Sprintf("%d", status.Node.Value.Peers)), labelW)
 	p.fieldAligned("Active Channels:",
-		fmt.Sprintf("%d", activeCount), labelW)
+		observationText(status.Channels, fmt.Sprintf("%d", activeCount)), labelW)
 	p.fieldAligned("Node Capacity:",
-		fmt.Sprintf("%s sats", formatSats(totalCap)),
+		channelAmountText(status, totalCap),
 		labelW)
 	p.blank()
 
@@ -312,24 +310,25 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	// Inbound is deliberately excluded because it's
 	// not the user's money; it's the remote side's
 	// liquidity that can be received into.
-	onchainStr := "0"
-	if status.lndBalance != "" {
-		onchainStr = status.lndBalance
+	totalSpendable := "unavailable"
+	if status.Balance.Known() && status.Channels.Known() {
+		totalSpendable = formatSats(totalLocal+parseBalance(status.Balance.Value.TotalBalance)) + " sats"
+		if !status.Balance.Fresh() || !status.Channels.Fresh() {
+			totalSpendable += " (stale)"
+		}
 	}
-	onChain := parseBalance(onchainStr)
-	totalSpendable := totalLocal + onChain
+	p.line(statusNotice(status))
 	p.fieldAligned("Outbound Liquidity:",
-		fmt.Sprintf("%s sats", formatSats(totalLocal)),
+		channelAmountText(status, totalLocal),
 		labelW)
 	p.fieldAligned("Inbound Liquidity:",
-		fmt.Sprintf("%s sats", formatSats(totalRemote)),
+		channelAmountText(status, totalRemote),
 		labelW)
 	p.fieldAligned("On-Chain Balance:",
-		fmt.Sprintf("%s sats", formatSats(onChain)),
+		onChainBalanceText(status),
 		labelW)
 	p.fieldAligned("Total Spendable:",
-		fmt.Sprintf("%s sats",
-			formatSats(totalSpendable)),
+		totalSpendable,
 		labelW)
 	p.blank()
 
@@ -345,8 +344,10 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	// block download an empty list is the expected
 	// state, not a misconfiguration — the warning is
 	// reserved for a synced node.
-	if len(status.lndURIs) == 0 {
-		if !status.lndSyncedChain {
+	if !status.Node.Fresh() {
+		p.dim("Advertised addresses unavailable or stale.")
+	} else if len(status.Node.Value.URIs) == 0 {
+		if !status.Node.Value.SyncedChain {
 			p.dim(
 				"No URIs advertised yet — LND starts")
 			p.dim(

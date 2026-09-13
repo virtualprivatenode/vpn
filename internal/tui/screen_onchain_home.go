@@ -376,7 +376,7 @@ func (s *OnChainHomeScreen) openTxDetail() (
 	}
 	var pfc []lndrpc.PendingForceCloseChannel
 	if s.ctx.Status != nil {
-		pfc = s.ctx.Status.pendingForceCloseChannels
+		pfc = s.ctx.Status.Channels.Value.Pending.PendingForceCloseChannels
 	}
 	screen := NewOnChainTxScreen(s.ctx, tx, pfc)
 	idx := s.txCursor
@@ -555,7 +555,7 @@ func (s *OnChainHomeScreen) View(
 			w, h, s.ctx.ContentFocused)
 	}
 
-	if status == nil || !status.lndResponding {
+	if status == nil {
 		return renderWaitingForLND(w, h)
 	}
 
@@ -572,20 +572,15 @@ func (s *OnChainHomeScreen) View(
 	utxos := s.ocCtx.Utxos
 	txs := s.ocCtx.OnChainTxs
 
-	onchain := "0"
-	if status.lndBalance != "" {
-		onchain = status.lndBalance
-	}
 	headerLines = append(headerLines,
 		" "+theme.Label.Render("Balance:  ")+
 			theme.Value.Render(
-				formatSats(parseBalance(onchain))+
-					" sats")+
+				onChainBalanceText(status))+
 			theme.Dim.Render(
 				fmt.Sprintf("  (%d UTXOs)",
 					len(utxos))))
 
-	if !status.btcSynced {
+	if status.Bitcoin.Fresh() && !status.Bitcoin.Value.Synced {
 		headerLines = append(headerLines, "")
 		headerLines = append(headerLines,
 			" "+theme.Warn.Render(
@@ -601,7 +596,7 @@ func (s *OnChainHomeScreen) View(
 				"sync is complete."))
 	}
 
-	headerLines = append(headerLines, "")
+	headerLines = append(headerLines, statusNotice(status))
 
 	sendLabel := "Send"
 	if s.ocCtx.Selection.Len() > 0 {
@@ -843,12 +838,11 @@ func (s *OnChainHomeScreen) View(
 			valStr := fmt.Sprintf("%*s",
 				tValW, valNum)
 
-			bal := int64(0)
+			balanceText := "N/A"
 			if i < len(txBalances) {
-				bal = txBalances[i]
+				balanceText = formatSats(txBalances[i])
 			}
-			balStr := fmt.Sprintf("%*s",
-				tBalW, formatSats(bal))
+			balStr := fmt.Sprintf("%*s", tBalW, balanceText)
 
 			marker := " "
 			if isSelected {
@@ -1114,11 +1108,10 @@ func (s *OnChainHomeScreen) computeTxBalances() []int64 {
 	if len(txs) == 0 {
 		return nil
 	}
-	bal := parseBalance("0")
-	if s.ctx.Status != nil &&
-		s.ctx.Status.lndBalance != "" {
-		bal = parseBalance(s.ctx.Status.lndBalance)
+	if s.ctx.Status == nil || !s.ctx.Status.Balance.Fresh() {
+		return nil
 	}
+	bal := parseBalance(s.ctx.Status.Balance.Value.TotalBalance)
 	balances := make([]int64, len(txs))
 	for i := range txs {
 		balances[i] = bal

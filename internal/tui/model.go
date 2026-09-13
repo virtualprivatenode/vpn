@@ -230,20 +230,7 @@ type labelTxMsg struct {
 	result  app.TransactionLabelResult
 }
 
-type channelInfo struct {
-	ChanID         uint64
-	ChannelPoint   string
-	PeerAlias      string
-	RemotePubkey   string
-	Capacity       int64
-	LocalBalance   int64
-	RemoteBalance  int64
-	Active         bool
-	Private        bool
-	Initiator      bool
-	Pending        bool
-	CommitmentType string
-}
+type channelInfo = app.StatusChannel
 
 type channelHistoryEntry struct {
 	PeerAlias       string
@@ -269,33 +256,7 @@ type peerOption struct {
 	MinChanSize int64
 }
 
-type statusMsg struct {
-	services                     map[string]bool
-	diskTotal, diskUsed, diskPct string
-	ramTotal, ramUsed, ramPct    string
-	btcSize, lndSize             string
-	btcBlocks, btcHeaders        int
-	btcProgress                  float64
-	btcSynced, btcResponding     bool
-	rebootRequired               bool
-	lndPubkey                    string
-	lndAlias                     string
-	lndURIs                      []string
-	lndVersion                   string
-	lndPeers                     int
-	lndChannels                  int
-	lndBalance                   string
-	lndSyncedChain               bool
-	lndSyncedGraph               bool
-	lndResponding                bool
-	lndWalletState               lndrpc.WalletState
-	publicIP                     string
-	channels                     []channelInfo
-	pendingOpen                  int
-	pendingForceClose            int
-	pendingForceCloseChannels    []lndrpc.PendingForceCloseChannel
-	waitingCloseChannels         []lndrpc.WaitingCloseChannel
-}
+type statusSnapshot = app.StatusSnapshot
 
 type Model struct {
 	cfg       *config.AppConfig
@@ -314,9 +275,11 @@ type Model struct {
 	// L16: section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
-	status        *statusMsg
-	latestVersion string
-	fetchInFlight bool
+	latestVersion   string
+	statusCollector statusReader
+	statusActive    *statusRequest
+	statusPending   bool
+	statusScope     statusScope
 
 	// QR fullscreen (Model-owned overlay)
 	urlTarget string
@@ -357,7 +320,7 @@ func NewModel(
 	m := Model{
 		cfg: cfg, prefs: prefs, state: state,
 		lndClient: client, version: version,
-		subview: svNone, fetchInFlight: true,
+		subview: svNone, statusCollector: app.NewStatusCollector(),
 		nav: NewNavSidebar(),
 	}
 	m.screenCtx = &ScreenContext{
@@ -382,16 +345,7 @@ func NewModel(
 	return m
 }
 
-func serviceNames(cfg *config.AppConfig) []string {
-	names := []string{"tor", "bitcoind"}
-	if cfg.HasLND() {
-		names = append(names, "lnd")
-	}
-	if cfg.SyncthingEnabled {
-		names = append(names, "syncthing")
-	}
-	return names
-}
+func serviceNames(cfg *config.AppConfig) []string { return app.StatusServices(*cfg) }
 
 func (m Model) savePreferences() {
 	if err := config.SavePreferences(m.prefs); err != nil {
@@ -401,13 +355,13 @@ func (m Model) savePreferences() {
 }
 
 func (m Model) pollInterval() time.Duration {
-	if m.status == nil {
+	if m.screenCtx.Status == nil {
 		return 3 * time.Second
 	}
 	if !m.state.WalletKnown || !m.state.KeyVerificationKnown {
 		return 5 * time.Second
 	}
-	if !m.status.lndResponding && m.cfg.HasLND() &&
+	if !m.screenCtx.Status.Node.Fresh() && m.cfg.HasLND() &&
 		m.state.WalletKnown && m.state.WalletExists {
 		return 5 * time.Second
 	}
@@ -422,6 +376,7 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		m.statusCollector.Close()
 		if m.screenCtx.AutoUnlock != nil {
 			m.screenCtx.AutoUnlock.Close()
 		}
@@ -479,7 +434,7 @@ func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		fetchStatus(m.cfg, m.state, m.lndClient),
+		requestStatusCmd,
 		fetchWalletStateCmd(m.screenCtx),
 		fetchKeyVerificationStateCmd(),
 		fetchLatestVersionCmd(),

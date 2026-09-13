@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
@@ -163,17 +162,5 @@ func TestBackgroundConfigurationUsesSchedulingSnapshot(t *testing.T) {
 	cfg.Network = "later-network"
 	if result := fees().(feeTiersMsg); result.err == nil || !strings.Contains(result.err.Error(), "scheduled-network") {
 		t.Fatalf("fee command read configuration after scheduling: %v", result.err)
-	}
-	// Avoid a privileged size read; this scenario only checks the configuration
-	// used to choose service observations, not daemon status or freshness.
-	lndSizeMu.Lock()
-	oldAt, oldVal := lndSizeAt, lndSizeVal
-	lndSizeAt, lndSizeVal = time.Now(), "test"
-	lndSizeMu.Unlock()
-	defer func() { lndSizeMu.Lock(); lndSizeAt, lndSizeVal = oldAt, oldVal; lndSizeMu.Unlock() }()
-	status := fetchStatus(cfg, nil, nil)
-	cfg.SyncthingEnabled = true
-	if _, exists := status().(statusMsg).services["syncthing"]; exists {
-		t.Fatal("status command read a setting published after scheduling")
 	}
 }
