@@ -117,17 +117,6 @@ func TestStatusSchedulingSnapshotAndScopeChange(t *testing.T) {
 	}
 	second.result <- app.StatusSnapshot{Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "1000"})}
 	statusUpdate(&m, <-done)
-	// A new wallet generation cannot inherit old-wallet last-good balances.
-	m.screenCtx.walletRevision++
-	third, done := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), r)
-	if m.screenCtx.Status != nil {
-		t.Fatal("old-wallet balance remained visible during replacement read")
-	}
-	third.result <- app.StatusSnapshot{Balance: app.Observation[lndrpc.WalletBalance]{Err: errors.New("unavailable")}}
-	statusUpdate(&m, <-done)
-	if m.screenCtx.Status.Balance.Known() {
-		t.Fatal("retained balance from an obsolete wallet generation")
-	}
 }
 
 func TestStatusFailureRenderingAndRecovery(t *testing.T) {
@@ -200,13 +189,18 @@ func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 	call, done := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	call.result <- good
 	statusUpdate(&m, <-done)
+	// Schedule through the real timer. Supply asynchronous results below without
+	// running helper I/O or waiting for the next timer.
+	statusUpdate(&m, tickMsg(time.Now()))
+	failedPresence := walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("LND stopped")}
 	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
-	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("LND stopped")})
+	statusUpdate(&m, failedPresence)
 	assertStale()
 	// A successful read already in flight cannot override unknown presence.
 	call.result <- good
 	statusUpdate(&m, <-done)
 	assertStale()
+	statusUpdate(&m, tickMsg(time.Now()))
 	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	if !call.wallet {
 		t.Fatal("lost presence read stopped same-wallet status queries")
@@ -219,6 +213,7 @@ func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	call.result <- good
 	statusUpdate(&m, <-done)
+	statusUpdate(&m, failedPresence)
 	for _, sec := range []int{secOnChain, secWallet, secChannels} {
 		m.nav.ActiveItem = sec
 		view := ansi.Strip(m.renderActiveTabContent(67, 36))

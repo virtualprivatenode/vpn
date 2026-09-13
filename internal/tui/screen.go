@@ -54,7 +54,8 @@ type ScreenContext struct {
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
 	walletCreationOwner *WalletCreateScreen
-	walletRevision      uint64
+	walletRevision      uint64 // Orders presence reads and invalidates replies across lifecycle changes.
+	walletGeneration    uint64 // Scopes retained observations; routine reads do not change it.
 	openWalletClient    func() (*lndrpc.Client, error)
 	HelperWorkflows     *app.HelperWorkflows
 	SSHAccess           *app.SSHAccess
@@ -108,6 +109,12 @@ type RuntimeState struct {
 	SyncthingDevices        []syncthing.Device
 	SyncthingDevicesErr     error
 	SyncthingDevicesKnown   bool
+}
+
+func (c *ScreenContext) invalidateWalletObservations() {
+	c.walletRevision++
+	c.walletGeneration++
+	c.Status = nil
 }
 
 func (c *ScreenContext) walletExists() bool {

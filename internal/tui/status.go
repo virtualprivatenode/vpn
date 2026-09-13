@@ -15,10 +15,10 @@ type statusReader interface {
 }
 
 type statusScope struct {
-	config         config.AppConfig
-	walletExists   bool
-	walletRevision uint64
-	client         *lndrpc.Client
+	config           config.AppConfig
+	walletExists     bool
+	walletGeneration uint64
+	client           *lndrpc.Client
 }
 
 type statusRequest struct{ scope statusScope }
@@ -31,7 +31,7 @@ func requestStatusCmd() tea.Msg { return refreshStatusMsg{} }
 
 func (m Model) currentStatusScope() statusScope {
 	return statusScope{config: *m.cfg,
-		walletExists: m.state.WalletExists, walletRevision: m.screenCtx.walletRevision,
+		walletExists: m.state.WalletExists, walletGeneration: m.screenCtx.walletGeneration,
 		client: m.lndClient}
 }
 

@@ -38,8 +38,7 @@ func (m Model) finishWalletCreation(msg walletFinalizedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	s.HandleMsg(msg)
-	m.screenCtx.walletRevision++
-	m.screenCtx.Status = nil
+	m.screenCtx.invalidateWalletObservations()
 	m.state.WalletKnown = msg.result.Presence != app.WalletUnknown
 	if m.state.WalletKnown {
 		m.state.WalletExists = msg.result.Presence == app.WalletPresent
@@ -80,7 +79,6 @@ func (m Model) continueWalletCreation(owner *WalletCreateScreen) (Model, tea.Cmd
 func (m *Model) releaseWalletCreation(screen Screen) {
 	if screen == m.screenCtx.walletCreationOwner {
 		m.screenCtx.walletCreationOwner = nil
-		m.screenCtx.walletRevision++
-		m.screenCtx.Status = nil
+		m.screenCtx.invalidateWalletObservations()
 	}
 }

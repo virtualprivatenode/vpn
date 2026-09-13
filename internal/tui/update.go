@@ -412,8 +412,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.state.WalletExists != msg.state.WalletExists {
-			m.screenCtx.walletRevision++
-			m.screenCtx.Status = nil
+			m.screenCtx.invalidateWalletObservations()
 		}
 		m.state.WalletExists = msg.state.WalletExists
 		m.state.WalletKnown = true
