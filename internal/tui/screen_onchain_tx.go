@@ -12,35 +12,12 @@ import (
 
 // ── OnChainTxScreen ────────────────────────────────────
 // View-only tab showing a single on-chain transaction.
-// No buttons — navigate away via backspace (parent).
+// Backspace returns to the parent.
 
-type OnChainTxScreen struct {
-	ctx             *ScreenContext
-	tx              lndrpc.OnChainTx
-	blocksRemaining int32 // from pending force close, 0 if N/A
-}
+type OnChainTxScreen struct{ onChainDetail }
 
-func NewOnChainTxScreen(
-	ctx *ScreenContext,
-	tx lndrpc.OnChainTx,
-	pendingForceClose []lndrpc.PendingForceCloseChannel,
-) *OnChainTxScreen {
-	var blocks int32
-	if tx.TxType == "channel_close" &&
-		tx.Confirmations > 0 {
-		for _, fc := range pendingForceClose {
-			if fc.ClosingTxid == tx.Txid &&
-				fc.BlocksRemaining > 0 {
-				blocks = fc.BlocksRemaining
-				break
-			}
-		}
-	}
-	return &OnChainTxScreen{
-		ctx:             ctx,
-		tx:              tx,
-		blocksRemaining: blocks,
-	}
+func NewOnChainTxScreen(ctx *ScreenContext, txid string) *OnChainTxScreen {
+	return &OnChainTxScreen{onChainDetail: newOnChainDetail(ctx, txid)}
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -79,8 +56,13 @@ func (s *OnChainTxScreen) HandleMsg(
 func (s *OnChainTxScreen) View(
 	w, h int,
 ) string {
-	tx := s.tx
 	p := newPane(w)
+	tx, notice, found := s.record()
+	if !found {
+		p.title(theme.Header, "Transaction Detail").warnWrap(notice).blank()
+		p.labelLine("TX ID:").monoWrap(s.key)
+		return p.render()
+	}
 
 	switch {
 	case tx.IsAnchorSweep:
@@ -95,6 +77,9 @@ func (s *OnChainTxScreen) View(
 		p.title(theme.Success, "On-Chain Receive")
 	}
 
+	if notice != "" {
+		p.warnWrap(notice).blank()
+	}
 	if tx.IsAnchorSweep {
 		p.dim("330-sat anchor from force close.")
 		p.dim("Sweep fee exceeded value.")
@@ -125,11 +110,17 @@ func (s *OnChainTxScreen) View(
 	}
 	p.field("Confs:   ", confStr)
 
-	if s.blocksRemaining > 0 {
-		p.field("Locked:  ",
-			fmt.Sprintf(
-				"~%d blocks remaining",
-				s.blocksRemaining))
+	if tx.TxType == "channel_close" && tx.Confirmations > 0 {
+		if s.ctx.Status == nil || !s.ctx.Status.Channels.Fresh() {
+			p.field("Locked:  ", "unavailable")
+		} else {
+			for _, fc := range s.ctx.Status.Channels.Value.Pending.PendingForceCloseChannels {
+				if fc.ClosingTxid == tx.Txid && fc.BlocksRemaining > 0 {
+					p.field("Locked:  ", fmt.Sprintf("~%d blocks remaining", fc.BlocksRemaining))
+					break
+				}
+			}
+		}
 	}
 
 	if tx.BlockHeight > 0 {
@@ -271,4 +262,11 @@ func (s *OnChainTxScreen) View(
 
 func (s *OnChainTxScreen) HelpBindings() []key.Binding {
 	return viewDetailBindings(s.ctx.HasTabs)
+}
+
+func (s *OnChainTxScreen) record() (lndrpc.OnChainTx, string, bool) {
+	if !s.current() {
+		return lndrpc.OnChainTx{}, previousOnChainDetail, false
+	}
+	return onChainDetailRecord(s.owner.OnChainTxs, func(tx lndrpc.OnChainTx) bool { return tx.Txid == s.key })
 }

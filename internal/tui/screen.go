@@ -48,6 +48,7 @@ type Screen interface {
 // read the current observation when rendering; no screen owns a second copy.
 
 type ScreenContext struct {
+	OnChain             *OnChainContext
 	AutoUnlock          autoUnlockChanges
 	LoginPasswords      loginPasswordChanges
 	Syncthing           *app.Syncthing
@@ -115,6 +116,10 @@ func (c *ScreenContext) invalidateWalletObservations() {
 	c.walletRevision++
 	c.walletGeneration++
 	c.Status = nil
+	if c.OnChain != nil {
+		c.OnChain.OnChainSnapshot = app.OnChainSnapshot{}
+		c.OnChain.Selection.Clear()
+	}
 }
 
 func (c *ScreenContext) walletExists() bool {
@@ -151,11 +156,14 @@ func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
 // OnChainContext holds wallet data and the selection shared by home and send.
 // Prepared sends own copies of their reviewed inputs.
 type OnChainContext struct {
-	txRevision   uint64
-	Utxos        []lndrpc.UTXO
+	app.OnChainSnapshot
+	revision     uint64
 	Selection    app.CoinSelection
-	OnChainTxs   []lndrpc.OnChainTx
 	SendFeeTiers [4]feeTier
+	reader       onChainReader
+	scope        onChainScope
+	active       *onChainRequest
+	pending      bool
 }
 
 // ── Screen-to-Model messages ────────────────────────────

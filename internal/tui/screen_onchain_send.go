@@ -550,7 +550,7 @@ func (s *OnChainSendScreen) handleSendCoinsResult(msg sendCoinsResultMsg) (Scree
 		s.ocCtx.Selection.Clear()
 	}
 	// Refresh wallet facts even if the RPC outcome is unknown. Never retry here.
-	return s, tea.Batch(listUnspentCmd(s.ctx.LndClient), fetchOnChainTxCmd(s.ctx.LndClient, s.ocCtx),
+	return s, tea.Batch(requestOnChainCmd,
 		requestStatusCmd)
 }
 
@@ -600,7 +600,7 @@ func (s *OnChainSendScreen) validateAndConfirm() (Screen, tea.Cmd) {
 		Address: s.addrInput.Value(), AmountSats: s.amtInput.Sats(), SendAll: s.sendAll,
 		SatPerVbyte: s.feeInput.Sats(), Label: s.labelInput.Value(),
 		Outpoints: s.ocCtx.Selection.Outpoints(),
-	}, s.ocCtx.Utxos)
+	}, s.ocCtx.Utxos.Value)
 	if err != nil {
 		s.error = err.Error()
 		return s, nil
@@ -754,7 +754,7 @@ func (s *OnChainSendScreen) viewInput(
 		if s.sendAll {
 			amount = "unknown"
 		}
-		diagLines = renderTxDiagram(buildDiagramInputs(s.ocCtx.Selection.Outpoints(), s.ocCtx.Utxos, s.ocCtx.OnChainTxs),
+		diagLines = renderTxDiagram(buildDiagramInputs(s.ocCtx.Selection.Outpoints(), s.ocCtx.Utxos.Value, s.ocCtx.OnChainTxs.Value),
 			strings.TrimSpace(s.addrInput.Value()), amount, "unknown", "unknown", s.sendAll, w)
 		diagLines = append(diagLines, " "+theme.Dim.Render("Total fee unavailable for this manual rate; LND determines change."))
 		if s.sendAll {

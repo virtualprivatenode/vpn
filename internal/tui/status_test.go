@@ -121,7 +121,7 @@ func TestStatusSchedulingSnapshotAndScopeChange(t *testing.T) {
 
 func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 	m, r := statusModelFixture(t)
-	oc := &OnChainContext{OnChainTxs: []lndrpc.OnChainTx{{Amount: 10000}, {Amount: 10000}}}
+	oc := &OnChainContext{OnChainSnapshot: app.OnChainSnapshot{OnChainTxs: freshStatus([]lndrpc.OnChainTx{{Amount: 10000}, {Amount: 10000}})}}
 	onchain := NewOnChainHomeScreen(m.screenCtx, oc)
 	channels := NewChannelsHomeScreen(m.screenCtx)
 	offchain := NewWalletHomeScreen(m.screenCtx)
@@ -164,7 +164,7 @@ func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 	m, reader := statusModelFixture(t)
 	m.lndClient = &lndrpc.Client{}
-	oc := &OnChainContext{OnChainTxs: []lndrpc.OnChainTx{{Amount: 10000}, {Amount: 10000}}}
+	oc := &OnChainContext{OnChainSnapshot: app.OnChainSnapshot{OnChainTxs: freshStatus([]lndrpc.OnChainTx{{Amount: 10000}, {Amount: 10000}})}}
 	m.sectionScreens[secOnChain] = NewOnChainHomeScreen(m.screenCtx, oc)
 	m.sectionScreens[secWallet] = NewWalletHomeScreen(m.screenCtx)
 	m.sectionScreens[secChannels] = NewChannelsHomeScreen(m.screenCtx)

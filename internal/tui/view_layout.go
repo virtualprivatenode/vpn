@@ -417,6 +417,9 @@ func (m Model) effectiveTabs() []openTab {
 	}
 	for _, t := range m.tabs {
 		if t.Section == sec {
+			if t.Kind == tabUtxoDetail || t.Kind == tabOnChainTx {
+				t.Label = onChainDetailLabel(t.Screen)
+			}
 			tabs = append(tabs, t)
 		}
 	}
