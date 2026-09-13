@@ -371,6 +371,9 @@ func (s *ReceiveScreen) handleButtonKey(
 }
 
 func (s *ReceiveScreen) submitInvoice() (Screen, tea.Cmd) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	if s.step != recvStepInput {
 		return s, nil
 	}
@@ -517,17 +520,6 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 	p := newPane(w)
 	p.title(theme.Header, "⚡ Receive Payment")
 
-	if !s.ctx.Cfg.HasLND() ||
-		!s.ctx.walletExists() {
-		p.dim("Create LND wallet to receive.")
-		return p.render()
-	}
-	if s.ctx.Status == nil ||
-		!s.ctx.Status.lndResponding {
-		p.dim("Waiting for LND...")
-		return p.render()
-	}
-
 	isFocused := s.ctx.ContentFocused
 	amtFocused := isFocused &&
 		s.focusZone == recvZoneAmount
@@ -563,7 +555,7 @@ func (s *ReceiveScreen) viewInput(w, h int) string {
 		s.focusZone == recvZoneButtons
 	return p.renderWithBottomButtons(
 		[]string{"Clear", "Create Invoice"},
-		s.btnIdx, btnFocused, h)
+		s.btnIdx, btnFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *ReceiveScreen) viewWaiting(

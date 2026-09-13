@@ -109,10 +109,10 @@ func (s *OnChainHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "enter":
 		// No wallet → trigger wallet creation flow
-		if !s.ctx.walletKnown() {
+		if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 			return s, fetchWalletStateCmd(s.ctx)
 		}
-		if !s.ctx.walletExists() {
+		if s.ctx.walletKnown() && !s.ctx.walletExists() {
 			screen := NewWalletCreateScreen(s.ctx)
 			return s, func() tea.Msg {
 				return openTabMsg{
@@ -151,7 +151,7 @@ func (s *OnChainHomeScreen) handleRight() (
 	switch s.focusZone {
 	case ocHomeZoneButtons:
 		if s.ctx.Cfg.HasLND() &&
-			s.ctx.walletExists() &&
+			s.ctx.walletDisplayAvailable() &&
 			s.btnIdx < 1 {
 			s.btnIdx++
 		}
@@ -306,6 +306,9 @@ func (s *OnChainHomeScreen) handleEnter() (
 func (s *OnChainHomeScreen) openReceive() (
 	Screen, tea.Cmd,
 ) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	screen := NewOCReceiveScreen(s.ctx)
 	return s, func() tea.Msg {
 		return openTabMsg{
@@ -319,6 +322,9 @@ func (s *OnChainHomeScreen) openReceive() (
 func (s *OnChainHomeScreen) openSend() (
 	Screen, tea.Cmd,
 ) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	screen := NewOnChainSendScreen(
 		s.ctx, s.ocCtx)
 	// Pre-fill the manual rate from the cached suggestion.
@@ -376,7 +382,7 @@ func (s *OnChainHomeScreen) openTxDetail() (
 	}
 	var pfc []lndrpc.PendingForceCloseChannel
 	if s.ctx.Status != nil {
-		pfc = s.ctx.Status.pendingForceCloseChannels
+		pfc = s.ctx.Status.Channels.Value.Pending.PendingForceCloseChannels
 	}
 	screen := NewOnChainTxScreen(s.ctx, tx, pfc)
 	idx := s.txCursor
@@ -451,6 +457,9 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 				s.closeLabelPopup()
 				return s, nil
 			case 1: // Save
+				if !s.ctx.walletExists() {
+					return s, nil
+				}
 				prepared, err := app.PrepareTransactionLabel(s.labelTxid, s.labelInput.Value())
 				if err != nil {
 					s.labelErr = err.Error()
@@ -547,15 +556,15 @@ func (s *OnChainHomeScreen) View(
 
 	// ── Fixed header ─────────────────────────────
 
-	if !s.ctx.walletKnown() {
+	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 		return renderWalletStateUnavailable(w, h)
 	}
-	if !cfg.HasLND() || !s.ctx.walletExists() {
+	if !cfg.HasLND() || !s.ctx.walletDisplayAvailable() {
 		return renderWalletPrompt(
 			w, h, s.ctx.ContentFocused)
 	}
 
-	if status == nil || !status.lndResponding {
+	if status == nil {
 		return renderWaitingForLND(w, h)
 	}
 
@@ -572,20 +581,15 @@ func (s *OnChainHomeScreen) View(
 	utxos := s.ocCtx.Utxos
 	txs := s.ocCtx.OnChainTxs
 
-	onchain := "0"
-	if status.lndBalance != "" {
-		onchain = status.lndBalance
-	}
 	headerLines = append(headerLines,
 		" "+theme.Label.Render("Balance:  ")+
 			theme.Value.Render(
-				formatSats(parseBalance(onchain))+
-					" sats")+
+				onChainBalanceText(status))+
 			theme.Dim.Render(
 				fmt.Sprintf("  (%d UTXOs)",
 					len(utxos))))
 
-	if !status.btcSynced {
+	if status.Bitcoin.Fresh() && !status.Bitcoin.Value.Synced {
 		headerLines = append(headerLines, "")
 		headerLines = append(headerLines,
 			" "+theme.Warn.Render(
@@ -601,7 +605,7 @@ func (s *OnChainHomeScreen) View(
 				"sync is complete."))
 	}
 
-	headerLines = append(headerLines, "")
+	headerLines = append(headerLines, statusNotice(status))
 
 	sendLabel := "Send"
 	if s.ocCtx.Selection.Len() > 0 {
@@ -618,7 +622,7 @@ func (s *OnChainHomeScreen) View(
 			s.btnIdx,
 			isFocused &&
 				s.focusZone == ocHomeZoneButtons,
-			w))
+			w, s.ctx.disabledWalletButtons(0, 1)...))
 	headerLines = append(headerLines, "")
 
 	header := strings.Join(headerLines, "\n")
@@ -843,12 +847,11 @@ func (s *OnChainHomeScreen) View(
 			valStr := fmt.Sprintf("%*s",
 				tValW, valNum)
 
-			bal := int64(0)
+			balanceText := "N/A"
 			if i < len(txBalances) {
-				bal = txBalances[i]
+				balanceText = formatSats(txBalances[i])
 			}
-			balStr := fmt.Sprintf("%*s",
-				tBalW, formatSats(bal))
+			balStr := fmt.Sprintf("%*s", tBalW, balanceText)
 
 			marker := " "
 			if isSelected {
@@ -990,7 +993,7 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 	btnStr := renderButtons(
 		[]string{"Cancel", "Save"},
 		s.labelBtnIdx,
-		isFocused && s.labelOnBtn, boxW)
+		isFocused && s.labelOnBtn, boxW, s.ctx.disabledWalletButtons(1)...)
 	if s.labelPending {
 		btnStr = theme.Dim.Render("Saving label...")
 	}
@@ -1023,7 +1026,7 @@ func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
 	if s.labelEditing {
 		return s.labelPopupBindings()
 	}
-	if !s.ctx.walletExists() {
+	if !s.ctx.walletDisplayAvailable() {
 		return walletUnavailableHelpBindings(s.ctx)
 	}
 	switch s.focusZone {
@@ -1114,11 +1117,10 @@ func (s *OnChainHomeScreen) computeTxBalances() []int64 {
 	if len(txs) == 0 {
 		return nil
 	}
-	bal := parseBalance("0")
-	if s.ctx.Status != nil &&
-		s.ctx.Status.lndBalance != "" {
-		bal = parseBalance(s.ctx.Status.lndBalance)
+	if s.ctx.Status == nil || !s.ctx.Status.Balance.Fresh() {
+		return nil
 	}
+	bal := parseBalance(s.ctx.Status.Balance.Value.TotalBalance)
 	balances := make([]int64, len(txs))
 	for i := range txs {
 		balances[i] = bal

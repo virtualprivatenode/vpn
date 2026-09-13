@@ -230,18 +230,29 @@ func (c *Client) Close() {
 // gRPC metadata. The field is read under the lock — Reconnect
 // rewrites it on another goroutine.
 func (c *Client) macaroonCtx() context.Context {
-	c.mu.RLock()
-	macHex := c.macaroonHex
-	c.mu.RUnlock()
-	md := metadata.New(map[string]string{
-		"macaroon": macHex,
-	})
-	return metadata.NewOutgoingContext(context.Background(), md)
+	return c.macaroonCtxFrom(context.Background())
 }
 
 // callCtx returns a context with macaroon and a timeout.
 func (c *Client) callCtx(timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(c.macaroonCtx(), timeout)
+	return c.callCtxFrom(context.Background(), timeout)
+}
+
+// callCtxFrom keeps the caller's cancellation when attaching credentials.
+func (c *Client) callCtxFrom(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(c.macaroonCtxFrom(parent), timeout)
+}
+
+func (c *Client) macaroonCtxFrom(parent context.Context) context.Context {
+	c.mu.RLock()
+	macHex := c.macaroonHex
+	c.mu.RUnlock()
+	md, _ := metadata.FromOutgoingContext(parent)
+	if md == nil {
+		md = metadata.MD{}
+	}
+	md.Set("macaroon", macHex)
+	return metadata.NewOutgoingContext(parent, md)
 }
 
 // rpc returns the Lightning client, or nil if not connected.

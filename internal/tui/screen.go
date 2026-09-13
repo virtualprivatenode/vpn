@@ -44,12 +44,8 @@ type Screen interface {
 }
 
 // ── ScreenContext ────────────────────────────────────────
-// Pointer semantics — screens always see current data.
-// Model owns the single instance; screens store a
-// *ScreenContext on creation. When Model updates
-// m.status on a new statusMsg, every screen's View()
-// automatically sees current data through the pointer
-// chain — zero refresh plumbing.
+// Model publishes one application snapshot through this shared context. Screens
+// read the current observation when rendering; no screen owns a second copy.
 
 type ScreenContext struct {
 	AutoUnlock          autoUnlockChanges
@@ -58,7 +54,8 @@ type ScreenContext struct {
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
 	walletCreationOwner *WalletCreateScreen
-	walletRevision      uint64
+	walletRevision      uint64 // Orders presence reads and invalidates replies across lifecycle changes.
+	walletGeneration    uint64 // Scopes retained observations; routine reads do not change it.
 	openWalletClient    func() (*lndrpc.Client, error)
 	HelperWorkflows     *app.HelperWorkflows
 	SSHAccess           *app.SSHAccess
@@ -66,7 +63,7 @@ type ScreenContext struct {
 	Cfg                 *config.AppConfig
 	State               *RuntimeState
 	LndClient           *lndrpc.Client
-	Status              *statusMsg
+	Status              *statusSnapshot
 	HasTabs             bool   // varies by section; Model sets before calling View/HelpBindings
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
@@ -114,12 +111,33 @@ type RuntimeState struct {
 	SyncthingDevicesKnown   bool
 }
 
+func (c *ScreenContext) invalidateWalletObservations() {
+	c.walletRevision++
+	c.walletGeneration++
+	c.Status = nil
+}
+
 func (c *ScreenContext) walletExists() bool {
 	return c.State != nil && c.State.WalletKnown && c.State.WalletExists
 }
 
 func (c *ScreenContext) walletKnown() bool {
 	return c.State != nil && c.State.WalletKnown
+}
+
+func (c *ScreenContext) walletDisplayAvailable() bool {
+	if c.State == nil || !c.State.WalletExists {
+		return false
+	}
+	return c.walletKnown() || (c.Status != nil &&
+		(c.Status.Node.Known() || c.Status.Balance.Known() || c.Status.Channels.Known()))
+}
+
+func (c *ScreenContext) disabledWalletButtons(indices ...int) []int {
+	if c.walletExists() {
+		return nil
+	}
+	return indices
 }
 
 func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
@@ -191,8 +209,7 @@ type showFullURLMsg struct {
 }
 
 // refreshStatusMsg tells Model to re-fetch node status.
-// Distinct from statusMsg which carries actual status
-// data.
+// statusResultMsg carries a completed observation and its request identity.
 type refreshStatusMsg struct{}
 
 // ── Message emitters ────────────────────────────────────

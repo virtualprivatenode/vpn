@@ -38,7 +38,7 @@ func (s *OCReceiveScreen) Init() tea.Cmd {
 }
 
 func (s *OCReceiveScreen) requestAddress() tea.Cmd {
-	if s.requesting {
+	if s.requesting || !s.ctx.walletExists() {
 		return nil
 	}
 	s.attempt++
@@ -126,7 +126,7 @@ func (s *OCReceiveScreen) View(
 		p.dim("Earlier addresses remain valid.")
 	}
 
-	if s.requesting || s.attempt == 0 {
+	if s.requesting {
 		p.blank()
 		p.dim("Generating address...")
 		return p.renderWithBottomButtons([]string{"Generating..."}, 0, false, h)
@@ -140,11 +140,14 @@ func (s *OCReceiveScreen) View(
 		buttons[1] = "Retry"
 	}
 	if s.address == "" {
-		buttons = []string{"Retry"}
+		buttons = []string{"New Address"}
+		if s.errMsg != "" {
+			buttons[0] = "Retry"
+		}
 	}
 
 	return p.renderWithBottomButtons(
-		buttons, s.btnIdx, s.ctx.ContentFocused, h)
+		buttons, s.btnIdx, s.ctx.ContentFocused, h, s.ctx.disabledWalletButtons(len(buttons)-1)...)
 }
 
 func (s *OCReceiveScreen) HelpBindings() []key.Binding {

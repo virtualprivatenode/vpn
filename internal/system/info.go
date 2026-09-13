@@ -3,6 +3,8 @@
 package system
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,40 +26,77 @@ type MemInfo struct {
 	Percent string
 }
 
-func Disk(path string) DiskInfo {
-	cmd := exec.Command("df", "-h", "--output=size,used,pcent", path)
-	out, _ := cmd.CombinedOutput()
+func ReadDisk(ctx context.Context, path string) (DiskInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "df", "-h", "--output=size,used,pcent", path).Output()
+	if err != nil {
+		return DiskInfo{}, err
+	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) < 2 {
-		return DiskInfo{"N/A", "N/A", "N/A"}
+		return DiskInfo{}, errors.New("missing disk usage")
 	}
 	f := strings.Fields(lines[1])
-	if len(f) < 3 {
-		return DiskInfo{"N/A", "N/A", "N/A"}
+	if len(f) != 3 {
+		return DiskInfo{}, errors.New("invalid disk usage")
 	}
-	return DiskInfo{f[0], f[1], f[2]}
+	return DiskInfo{f[0], f[1], f[2]}, nil
 }
 
-func Memory() MemInfo {
-	data, _ := os.ReadFile("/proc/meminfo")
+func ReadMemory() (MemInfo, error) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return MemInfo{}, err
+	}
+	return parseMemory(string(data))
+}
+
+func parseMemory(data string) (MemInfo, error) {
 	var total, avail int
-	for _, line := range strings.Split(string(data), "\n") {
+	haveTotal, haveAvail := false, false
+	for _, line := range strings.Split(data, "\n") {
 		if strings.HasPrefix(line, "MemTotal:") {
-			fmt.Sscanf(line, "MemTotal: %d kB", &total)
+			n, err := fmt.Sscanf(line, "MemTotal: %d kB", &total)
+			haveTotal = n == 1 && err == nil
 		}
 		if strings.HasPrefix(line, "MemAvailable:") {
-			fmt.Sscanf(line, "MemAvailable: %d kB", &avail)
+			n, err := fmt.Sscanf(line, "MemAvailable: %d kB", &avail)
+			haveAvail = n == 1 && err == nil
 		}
 	}
-	if total == 0 {
-		return MemInfo{"N/A", "N/A", "N/A"}
+	if !haveTotal || !haveAvail || total <= 0 || avail < 0 || avail > total {
+		return MemInfo{}, errors.New("invalid memory usage")
 	}
 	used := total - avail
-	return MemInfo{
-		Total:   fmtKB(total),
-		Used:    fmtKB(used),
-		Percent: fmt.Sprintf("%.0f%%", float64(used)/float64(total)*100),
+	return MemInfo{Total: fmtKB(total), Used: fmtKB(used),
+		Percent: fmt.Sprintf("%.0f%%", float64(used)/float64(total)*100)}, nil
+}
+
+// ReadServiceActive separates an inactive unit from a failed systemd query.
+func ReadServiceActive(ctx context.Context, name string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState", "--value", name).Output()
+	if err != nil {
+		return false, err
 	}
+	switch strings.TrimSpace(string(out)) {
+	case "active", "reloading", "refreshing":
+		return true, nil
+	case "inactive", "failed", "activating", "deactivating", "maintenance":
+		return false, nil
+	default:
+		return false, errors.New("unavailable service state")
+	}
+}
+
+func ReadRebootRequired() (bool, error) {
+	_, err := os.Stat("/var/run/reboot-required")
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // DirSize measures a directory tree with du. Root only: the
@@ -112,12 +151,22 @@ func PublicIPv4() string {
 }
 
 func detectPublicIPv4() string {
-	output, err := RunContext(3*time.Second,
-		"ip", "-4", "route", "get", "1.1.1.1")
+	ip, _ := ReadPublicIPv4(context.Background())
+	return ip
+}
+
+func ReadPublicIPv4(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ip", "-4", "route", "get", "1.1.1.1").Output()
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return ParseSourceIP(output)
+	ip := ParseSourceIP(string(out))
+	if ip == "" {
+		return "", errors.New("public IPv4 unavailable")
+	}
+	return ip, nil
 }
 
 // ParseSourceIP extracts the source IP from "ip route get" output.

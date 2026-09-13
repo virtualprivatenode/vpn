@@ -463,7 +463,7 @@ func (s *ChannelCloseScreen) handleReviewKey(key string) (Screen, tea.Cmd) {
 			back()
 			return s, nil
 		}
-		if s.attempt == nil {
+		if s.attempt == nil || !s.ctx.walletExists() {
 			return s, nil
 		}
 		s.step = closeStepClosing
@@ -508,7 +508,7 @@ func (s *ChannelCloseScreen) viewReview(w, h int) string {
 	if req.Force {
 		action = "Force Close"
 	}
-	return p.renderWithBottomButtons([]string{"Go Back", action}, s.confirmBtnIdx, s.ctx.ContentFocused, h)
+	return p.renderWithBottomButtons([]string{"Go Back", action}, s.confirmBtnIdx, s.ctx.ContentFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *ChannelCloseScreen) viewType(

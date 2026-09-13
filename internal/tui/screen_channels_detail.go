@@ -113,9 +113,9 @@ func (s *ChannelDetailScreen) HandleMsg(
 		// so the detail view reflects any changes
 		// since this tab was last viewed (e.g.
 		// balance change after payment settlement).
-		if s.ctx.Status != nil {
+		if s.ctx.Status != nil && s.ctx.Status.Channels.Known() {
 			s.unavailable = true
-			for _, ch := range s.ctx.Status.channels {
+			for _, ch := range s.ctx.Status.Channels.Value.Channels {
 				if ch.ChannelPoint ==
 					s.channel.ChannelPoint {
 					s.unavailable = false
@@ -159,6 +159,9 @@ func (s *ChannelDetailScreen) View(
 		status = theme.Warning.Render("unavailable; check pending channels and history")
 	}
 
+	if s.ctx.Status != nil && !s.ctx.Status.Channels.Fresh() {
+		p.warn("Channel data stale; refresh unavailable.")
+	}
 	p.line(" " + theme.Label.Render("Status:    ") +
 		status)
 	p.field("Capacity:  ",
@@ -207,7 +210,7 @@ func (s *ChannelDetailScreen) View(
 		btnFocused := s.ctx.ContentFocused
 		return p.renderWithBottomButtons(
 			[]string{"Cancel", "Close Channel"},
-			s.viewBtnIdx, btnFocused, h)
+			s.viewBtnIdx, btnFocused, h, s.ctx.disabledWalletButtons(1)...)
 	}
 
 	return p.render()
@@ -229,7 +232,7 @@ func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
 func (s *ChannelDetailScreen) launchClose() (
 	Screen, tea.Cmd,
 ) {
-	if s.unavailable || s.channel.Pending {
+	if s.unavailable || s.channel.Pending || !s.ctx.walletExists() {
 		return s, nil
 	}
 	s.closeScreen = NewChannelCloseScreen(

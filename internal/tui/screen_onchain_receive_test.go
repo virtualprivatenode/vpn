@@ -36,7 +36,7 @@ func receiveAddress(t *testing.T, index byte) string {
 }
 
 func receiveAddressModel(client *receiveAddressClient) (Model, *OCReceiveScreen) {
-	s := NewOCReceiveScreen(&ScreenContext{Cfg: config.Default(), ContentFocused: true})
+	s := NewOCReceiveScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}, ContentFocused: true})
 	s.addresses = client
 	m := Model{nav: NewNavSidebar(), screenCtx: s.ctx,
 		tabs: []openTab{{Kind: tabOCReceive, Section: secOnChain, Screen: s}}}

@@ -391,12 +391,20 @@ func (s *SystemHomeScreen) View(
 
 	names := serviceNames(cfg)
 	for i, name := range names {
-		dot := theme.RedDot.Render("●")
+		dot := theme.Dim.Render("?")
+		stateText := "unavailable"
 		if status != nil {
-			if active, ok :=
-				status.services[name]; ok &&
-				active {
-				dot = theme.GreenDot.Render("●")
+			observation := status.Services[name]
+			if observation.Known() {
+				stateText = ""
+				dot = theme.RedDot.Render("●")
+				if observation.Value {
+					dot = theme.GreenDot.Render("●")
+				}
+				if !observation.Fresh() {
+					dot = theme.Dim.Render("?")
+					stateText = "stale"
+				}
 			}
 		}
 
@@ -413,8 +421,11 @@ func (s *SystemHomeScreen) View(
 
 		svcLine := prefix + " " + dot + " " +
 			style.Render(name)
+		if stateText != "" {
+			svcLine += " " + theme.Dim.Render(stateText)
+		}
 		if name == "lnd" && status != nil &&
-			status.lndWalletState == lndrpc.WalletStateLocked {
+			status.WalletState.Fresh() && status.WalletState.Value == lndrpc.WalletStateLocked {
 			svcLine += "  " + theme.Warning.Render("locked")
 		}
 
@@ -503,30 +514,30 @@ func (s *SystemHomeScreen) View(
 		resRows := []string{
 			" " + theme.Label.Render("Disk: ") +
 				theme.Value.Render(
-					fmt.Sprintf("%s / %s (%s)",
-						status.diskUsed,
-						status.diskTotal,
-						status.diskPct)),
+					observationText(status.Disk, fmt.Sprintf("%s / %s (%s)",
+						status.Disk.Value.Used,
+						status.Disk.Value.Total,
+						status.Disk.Value.Percent))),
 			" " + theme.Label.Render("RAM:  ") +
 				theme.Value.Render(
-					fmt.Sprintf("%s / %s (%s)",
-						status.ramUsed,
-						status.ramTotal,
-						status.ramPct)),
+					observationText(status.Memory, fmt.Sprintf("%s / %s (%s)",
+						status.Memory.Value.Used,
+						status.Memory.Value.Total,
+						status.Memory.Value.Percent))),
 			" " + theme.Label.Render("BTC:  ") +
 				theme.Value.Render(
-					status.btcSize),
+					bitcoinSize(status.Bitcoin)),
 		}
 		if cfg.HasLND() {
 			resRows = append(resRows,
 				" "+theme.Label.Render("LND:  ")+
 					theme.Value.Render(
-						status.lndSize))
+						observationText(status.LNDSize, status.LNDSize.Value)))
 		}
-		if status.rebootRequired {
+		if status.Reboot.Value {
 			resRows = append(resRows,
 				" "+theme.Warning.Render(
-					"⚠ Reboot required"))
+					observationText(status.Reboot, "⚠ Reboot required")))
 		}
 
 		for _, rl := range resRows {
@@ -592,7 +603,7 @@ func (s *SystemHomeScreen) View(
 				btcLoad+
 				strings.Repeat(" ", btcLoadPad)+
 				border.Render("│"))
-	} else if !status.btcResponding {
+	} else if !status.Bitcoin.Known() {
 		btcErr := " " +
 			theme.Warn.Render(" Not responding")
 		btcErrVis := lipgloss.Width(btcErr)
@@ -608,24 +619,24 @@ func (s *SystemHomeScreen) View(
 	} else {
 		var btcRows []string
 		syncVal := theme.Good.Render("synced")
-		if !status.btcSynced {
+		if !status.Bitcoin.Value.Synced {
 			syncVal = theme.Warn.Render("syncing")
 		}
 		btcRows = append(btcRows,
 			" "+theme.Label.Render("Sync:     ")+
-				syncVal)
+				observationText(status.Bitcoin, syncVal))
 		btcRows = append(btcRows,
 			" "+theme.Label.Render("Height:   ")+
 				theme.Value.Render(
 					fmt.Sprintf("%d / %d",
-						status.btcBlocks,
-						status.btcHeaders)))
-		if status.btcProgress > 0 {
+						status.Bitcoin.Value.Blocks,
+						status.Bitcoin.Value.Headers)))
+		if status.Bitcoin.Value.Progress > 0 {
 			btcRows = append(btcRows,
 				" "+theme.Label.Render("Progress: ")+
 					theme.Value.Render(
 						bitcoin.FormatProgress(
-							status.btcProgress)))
+							status.Bitcoin.Value.Progress)))
 		}
 		btcRows = append(btcRows,
 			" "+theme.Label.Render("Network:  ")+
@@ -733,7 +744,7 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 		actions = append(actions, sysBtnUpdateNode)
 	}
 	if s.ctx.Status != nil &&
-		s.ctx.Status.rebootRequired {
+		s.ctx.Status.Reboot.Value {
 		actions = append(actions, sysBtnReboot)
 	}
 	return actions

@@ -33,7 +33,7 @@ func onChainScreen(t *testing.T) (*OnChainSendScreen, *screenOnChainClient) {
 	client := &screenOnChainClient{coins: []lndrpc.UTXO{coin}}
 	ocCtx := &OnChainContext{Utxos: client.coins}
 	ocCtx.Selection.Toggle(coin)
-	s := NewOnChainSendScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{}}, ocCtx)
+	s := NewOnChainSendScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}}, ocCtx)
 	s.client = client
 	addr, err := btcutil.NewAddressWitnessPubKeyHash(make([]byte, 20), &chaincfg.MainNetParams)
 	if err != nil {

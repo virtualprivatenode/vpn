@@ -156,7 +156,7 @@ func (s *WalletCreateScreen) startWaitingForLND() tea.Cmd {
 		return nil
 	}
 	s.ctx.walletCreationOwner = s
-	s.ctx.walletRevision++
+	s.ctx.invalidateWalletObservations()
 	s.step = walletWaiting
 	s.attempt = &walletCreationAttempt{}
 	attempt, network, workflow := s.attempt, s.ctx.Cfg.Network, s.ctx.walletCreation()

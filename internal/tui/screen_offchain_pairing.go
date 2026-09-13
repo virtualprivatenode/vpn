@@ -86,6 +86,9 @@ func (s *PairingScreen) buttons() []string {
 }
 
 func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	btns := s.buttons()
 	if s.btnIdx < 0 || s.btnIdx >= len(btns) {
 		return s, nil
@@ -108,13 +111,13 @@ func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
 	case "Show QR (Clearnet)":
 		if s.ctx.Cfg.P2PMode == "hybrid" &&
 			s.ctx.Status != nil &&
-			s.ctx.Status.publicIP != "" {
+			s.ctx.Status.PublicIP.Fresh() && s.ctx.Status.PublicIP.Value != "" {
 			mac := readMacaroonHex()
 			if mac != "" {
 				url := fmt.Sprintf(
 					"lndconnect://%s:8080"+
 						"?macaroon=%s",
-					s.ctx.Status.publicIP,
+					s.ctx.Status.PublicIP.Value,
 					hexToBase64URL(mac))
 				return s, func() tea.Msg {
 					return showQRMsg{
@@ -152,7 +155,10 @@ func (s *PairingScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
-	if !cfg.HasLND() || !s.ctx.walletExists() {
+	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
+		return renderWalletStateUnavailable(w, h)
+	}
+	if !cfg.HasLND() || !s.ctx.walletDisplayAvailable() {
 		p := newPane(w)
 		p.title(theme.Lightning, "⚡ Zeus Wallet")
 		p.dim("Create LND wallet first")
@@ -160,7 +166,7 @@ func (s *PairingScreen) View(
 			[]string{"Done"}, 0, false, h)
 	}
 
-	if status == nil || !status.lndResponding {
+	if status == nil || !status.Node.Fresh() {
 		p := newPane(w)
 		p.title(theme.Lightning, "⚡ Zeus Wallet")
 		p.dim("Waiting for LND...")
@@ -176,12 +182,14 @@ func (s *PairingScreen) View(
 	if cfg.P2PMode == "hybrid" {
 		p.line(" " + theme.Header.Render(
 			"Clearnet"))
-		if status.publicIP != "" {
+		if status.PublicIP.Value != "" {
 			p.labelLine("Server:")
-			p.monoWrap(status.publicIP)
+			p.monoWrap(observationText(status.PublicIP, status.PublicIP.Value))
 			p.blank()
 			p.labelLine("Port:")
 			p.monoWrap("8080")
+		} else {
+			p.dim("Server address unavailable.")
 		}
 		p.blank()
 		p.line(" " + theme.Header.Render("Tor"))

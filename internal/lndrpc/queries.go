@@ -144,11 +144,15 @@ type PeerInfo struct {
 // ── Read queries ─────────────────────────────────────────
 
 func (c *Client) GetInfo() (*NodeInfo, error) {
+	return c.GetInfoContext(context.Background())
+}
+
+func (c *Client) GetInfoContext(parent context.Context) (*NodeInfo, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.GetInfo(ctx, &lnrpc.GetInfoRequest{})
@@ -173,17 +177,17 @@ func (c *Client) GetInfo() (*NodeInfo, error) {
 // is locked. This lets status distinguish an intentionally running-but-locked
 // daemon from a stopped daemon or a generic RPC outage.
 func (c *Client) GetState() (WalletState, error) {
+	return c.GetStateContext(context.Background())
+}
+
+func (c *Client) GetStateContext(parent context.Context) (WalletState, error) {
 	rpc := c.stateRPC()
 	if rpc == nil {
 		return WalletStateUnknown, errNotConnected
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	ctx, cancel := context.WithTimeout(parent, defaultTimeout)
 	defer cancel()
-	resp, err := rpc.GetState(ctx, &lnrpc.GetStateRequest{})
-	if err != nil {
-		return WalletStateUnknown, err
-	}
-	return walletStateName(resp.GetState()), nil
+	return readWalletSetupState(ctx, rpc)
 }
 
 func walletStateName(state lnrpc.WalletState) WalletState {
@@ -198,11 +202,15 @@ func walletStateName(state lnrpc.WalletState) WalletState {
 }
 
 func (c *Client) GetWalletBalance() (*WalletBalance, error) {
+	return c.GetWalletBalanceContext(context.Background())
+}
+
+func (c *Client) GetWalletBalanceContext(parent context.Context) (*WalletBalance, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.WalletBalance(ctx, &lnrpc.WalletBalanceRequest{})
@@ -218,11 +226,15 @@ func (c *Client) GetWalletBalance() (*WalletBalance, error) {
 }
 
 func (c *Client) ListChannels() ([]Channel, error) {
+	return c.ListChannelsContext(context.Background())
+}
+
+func (c *Client) ListChannelsContext(parent context.Context) ([]Channel, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
@@ -247,17 +259,25 @@ func (c *Client) ListChannels() ([]Channel, error) {
 		})
 	}
 	for i := range channels {
-		channels[i].PeerAlias = c.getPeerAlias(channels[i].RemotePubkey)
+		channels[i].PeerAlias = c.getPeerAliasContext(ctx, channels[i].RemotePubkey)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	return channels, nil
 }
 
 func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
+	return c.GetPendingChannelsContext(context.Background())
+}
+
+func (c *Client) GetPendingChannelsContext(parent context.Context) (*PendingChannelInfo, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.PendingChannels(ctx, &lnrpc.PendingChannelsRequest{})
@@ -270,7 +290,7 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 	for _, pc := range resp.GetPendingOpenChannels() {
 		ch := pc.GetChannel()
 		if ch != nil {
-			alias := c.getPeerAlias(ch.GetRemoteNodePub())
+			alias := c.getPeerAliasContext(ctx, ch.GetRemoteNodePub())
 			pendingChans = append(pendingChans, PendingChannel{
 				RemotePubkey: ch.GetRemoteNodePub(),
 				Capacity:     ch.GetCapacity(),
@@ -284,7 +304,7 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 	for _, fc := range resp.GetPendingForceClosingChannels() {
 		ch := fc.GetChannel()
 		if ch != nil {
-			alias := c.getPeerAlias(
+			alias := c.getPeerAliasContext(ctx,
 				ch.GetRemoteNodePub())
 			forceCloseChans = append(forceCloseChans,
 				PendingForceCloseChannel{
@@ -306,7 +326,7 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 	for _, wc := range resp.GetWaitingCloseChannels() {
 		ch := wc.GetChannel()
 		if ch != nil {
-			alias := c.getPeerAlias(
+			alias := c.getPeerAliasContext(ctx,
 				ch.GetRemoteNodePub())
 			waitingCloseChans = append(
 				waitingCloseChans,
@@ -320,6 +340,10 @@ func (c *Client) GetPendingChannels() (*PendingChannelInfo, error) {
 					PeerAlias:    alias,
 				})
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	return &PendingChannelInfo{
@@ -564,11 +588,15 @@ func buildOpenChannelRequest(input ChannelOpenRequest) (*lnrpc.OpenChannelReques
 // ── Internal helpers ─────────────────────────────────────
 
 func (c *Client) getPeerAlias(pubkey string) string {
+	return c.getPeerAliasContext(context.Background(), pubkey)
+}
+
+func (c *Client) getPeerAliasContext(parent context.Context, pubkey string) string {
 	rpc := c.rpc()
 	if rpc == nil {
 		return ""
 	}
-	ctx, cancel := c.callCtx(3 * time.Second)
+	ctx, cancel := c.callCtxFrom(parent, 3*time.Second)
 	defer cancel()
 
 	resp, err := rpc.GetNodeInfo(ctx, &lnrpc.NodeInfoRequest{

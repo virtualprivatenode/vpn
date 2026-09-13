@@ -11,6 +11,7 @@ package bitcoin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,11 +30,10 @@ import (
 const RPCUser = "vpn"
 
 type BlockchainInfo struct {
-	Blocks     int
-	Headers    int
-	Progress   float64
-	Synced     bool
-	Responding bool
+	Blocks   int
+	Headers  int
+	Progress float64
+	Synced   bool
 	// SizeOnDisk is bitcoind's own measure of its data
 	// footprint in bytes — which is why no privileged
 	// du of the data dir is needed for the status screen.
@@ -81,6 +81,10 @@ func GetBlockchainIdentity(rpcPort int) (BlockchainIdentity, error) {
 // from the board and sent as HTTP basic auth.
 func rpcCall(rpcPort int, method string,
 	params []any, result any) error {
+	return rpcCallContext(context.Background(), rpcPort, method, params, result)
+}
+
+func rpcCallContext(ctx context.Context, rpcPort int, method string, params []any, result any) error {
 	pass, err := helper.ReadBoardString(paths.StateBitcoindRPCPass)
 	if err != nil {
 		return err
@@ -97,7 +101,7 @@ func rpcCall(rpcPort int, method string,
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		fmt.Sprintf("http://127.0.0.1:%d/", rpcPort),
 		bytes.NewReader(payload))
 	if err != nil {
@@ -146,25 +150,23 @@ func rpcCall(rpcPort int, method string,
 	return nil
 }
 
-// GetBlockchainInfo probes chain status. Never errors — the
-// status screen renders Responding=false as "not responding",
-// which covers bitcoind being down, starting up, or the staged
-// credential being unavailable (each already logged closer to
-// its source).
-func GetBlockchainInfo(rpcPort int) *BlockchainInfo {
+// GetBlockchainInfo reports read failures separately from a valid empty chain.
+func GetBlockchainInfo(ctx context.Context, rpcPort int) (BlockchainInfo, error) {
+	return readBlockchainInfo(func(result any) error {
+		return rpcCallContext(ctx, rpcPort, "getblockchaininfo", nil, result)
+	})
+}
+
+func readBlockchainInfo(read func(any) error) (BlockchainInfo, error) {
 	var resp blockchainInfoResponse
-	if err := rpcCall(rpcPort,
-		"getblockchaininfo", nil, &resp); err != nil {
-		return &BlockchainInfo{Responding: false}
+	if err := read(&resp); err != nil {
+		return BlockchainInfo{}, err
 	}
-	return &BlockchainInfo{
-		Blocks:     resp.Blocks,
-		Headers:    resp.Headers,
-		Progress:   resp.VerificationProgress,
-		Synced:     !resp.InitialBlockDownload,
-		Responding: true,
+	return BlockchainInfo{
+		Blocks: resp.Blocks, Headers: resp.Headers,
+		Progress: resp.VerificationProgress, Synced: !resp.InitialBlockDownload,
 		SizeOnDisk: resp.SizeOnDisk,
-	}
+	}, nil
 }
 
 // EstimateSmartFee returns the fee estimate for the target in

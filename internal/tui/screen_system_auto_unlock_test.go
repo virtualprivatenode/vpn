@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -146,9 +147,9 @@ func TestSuccessfulDisableOffersReenableOnSameScreen(t *testing.T) {
 
 func TestSystemServiceRowShowsLockedLND(t *testing.T) {
 	ctx := autoUnlockTestContext(false)
-	ctx.Status = &statusMsg{
-		services:       map[string]bool{"lnd": true},
-		lndWalletState: lndrpc.WalletStateLocked,
+	ctx.Status = &statusSnapshot{
+		Services:    map[string]app.Observation[bool]{"lnd": {Value: true, ObservedAt: time.Now()}},
+		WalletState: app.Observation[lndrpc.WalletState]{Value: lndrpc.WalletStateLocked, ObservedAt: time.Now()},
 	}
 	view := NewSystemHomeScreen(ctx).View(82, 34)
 	if !strings.Contains(view, "lnd") || !strings.Contains(view, "locked") {

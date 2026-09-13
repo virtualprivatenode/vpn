@@ -199,15 +199,15 @@ func renderViewport(
 // their legacy counterparts during migration).
 
 func balanceSummaryLines(
-	status *statusMsg, w int,
+	status *statusSnapshot, w int,
 ) []string {
-	if status == nil || !status.lndResponding {
+	if status == nil {
 		return nil
 	}
 
 	var totalCap, totalLocal, totalRemote int64
 	activeCount, inactiveCount := 0, 0
-	for _, ch := range status.channels {
+	for _, ch := range status.Channels.Value.Channels {
 		if ch.Pending {
 			continue
 		}
@@ -219,10 +219,6 @@ func balanceSummaryLines(
 		} else {
 			inactiveCount++
 		}
-	}
-	onchain := "0"
-	if status.lndBalance != "" {
-		onchain = status.lndBalance
 	}
 
 	localPct, remotePct := 0, 0
@@ -299,20 +295,23 @@ func balanceSummaryLines(
 		boxPct, boxCap, boxBot,
 	}
 
+	if !status.Channels.Known() {
+		boxLines = []string{"", "Channels unavailable"}
+	}
+
 	leftLines := []string{
 		"",
 		" " + theme.Label.Render("Outbound: ") +
 			theme.Value.Render(
-				formatSats(totalLocal)+" sats"),
+				channelAmountText(status, totalLocal)),
 		"",
 		" " + theme.Label.Render("Inbound:  ") +
 			theme.Value.Render(
-				formatSats(totalRemote)+" sats"),
+				channelAmountText(status, totalRemote)),
 		"",
 		" " + theme.Label.Render("On-chain: ") +
 			theme.Value.Render(
-				formatSats(parseBalance(onchain))+
-					" sats"),
+				onChainBalanceText(status)),
 	}
 
 	maxH := len(boxLines)
@@ -335,6 +334,9 @@ func balanceSummaryLines(
 				leftColW-lftW)
 		}
 		result = append(result, lft+" "+boxLines[i])
+	}
+	if notice := statusNotice(status); notice != "" {
+		result = append([]string{notice}, result...)
 	}
 	return result
 }

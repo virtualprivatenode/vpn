@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -422,35 +423,28 @@ func (m Model) effectiveTabs() []openTab {
 	return tabs
 }
 
-func (m Model) renderActiveTabContent(
-	w, h int,
-) string {
+func (m Model) renderActiveTabContent(w, h int) string {
 	tabs := m.effectiveTabs()
 	idx := m.activeTab
 	if idx < 0 || idx >= len(tabs) {
 		idx = 0
 	}
-
-	tab := tabs[idx]
-
-	// Tab screens: delegate to screen component
-	if tab.Screen != nil {
-		m.screenCtx.HasTabs = m.hasDetailTabs()
-		m.screenCtx.ContentFocused = m.contentFocused
-		return tab.Screen.View(w, h)
-	}
-
-	// Section home (tab 0 / tabMain): delegate to
-	// section home screen
+	screen := tabs[idx].Screen
 	sec := m.nav.ActiveSection()
-	if sec >= 0 && sec < numSections &&
-		m.sectionScreens[sec] != nil {
-		m.screenCtx.HasTabs = m.hasDetailTabs()
-		m.screenCtx.ContentFocused = m.contentFocused
-		return m.sectionScreens[sec].View(w, h)
+	if screen == nil && sec >= 0 && sec < numSections {
+		screen = m.sectionScreens[sec]
 	}
-
-	return ""
+	if screen == nil {
+		return ""
+	}
+	m.screenCtx.HasTabs = m.hasDetailTabs()
+	m.screenCtx.ContentFocused = m.contentFocused
+	if (sec == secChannels || sec == secWallet || sec == secOnChain) &&
+		!m.screenCtx.walletKnown() && (idx > 0 || m.screenCtx.walletDisplayAvailable()) {
+		notice := ansi.Wrap("Wallet state unavailable. Wallet actions are temporarily disabled.", w, "")
+		return theme.Warn.Render(notice) + "\n" + screen.View(w, max(1, h-lipgloss.Height(notice)))
+	}
+	return screen.View(w, h)
 }
 
 // ── Helpers ──────────────────────────────────────────────

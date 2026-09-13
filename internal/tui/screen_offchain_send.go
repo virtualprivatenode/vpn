@@ -263,6 +263,9 @@ func (s *SendScreen) handleInputKey(
 
 // submitSendPayment validates input before scheduling daemon work.
 func (s *SendScreen) submitSendPayment() (Screen, tea.Cmd) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	s.attempt = nil
 	request, err := app.ParseLightningPayment(s.ctx.Cfg.Network, s.sendInput.Value())
 	if err != nil {
@@ -311,6 +314,9 @@ func (s *SendScreen) handleConfirmKey(
 			s.backToInput()
 			return s, nil
 		case 1: // Confirm
+			if !s.ctx.walletExists() {
+				return s, nil
+			}
 			s.step = sendStepInFlight
 			return s, sendPaymentCmd(
 				s.payments, s.attempt, s.prepared)
@@ -428,23 +434,14 @@ func (s *SendScreen) viewInput(w, h int) string {
 	p := newPane(w)
 	p.title(theme.Header, "⚡ Send Payment")
 
-	if !s.ctx.Cfg.HasLND() ||
-		!s.ctx.walletExists() {
-		p.dim("Create LND wallet to send.")
-		return p.render()
-	}
-	if s.ctx.Status == nil ||
-		!s.ctx.Status.lndResponding {
-		p.dim("Waiting for LND...")
-		return p.render()
-	}
-
 	var totalLocal int64
-	for _, ch := range s.ctx.Status.channels {
-		totalLocal += ch.LocalBalance
+	if s.ctx.Status != nil {
+		for _, ch := range s.ctx.Status.Channels.Value.Channels {
+			totalLocal += ch.LocalBalance
+		}
 	}
 	p.field("Spendable: ",
-		formatSats(totalLocal)+" sats")
+		channelAmountText(s.ctx.Status, totalLocal))
 	p.blank()
 
 	isFocused := s.ctx.ContentFocused
@@ -462,7 +459,7 @@ func (s *SendScreen) viewInput(w, h int) string {
 		s.focusZone == sendZoneButtons
 	return p.renderWithBottomButtons(
 		[]string{"Clear", "Send"},
-		s.inputBtnIdx, btnFocused, h)
+		s.inputBtnIdx, btnFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *SendScreen) viewConfirm(
@@ -487,7 +484,7 @@ func (s *SendScreen) viewConfirm(
 	btnFocused := s.ctx.ContentFocused
 	return p.renderWithBottomButtons(
 		[]string{"Go Back", "Confirm"},
-		s.confirmBtnIdx, btnFocused, h)
+		s.confirmBtnIdx, btnFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *SendScreen) viewInFlight(

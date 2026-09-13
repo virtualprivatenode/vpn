@@ -4,6 +4,7 @@ package bitcoin
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -35,36 +36,24 @@ func TestBlockchainInfoParsing(t *testing.T) {
 	}
 }
 
-func TestBlockchainInfoSyncing(t *testing.T) {
-	raw := `{
-        "blocks": 100000,
-        "headers": 850000,
-        "verificationprogress": 0.1234,
-        "initialblockdownload": true
-    }`
-
-	var resp blockchainInfoResponse
-	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+func TestBlockchainInfoObservation(t *testing.T) {
+	for _, tc := range []struct {
+		raw    string
+		blocks int
+		synced bool
+	}{
+		{`{"blocks":100000,"headers":850000,"verificationprogress":0.1234,"initialblockdownload":true,"unknown_future_field":42}`, 100000, false},
+		{`{"blocks":0,"headers":0,"initialblockdownload":false}`, 0, true},
+	} {
+		info, err := readBlockchainInfo(func(result any) error { return json.Unmarshal([]byte(tc.raw), result) })
+		if err != nil || info.Blocks != tc.blocks || info.Synced != tc.synced {
+			t.Fatalf("chain observation: %+v %v", info, err)
+		}
 	}
-
-	if !resp.InitialBlockDownload {
-		t.Error("InitialBlockDownload: expected true during sync")
-	}
-
-	// Test the conversion logic
-	info := &BlockchainInfo{
-		Blocks:   resp.Blocks,
-		Headers:  resp.Headers,
-		Progress: resp.VerificationProgress,
-		Synced:   !resp.InitialBlockDownload,
-	}
-
-	if info.Synced {
-		t.Error("should not be synced during IBD")
-	}
-	if info.Blocks != 100000 {
-		t.Errorf("Blocks: got %d, want 100000", info.Blocks)
+	failed := errors.New("RPC unavailable")
+	info, err := readBlockchainInfo(func(any) error { return failed })
+	if !errors.Is(err, failed) || info.Synced {
+		t.Fatal("failed read became a synced empty chain")
 	}
 }
 
