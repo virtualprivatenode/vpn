@@ -86,6 +86,9 @@ func (s *PairingScreen) buttons() []string {
 }
 
 func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	btns := s.buttons()
 	if s.btnIdx < 0 || s.btnIdx >= len(btns) {
 		return s, nil
@@ -152,7 +155,10 @@ func (s *PairingScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
-	if !cfg.HasLND() || !s.ctx.walletExists() {
+	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
+		return renderWalletStateUnavailable(w, h)
+	}
+	if !cfg.HasLND() || !s.ctx.walletDisplayAvailable() {
 		p := newPane(w)
 		p.title(theme.Lightning, "⚡ Zeus Wallet")
 		p.dim("Create LND wallet first")

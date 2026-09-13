@@ -23,7 +23,7 @@ func (c *labelSaveClient) SetTransactionLabel(request lndrpc.TransactionLabelReq
 
 func labelModel() (Model, *OnChainHomeScreen, *labelSaveClient) {
 	theme.Init(true)
-	ctx := &ScreenContext{ContentFocused: true}
+	ctx := &ScreenContext{ContentFocused: true, State: &RuntimeState{WalletKnown: true, WalletExists: true}}
 	oc := &OnChainContext{
 		Utxos: []lndrpc.UTXO{{Txid: strings.Repeat("01", 32)}, {Txid: strings.Repeat("02", 32)}},
 		OnChainTxs: []lndrpc.OnChainTx{
@@ -61,8 +61,7 @@ func TestLabelEditKeepsTargetAcrossUTXORefresh(t *testing.T) {
 		}
 		updated, _ := m.Update(utxoListMsg{utxos: utxos})
 		m = updated.(Model)
-		// The status and wallet observation are unavailable in this fixture.
-		// Neither that nor an empty UTXO list may hide the active editor.
+		// An unavailable dashboard or empty UTXO list must not hide the editor.
 		if view := s.View(67, 28); !strings.Contains(view, "Transaction:") || !strings.Contains(view, "Save") {
 			t.Fatal("refresh or unavailable status hid the editor")
 		}

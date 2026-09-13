@@ -36,7 +36,7 @@ func (c *screenInvoiceClient) LookupInvoice(hash []byte) (*lndrpc.Invoice, error
 }
 
 func receiveScreen(client *screenInvoiceClient) *ReceiveScreen {
-	s := NewReceiveScreen(&ScreenContext{Cfg: config.Default()})
+	s := NewReceiveScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}})
 	s.invoices = client
 	s.amountInput.SetSats(42)
 	s.memoInput.SetValue("coffee")

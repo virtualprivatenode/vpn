@@ -27,7 +27,7 @@ func (c *screenCloseClient) CloseChannel(req lndrpc.ChannelCloseRequest) lndrpc.
 	return c.result
 }
 func closeScreenFixture(point string) (*ChannelDetailScreen, *screenCloseClient) {
-	ctx := &ScreenContext{Cfg: config.Default(), HasTabs: true, ContentFocused: true}
+	ctx := &ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}, HasTabs: true, ContentFocused: true}
 	ch := channelInfo{Channel: lndrpc.Channel{ChannelPoint: point, PeerAlias: "same peer", RemotePubkey: strings.Repeat("a", 66), Capacity: 30000, LocalBalance: 20000, Active: true}}
 	detail := NewChannelDetailScreen(ctx, ch)
 	detail.launchClose()
@@ -140,7 +140,7 @@ func TestChannelTabIdentitySurvivesReorderAndRemoval(t *testing.T) {
 	a := channelInfo{Channel: lndrpc.Channel{ChannelPoint: strings.Repeat("a", 64) + ":0", RemotePubkey: strings.Repeat("c", 66), PeerAlias: "same peer", Capacity: 30000}}
 	b := a
 	b.ChannelPoint = strings.Repeat("b", 64) + ":0"
-	ctx := &ScreenContext{Cfg: config.Default(), Status: &statusSnapshot{Channels: app.Observation[app.ChannelStatus]{Value: app.ChannelStatus{Channels: []channelInfo{a, b}}, ObservedAt: time.Now()}}}
+	ctx := &ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}, Status: &statusSnapshot{Channels: app.Observation[app.ChannelStatus]{Value: app.ChannelStatus{Channels: []channelInfo{a, b}}, ObservedAt: time.Now()}}}
 	home := NewChannelsHomeScreen(ctx)
 	home.focusZone = chanHomeZoneList
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx}

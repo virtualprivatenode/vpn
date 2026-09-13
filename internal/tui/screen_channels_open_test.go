@@ -60,7 +60,7 @@ func channelScreen(t *testing.T) (*ChannelOpenScreen, *screenChannelClient) {
 	t.Helper()
 	coin := lndrpc.UTXO{Txid: strings.Repeat("a", 64), AmountSats: 50000}
 	c := &screenChannelClient{coins: []lndrpc.UTXO{coin}, result: lndrpc.ChannelOpenResult{Submitted: true, FundingTxID: strings.Repeat("c", 64)}}
-	s := NewChannelOpenScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{}})
+	s := NewChannelOpenScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}})
 	s.client = c
 	s.peerIdx = len(s.peerList)
 	s.customPubkey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"

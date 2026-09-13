@@ -74,7 +74,7 @@ func (s *ChannelsHomeScreen) HandleKey(
 	case "right":
 		if s.focusZone == chanHomeZoneButtons &&
 			s.ctx.Cfg.HasLND() &&
-			s.ctx.walletExists() &&
+			s.ctx.walletDisplayAvailable() &&
 			s.btnIdx < 2 {
 			s.btnIdx++
 		}
@@ -121,10 +121,10 @@ func (s *ChannelsHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "enter":
 		// No wallet → trigger wallet creation flow
-		if !s.ctx.walletKnown() {
+		if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 			return s, fetchWalletStateCmd(s.ctx)
 		}
-		if !s.ctx.walletExists() {
+		if s.ctx.walletKnown() && !s.ctx.walletExists() {
 			screen := NewWalletCreateScreen(s.ctx)
 			return s, func() tea.Msg {
 				return openTabMsg{
@@ -298,10 +298,10 @@ func (s *ChannelsHomeScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
-	if !s.ctx.walletKnown() {
+	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 		return renderWalletStateUnavailable(w, h)
 	}
-	if !cfg.HasLND() || !s.ctx.walletExists() {
+	if !cfg.HasLND() || !s.ctx.walletDisplayAvailable() {
 		return renderWalletPrompt(
 			w, h, s.ctx.ContentFocused)
 	}
@@ -380,7 +380,7 @@ func (s *ChannelsHomeScreen) View(
 				"Node Info",
 				"History",
 			},
-			s.btnIdx, isOnButton, w))
+			s.btnIdx, isOnButton, w, s.ctx.disabledWalletButtons(0)...))
 	btnLines = append(btnLines, "")
 	btnLines = append(btnLines, "")
 
@@ -518,7 +518,7 @@ func (s *ChannelsHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *ChannelsHomeScreen) HelpBindings() []key.Binding {
-	if !s.ctx.walletExists() {
+	if !s.ctx.walletDisplayAvailable() {
 		return walletUnavailableHelpBindings(s.ctx)
 	}
 	if s.zeroBalanceMsg {

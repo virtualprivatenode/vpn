@@ -63,6 +63,13 @@ type StatusSnapshot struct {
 	Channels    Observation[ChannelStatus]
 }
 
+// WalletUnavailable preserves observations for display without treating a
+// failed presence read as a change of wallet or proof of current balances.
+func (s StatusSnapshot) WalletUnavailable(err error) StatusSnapshot {
+	s.WalletState.Err, s.Node.Err, s.Balance.Err, s.Channels.Err = err, err, err, err
+	return s
+}
+
 // Retain combines failures with last-good values from the same observation
 // scope. Callers must discard the previous snapshot when that scope changes.
 func (s StatusSnapshot) Retain(previous StatusSnapshot) StatusSnapshot {

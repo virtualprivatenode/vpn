@@ -210,7 +210,7 @@ func (s *ChannelDetailScreen) View(
 		btnFocused := s.ctx.ContentFocused
 		return p.renderWithBottomButtons(
 			[]string{"Cancel", "Close Channel"},
-			s.viewBtnIdx, btnFocused, h)
+			s.viewBtnIdx, btnFocused, h, s.ctx.disabledWalletButtons(1)...)
 	}
 
 	return p.render()
@@ -232,7 +232,7 @@ func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
 func (s *ChannelDetailScreen) launchClose() (
 	Screen, tea.Cmd,
 ) {
-	if s.unavailable || s.channel.Pending {
+	if s.unavailable || s.channel.Pending || !s.ctx.walletExists() {
 		return s, nil
 	}
 	s.closeScreen = NewChannelCloseScreen(

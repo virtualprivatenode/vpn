@@ -118,6 +118,21 @@ func (c *ScreenContext) walletKnown() bool {
 	return c.State != nil && c.State.WalletKnown
 }
 
+func (c *ScreenContext) walletDisplayAvailable() bool {
+	if c.State == nil || !c.State.WalletExists {
+		return false
+	}
+	return c.walletKnown() || (c.Status != nil &&
+		(c.Status.Node.Known() || c.Status.Balance.Known() || c.Status.Channels.Known()))
+}
+
+func (c *ScreenContext) disabledWalletButtons(indices ...int) []int {
+	if c.walletExists() {
+		return nil
+	}
+	return indices
+}
+
 func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
 	enter := kEnterCreateWallet
 	if !c.walletKnown() {

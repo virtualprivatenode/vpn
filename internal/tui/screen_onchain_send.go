@@ -450,7 +450,7 @@ func (s *OnChainSendScreen) handleConfirmKey(
 			s.backToInput()
 			return s, nil
 		case 1: // Confirm & Broadcast
-			if s.attempt == nil {
+			if s.attempt == nil || !s.ctx.walletExists() {
 				return s, nil
 			}
 			req := s.attempt.prepared.Request()
@@ -593,6 +593,9 @@ func (s *OnChainSendScreen) applyMax() {
 func (s *OnChainSendScreen) disengageMax() { s.sendAll = false }
 
 func (s *OnChainSendScreen) validateAndConfirm() (Screen, tea.Cmd) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	prepared, err := app.PrepareOnChainSend(s.ctx.Cfg.Network, app.OnChainSendInput{
 		Address: s.addrInput.Value(), AmountSats: s.amtInput.Sats(), SendAll: s.sendAll,
 		SatPerVbyte: s.feeInput.Sats(), Label: s.labelInput.Value(),
@@ -785,7 +788,7 @@ func (s *OnChainSendScreen) viewInput(
 		s.step == ocStepButtons
 	btnLine := renderButtons(
 		[]string{"Clear", "Create Transaction"},
-		s.sendBtnIdx, btnFocused, w)
+		s.sendBtnIdx, btnFocused, w, s.ctx.disabledWalletButtons(1)...)
 
 	// ── Layout: form top, diagram centered in
 	// remaining space, buttons pinned at bottom ──
@@ -850,7 +853,7 @@ func (s *OnChainSendScreen) viewConfirm(w, h int) string {
 	if s.error != "" {
 		p.warnWrap(s.error)
 	}
-	return p.renderWithBottomButtons([]string{"Go Back", "Confirm & Broadcast"}, s.confirmBtnIdx, s.ctx.ContentFocused, h)
+	return p.renderWithBottomButtons([]string{"Go Back", "Confirm & Broadcast"}, s.confirmBtnIdx, s.ctx.ContentFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *OnChainSendScreen) viewBroadcast(

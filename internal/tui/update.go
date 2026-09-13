@@ -404,8 +404,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.state.WalletKnown = false
+			if m.screenCtx.Status != nil {
+				snapshot := m.screenCtx.Status.WalletUnavailable(msg.err)
+				m.screenCtx.Status = &snapshot
+			}
 			logger.TUI("read live wallet state: %v", msg.err)
 			return m, nil
+		}
+		if m.state.WalletExists != msg.state.WalletExists {
+			m.screenCtx.walletRevision++
+			m.screenCtx.Status = nil
 		}
 		m.state.WalletExists = msg.state.WalletExists
 		m.state.WalletKnown = true

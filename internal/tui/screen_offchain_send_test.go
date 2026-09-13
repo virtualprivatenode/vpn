@@ -28,7 +28,7 @@ func (c *screenPaymentClient) SendPayment(request string) (*lndrpc.SendPaymentRe
 }
 
 func paymentScreen(client *screenPaymentClient) *SendScreen {
-	s := NewSendScreen(&ScreenContext{Cfg: config.Default()})
+	s := NewSendScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}})
 	s.payments = client
 	return s
 }

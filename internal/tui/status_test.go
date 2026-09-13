@@ -10,11 +10,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
 type statusReadCall struct {
 	cfg    config.AppConfig
+	wallet bool
 	result chan app.StatusSnapshot
 }
 type controlledStatusReader struct {
@@ -22,8 +24,8 @@ type controlledStatusReader struct {
 	done  <-chan struct{}
 }
 
-func (r *controlledStatusReader) Collect(cfg config.AppConfig, _ bool, _ app.StatusLND) app.StatusSnapshot {
-	call := statusReadCall{cfg: cfg, result: make(chan app.StatusSnapshot, 1)}
+func (r *controlledStatusReader) Collect(cfg config.AppConfig, wallet bool, _ app.StatusLND) app.StatusSnapshot {
+	call := statusReadCall{cfg: cfg, wallet: wallet, result: make(chan app.StatusSnapshot, 1)}
 	r.calls <- call
 	select {
 	case result := <-call.result:
@@ -167,5 +169,89 @@ func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 	publish(app.StatusSnapshot{Node: freshStatus(lndrpc.NodeInfo{}), Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "0"}), Channels: freshStatus(app.ChannelStatus{})})
 	if !strings.Contains(ansi.Strip(onchain.View(90, 42)), "0 sats") || !strings.Contains(ansi.Strip(channels.View(90, 42)), "No channels yet") || !m.screenCtx.Status.Balance.Fresh() {
 		t.Fatal("successful empty observation failed to recover")
+	}
+}
+
+func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
+	m, reader := statusModelFixture(t)
+	m.lndClient = &lndrpc.Client{}
+	oc := &OnChainContext{OnChainTxs: []lndrpc.OnChainTx{{Amount: 10000}, {Amount: 10000}}}
+	m.sectionScreens[secOnChain] = NewOnChainHomeScreen(m.screenCtx, oc)
+	m.sectionScreens[secWallet] = NewWalletHomeScreen(m.screenCtx)
+	m.sectionScreens[secChannels] = NewChannelsHomeScreen(m.screenCtx)
+	assertStale := func() {
+		t.Helper()
+		for _, sec := range []int{secOnChain, secWallet, secChannels} {
+			m.nav.ActiveItem = sec
+			view := ansi.Strip(m.renderActiveTabContent(67, 36))
+			if !strings.Contains(view, "20,000 sats (stale)") || !strings.Contains(view, "Wallet actions are temporarily disabled.") {
+				t.Fatalf("section %d hid retained observations or uncertainty:\n%s", sec, view)
+			}
+			if sec == secOnChain && !strings.Contains(view, "N/A") {
+				t.Fatal("stale total produced running balances")
+			}
+			if sec == secChannels && !strings.Contains(view, "No channels yet. (stale)") {
+				t.Fatal("previous empty list was presented as current")
+			}
+		}
+	}
+	good := app.StatusSnapshot{Node: freshStatus(lndrpc.NodeInfo{}),
+		Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "20000"}), Channels: freshStatus(app.ChannelStatus{})}
+	call, done := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	call.result <- good
+	statusUpdate(&m, <-done)
+	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("LND stopped")})
+	assertStale()
+	// A successful read already in flight cannot override unknown presence.
+	call.result <- good
+	statusUpdate(&m, <-done)
+	assertStale()
+	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	if !call.wallet {
+		t.Fatal("lost presence read stopped same-wallet status queries")
+	}
+	failed := errors.New("RPC unavailable")
+	call.result <- app.StatusSnapshot{Balance: app.Observation[lndrpc.WalletBalance]{Err: failed}, Channels: app.Observation[app.ChannelStatus]{Err: failed}}
+	statusUpdate(&m, <-done)
+	assertStale()
+	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: true}})
+	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	call.result <- good
+	statusUpdate(&m, <-done)
+	for _, sec := range []int{secOnChain, secWallet, secChannels} {
+		m.nav.ActiveItem = sec
+		view := ansi.Strip(m.renderActiveTabContent(67, 36))
+		if strings.Contains(view, "stale") || strings.Contains(view, "disabled") || !strings.Contains(view, "20,000 sats") {
+			t.Fatalf("section %d did not recover:\n%s", sec, view)
+		}
+	}
+}
+
+func TestStatusPresenceChangeRejectsPriorWalletCompletion(t *testing.T) {
+	m, reader := statusModelFixture(t)
+	m.lndClient = &lndrpc.Client{}
+	m.sectionScreens[secOnChain] = NewOnChainHomeScreen(m.screenCtx, &OnChainContext{})
+	m.nav.ActiveItem = secOnChain
+	good := app.StatusSnapshot{Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "20000"})}
+	call, done := startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	call.result <- good
+	statusUpdate(&m, <-done)
+	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
+	for _, exists := range []bool{false, true} {
+		statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: exists}})
+	}
+	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("new wallet not observable")})
+	if m.screenCtx.Status != nil {
+		t.Fatal("confirmed presence change retained the previous wallet snapshot")
+	}
+	call.result <- good
+	next := statusUpdate(&m, <-done)
+	call, done = startStatusCommand(t, next, reader)
+	call.result <- app.StatusSnapshot{Balance: app.Observation[lndrpc.WalletBalance]{Err: errors.New("unavailable")}}
+	statusUpdate(&m, <-done)
+	view := ansi.Strip(m.renderActiveTabContent(67, 36))
+	if !strings.Contains(view, "Wallet State Unavailable") || strings.Contains(view, "20,000") {
+		t.Fatalf("new unknown wallet inherited an old observation:\n%s", view)
 	}
 }

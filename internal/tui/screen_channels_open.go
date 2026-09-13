@@ -709,6 +709,9 @@ func (s *ChannelOpenScreen) clearForm() {
 func (s *ChannelOpenScreen) submitOpenChannel() (
 	Screen, tea.Cmd,
 ) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	if !s.peerConfirmed {
 		s.error = "Select a peer first"
 		return s, nil
@@ -771,17 +774,6 @@ func (s *ChannelOpenScreen) viewInput(
 ) string {
 	p := newPane(w)
 	p.title(theme.Header, "Open Channel")
-
-	if !s.ctx.Cfg.HasLND() ||
-		!s.ctx.walletExists() {
-		p.dim("Create wallet first.")
-		return p.render()
-	}
-	if s.ctx.Status == nil ||
-		!s.ctx.Status.Node.Fresh() {
-		p.dim("Waiting for LND...")
-		return p.render()
-	}
 
 	p.field("On-Chain Balance: ", onChainBalanceText(s.ctx.Status))
 	p.blank()
@@ -940,7 +932,7 @@ func (s *ChannelOpenScreen) viewInput(
 		s.focusZone == coZoneButtons
 	return p.renderWithBottomButtons(
 		[]string{"Clear", "Open Channel"},
-		s.btnIdx, btnFocused, h)
+		s.btnIdx, btnFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *ChannelOpenScreen) addToggles(

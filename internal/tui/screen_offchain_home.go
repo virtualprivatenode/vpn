@@ -65,7 +65,7 @@ func (s *WalletHomeScreen) HandleKey(
 	case "right":
 		if s.focusZone == walletHomeZoneButtons &&
 			s.ctx.Cfg.HasLND() &&
-			s.ctx.walletExists() &&
+			s.ctx.walletDisplayAvailable() &&
 			s.btnIdx < 2 {
 			s.btnIdx++
 		}
@@ -112,10 +112,10 @@ func (s *WalletHomeScreen) HandleKey(
 		return s, emitFocusSidebar
 	case "enter":
 		// No wallet → trigger wallet creation flow
-		if !s.ctx.walletKnown() {
+		if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 			return s, fetchWalletStateCmd(s.ctx)
 		}
-		if !s.ctx.walletExists() {
+		if s.ctx.walletKnown() && !s.ctx.walletExists() {
 			screen := NewWalletCreateScreen(s.ctx)
 			return s, func() tea.Msg {
 				return openTabMsg{
@@ -216,6 +216,9 @@ func (s *WalletHomeScreen) openReceive() (
 func (s *WalletHomeScreen) openPairing() (
 	Screen, tea.Cmd,
 ) {
+	if !s.ctx.walletExists() {
+		return s, nil
+	}
 	screen := NewPairingScreen(s.ctx)
 	return s, func() tea.Msg {
 		return openTabMsg{
@@ -247,10 +250,10 @@ func (s *WalletHomeScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
-	if !s.ctx.walletKnown() {
+	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 		return renderWalletStateUnavailable(w, h)
 	}
-	if !cfg.HasLND() || !s.ctx.walletExists() {
+	if !cfg.HasLND() || !s.ctx.walletDisplayAvailable() {
 		return renderWalletPrompt(
 			w, h, s.ctx.ContentFocused)
 	}
@@ -280,7 +283,7 @@ func (s *WalletHomeScreen) View(
 	headerLines = append(headerLines,
 		renderButtons(
 			[]string{"Send", "Receive", "Pairing"},
-			s.btnIdx, isOnButton, w))
+			s.btnIdx, isOnButton, w, s.ctx.disabledWalletButtons(0, 1, 2)...))
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
 
@@ -493,7 +496,7 @@ func (s *WalletHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *WalletHomeScreen) HelpBindings() []key.Binding {
-	if !s.ctx.walletExists() {
+	if !s.ctx.walletDisplayAvailable() {
 		return walletUnavailableHelpBindings(s.ctx)
 	}
 	if s.focusZone == walletHomeZoneList {

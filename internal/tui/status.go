@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
@@ -13,10 +15,10 @@ type statusReader interface {
 }
 
 type statusScope struct {
-	config                    config.AppConfig
-	walletKnown, walletExists bool
-	walletRevision            uint64
-	client                    *lndrpc.Client
+	config         config.AppConfig
+	walletExists   bool
+	walletRevision uint64
+	client         *lndrpc.Client
 }
 
 type statusRequest struct{ scope statusScope }
@@ -28,7 +30,7 @@ type statusResultMsg struct {
 func requestStatusCmd() tea.Msg { return refreshStatusMsg{} }
 
 func (m Model) currentStatusScope() statusScope {
-	return statusScope{config: *m.cfg, walletKnown: m.state.WalletKnown,
+	return statusScope{config: *m.cfg,
 		walletExists: m.state.WalletExists, walletRevision: m.screenCtx.walletRevision,
 		client: m.lndClient}
 }
@@ -53,7 +55,7 @@ func (m *Model) admitStatus() tea.Cmd {
 			client = request.scope.client
 		}
 		return statusResultMsg{request: request, snapshot: collector.Collect(
-			request.scope.config, request.scope.walletKnown && request.scope.walletExists, client)}
+			request.scope.config, request.scope.walletExists, client)}
 	}
 }
 
@@ -66,6 +68,9 @@ func (m *Model) completeStatus(msg statusResultMsg) tea.Cmd {
 	if msg.request.scope == current {
 		if m.screenCtx.Status != nil && m.statusScope == current {
 			msg.snapshot = msg.snapshot.Retain(*m.screenCtx.Status)
+		}
+		if !m.state.WalletKnown {
+			msg.snapshot = msg.snapshot.WalletUnavailable(errors.New("wallet state unavailable"))
 		}
 		m.screenCtx.Status = &msg.snapshot
 		m.statusScope = current

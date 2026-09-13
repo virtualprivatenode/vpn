@@ -15,7 +15,7 @@ func TestLightningInvoicePrefilterUsesInstalledProfile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		screen := NewSendScreen(&ScreenContext{Cfg: cfg})
+		screen := NewSendScreen(&ScreenContext{Cfg: cfg, State: &RuntimeState{WalletKnown: true, WalletExists: true}})
 		screen.sendInput.SetValue(profile.InvoicePrefix + "1example")
 		_, cmd := screen.submitSendPayment()
 		if cmd == nil || screen.inputError != "" {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -262,9 +263,10 @@ func (p *paneBuilder) render() string {
 func (p *paneBuilder) renderWithBottomButtons(
 	labels []string, activeIdx int,
 	focused bool, h int,
+	disabled ...int,
 ) string {
 	btnLine := renderButtons(
-		labels, activeIdx, focused, p.w)
+		labels, activeIdx, focused, p.w, disabled...)
 	contentH := len(p.lines)
 	pad := h - contentH - 1
 	if pad < 1 {
@@ -282,15 +284,7 @@ func (p *paneBuilder) renderWithBottomButtons(
 func renderButtons(
 	labels []string, activeIdx int,
 	focused bool, w int,
-) string {
-	return renderButtonsWithGray(
-		labels, activeIdx, focused, w, -1, false)
-}
-
-func renderButtonsWithGray(
-	labels []string, activeIdx int,
-	focused bool, w int,
-	grayIdx int, grayCondition bool,
+	disabled ...int,
 ) string {
 	btnW := w - 2
 	if btnW < 20 {
@@ -308,7 +302,7 @@ func renderButtonsWithGray(
 
 	var parts []string
 	for i, label := range labels {
-		if i == grayIdx && grayCondition {
+		if slices.Contains(disabled, i) {
 			parts = append(parts,
 				lipgloss.NewStyle().
 					Foreground(theme.ColorGrayed).

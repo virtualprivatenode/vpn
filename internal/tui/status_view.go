@@ -26,6 +26,9 @@ func onChainBalanceText(status *statusSnapshot) string {
 }
 
 func channelAmountText(status *statusSnapshot, sats int64) string {
+	if status == nil {
+		return "unavailable"
+	}
 	return observationText(status.Channels, formatSats(sats)+" sats")
 }
 

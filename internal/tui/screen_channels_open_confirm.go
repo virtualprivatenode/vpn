@@ -44,7 +44,7 @@ func (s *ChannelOpenScreen) handleConfirmKey(
 			s.backToInput()
 			return s, nil
 		case 1: // Confirm
-			if s.attempt == nil {
+			if s.attempt == nil || !s.ctx.walletExists() {
 				return s, nil
 			}
 			if !slices.Equal(s.selection.Outpoints(), s.attempt.prepared.Request().Outpoints) {
@@ -153,7 +153,7 @@ func (s *ChannelOpenScreen) viewConfirm(w, h int) string {
 		p.line("Max deducts fees and may leave change for reserves or limits.")
 	}
 	p.appendError(s.error)
-	return p.renderWithBottomButtons([]string{"Go Back", "Confirm"}, s.confirmBtnIdx, s.ctx.ContentFocused, h)
+	return p.renderWithBottomButtons([]string{"Go Back", "Confirm"}, s.confirmBtnIdx, s.ctx.ContentFocused, h, s.ctx.disabledWalletButtons(1)...)
 }
 
 func (s *ChannelOpenScreen) viewOpening(w, h int) string {
