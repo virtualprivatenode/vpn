@@ -514,7 +514,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case onChainTxMsg:
-		if msg.err == nil {
+		if msg.owner != nil && msg.owner == m.ocCtx && msg.revision == m.ocCtx.txRevision && msg.err == nil {
 			m.ocCtx.OnChainTxs = msg.txs
 		}
 		return m, nil
@@ -539,13 +539,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route to history screen so it gets the data
 		return m.dispatchToTab(tabChannelHistory, msg)
 	case labelTxMsg:
-		// Route to on-chain home screen
-		if cmd, ok := m.routeToSectionScreen(
-			secOnChain, msg); ok {
+		if msg.owner != nil && m.sectionScreens[secOnChain] == msg.owner {
+			_, cmd := msg.owner.HandleMsg(msg)
 			return m, cmd
-		}
-		if msg.err == nil {
-			return m, fetchOnChainTxCmd(m.lndClient)
 		}
 		return m, nil
 	case feeTiersMsg:
@@ -922,7 +918,7 @@ func (m Model) previewSection(
 	case secOnChain:
 		return m, tea.Batch(
 			listUnspentCmd(m.lndClient),
-			fetchOnChainTxCmd(m.lndClient))
+			fetchOnChainTxCmd(m.lndClient, m.ocCtx))
 	}
 	return m, nil
 }

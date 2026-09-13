@@ -208,8 +208,10 @@ type feeTiersMsg struct {
 }
 
 type onChainTxMsg struct {
-	txs []lndrpc.OnChainTx
-	err error
+	owner    *OnChainContext
+	revision uint64
+	txs      []lndrpc.OnChainTx
+	err      error
 }
 
 type channelCloseResultMsg struct {
@@ -223,7 +225,9 @@ type closedChannelsMsg struct {
 }
 
 type labelTxMsg struct {
-	err error
+	owner   *OnChainHomeScreen
+	attempt uint64
+	result  app.TransactionLabelResult
 }
 
 type channelInfo struct {

@@ -550,7 +550,7 @@ func (s *OnChainSendScreen) handleSendCoinsResult(msg sendCoinsResultMsg) (Scree
 		s.ocCtx.Selection.Clear()
 	}
 	// Refresh wallet facts even if the RPC outcome is unknown. Never retry here.
-	return s, tea.Batch(listUnspentCmd(s.ctx.LndClient), fetchOnChainTxCmd(s.ctx.LndClient),
+	return s, tea.Batch(listUnspentCmd(s.ctx.LndClient), fetchOnChainTxCmd(s.ctx.LndClient, s.ocCtx),
 		fetchStatus(s.ctx.Cfg, s.ctx.State, s.ctx.LndClient))
 }
 

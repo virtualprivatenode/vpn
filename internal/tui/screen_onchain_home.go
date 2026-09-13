@@ -8,7 +8,9 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -48,6 +50,11 @@ type OnChainHomeScreen struct {
 	labelInput   textinput.Model
 	labelOnBtn   bool // true when on Save/Cancel buttons
 	labelBtnIdx  int  // 0=Cancel, 1=Save
+	labelTxid    string
+	labelAttempt uint64
+	labelPending bool
+	labelErr     string
+	labels       app.TransactionLabelClient
 }
 
 func NewOnChainHomeScreen(
@@ -389,6 +396,15 @@ func (s *OnChainHomeScreen) openTxDetail() (
 func (s *OnChainHomeScreen) handleLabelPopupKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
+	if s.labelPending {
+		switch keyStr {
+		case "ctrl+c":
+			return s, tea.Quit
+		case "left":
+			return s, emitFocusSidebar
+		}
+		return s, nil
+	}
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
@@ -435,16 +451,19 @@ func (s *OnChainHomeScreen) handleLabelPopupKey(
 				s.closeLabelPopup()
 				return s, nil
 			case 1: // Save
-				if s.utxoCursor <
-					len(s.ocCtx.Utxos) {
-					txid := s.ocCtx.Utxos[s.utxoCursor].Txid
-					label := s.labelInput.Value()
-					return s, labelTxCmd(
-						s.ctx.LndClient,
-						txid, label)
+				prepared, err := app.PrepareTransactionLabel(s.labelTxid, s.labelInput.Value())
+				if err != nil {
+					s.labelErr = err.Error()
+					return s, nil
 				}
-				s.closeLabelPopup()
-				return s, nil
+				s.labelAttempt++
+				s.labelPending = true
+				s.labelErr = ""
+				client := s.labels
+				if client == nil && s.ctx.LndClient != nil {
+					client = s.ctx.LndClient
+				}
+				return s, labelTxCmd(s, client, prepared)
 			}
 		}
 		// On label field — move to buttons, land on Save.
@@ -478,15 +497,32 @@ func (s *OnChainHomeScreen) HandleMsg(
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case labelTxMsg:
-		if msg.err == nil {
+		if msg.owner != s || msg.attempt != s.labelAttempt || !s.labelPending {
+			return s, nil
+		}
+		s.labelPending = false
+		switch msg.result.Outcome {
+		case app.TransactionLabelSaved:
+			// Publish only the acknowledged label. Invalidate older history reads
+			// before requesting a fresh snapshot, so they cannot undo this result.
+			for i := range s.ocCtx.OnChainTxs {
+				if s.ocCtx.OnChainTxs[i].Txid == s.labelTxid {
+					s.ocCtx.OnChainTxs[i].Label = s.labelInput.Value()
+				}
+			}
 			s.closeLabelPopup()
-			return s, tea.Batch(
-				fetchOnChainTxCmd(s.ctx.LndClient),
-				listUnspentCmd(s.ctx.LndClient))
+			return s, fetchOnChainTxCmd(s.ctx.LndClient, s.ocCtx)
+		case app.TransactionLabelNotSaved:
+			s.labelErr = "Label was not saved."
+			if msg.result.Err != nil {
+				s.labelErr += " " + msg.result.Err.Error()
+			}
+		default:
+			s.labelErr = "Save was not confirmed. Check the transaction label before retrying."
 		}
 		return s, nil
 	case tea.PasteMsg:
-		if s.labelEditing && !s.labelOnBtn {
+		if s.labelEditing && !s.labelPending && !s.labelOnBtn {
 			var cmd tea.Cmd
 			s.labelInput, cmd =
 				s.labelInput.Update(msg)
@@ -501,6 +537,10 @@ func (s *OnChainHomeScreen) HandleMsg(
 func (s *OnChainHomeScreen) View(
 	w, h int,
 ) string {
+	// An active edit survives wallet/status failures and removal of its UTXO.
+	if s.labelEditing {
+		return strings.Join(s.renderLabelPopup(w), "\n")
+	}
 	s.clampCursors()
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
@@ -722,14 +762,6 @@ func (s *OnChainHomeScreen) View(
 						theme.Dim.Render(uAddrStr)+
 						theme.Value.Render(uValStr))
 			}
-
-			// Label edit popup
-			if s.labelEditing &&
-				s.utxoCursor == i {
-				popLines := s.renderLabelPopup(w)
-				utxoMidLines = append(utxoMidLines,
-					popLines...)
-			}
 		}
 	}
 
@@ -860,15 +892,9 @@ func (s *OnChainHomeScreen) View(
 	txVPH = max(txVPH, 1)
 	utxoVPH = max(utxoVPH, 1)
 
-	// Cursor line accounting for popup
-	utxoCursorLine := s.utxoCursor
-	if s.labelEditing {
-		utxoCursorLine = s.utxoCursor + 4
-	}
-
 	utxoVPRendered := renderViewport(
 		utxoMidContent, w, utxoVPH,
-		utxoCursorLine,
+		s.utxoCursor,
 		len(utxoMidLines),
 		len(utxos) > 0 &&
 			s.focusZone == ocHomeZoneUtxos)
@@ -890,11 +916,12 @@ func (s *OnChainHomeScreen) View(
 // ── Label popup ─────────────────────────────────────────
 
 func (s *OnChainHomeScreen) openLabelPopup() {
-	if s.utxoCursor >= len(s.ocCtx.Utxos) {
+	if s.utxoCursor < 0 || s.utxoCursor >= len(s.ocCtx.Utxos) {
 		return
 	}
-	txLabel := s.utxoTxLabel(
-		s.ocCtx.Utxos[s.utxoCursor].Txid)
+	s.labelTxid = s.ocCtx.Utxos[s.utxoCursor].Txid
+	s.labelErr = ""
+	txLabel := s.utxoTxLabel(s.labelTxid)
 	contentW := tuiWidth - 2 - 12 - 1 // nav width=12
 	fieldW := contentW - 16
 	if fieldW < 20 {
@@ -902,7 +929,7 @@ func (s *OnChainHomeScreen) openLabelPopup() {
 	}
 	s.labelInput = newDetailField(txLabel, fieldW)
 	s.labelInput.Placeholder = "enter label"
-	s.labelInput.CharLimit = 64
+	// app validates LND's byte limit; a rune limit can truncate existing labels.
 	s.labelInput.Focus()
 	s.labelEditing = true
 	s.labelOnBtn = false
@@ -936,6 +963,9 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 	lines = append(lines,
 		"  "+border.Render(
 			"┌"+strings.Repeat("─", boxW)+"┐"))
+	for _, line := range strings.Split(ansi.Wrap("Transaction: "+s.labelTxid, boxW-2, ""), "\n") {
+		lines = append(lines, "  "+border.Render("│")+pad(line, boxW)+border.Render("│"))
+	}
 
 	lblActive := isFocused && !s.labelOnBtn
 	lblStyle := theme.Header
@@ -961,6 +991,9 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 		[]string{"Cancel", "Save"},
 		s.labelBtnIdx,
 		isFocused && s.labelOnBtn, boxW)
+	if s.labelPending {
+		btnStr = theme.Dim.Render("Saving label...")
+	}
 	btnW := lipgloss.Width(btnStr)
 	btnPad := boxW - btnW
 	if btnPad < 0 {
@@ -971,6 +1004,11 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 			btnStr+
 			strings.Repeat(" ", btnPad)+
 			border.Render("│"))
+	if s.labelErr != "" {
+		for _, line := range strings.Split(ansi.Wrap(s.labelErr, boxW-2, ""), "\n") {
+			lines = append(lines, "  "+border.Render("│")+pad(theme.Warning.Render(line), boxW)+border.Render("│"))
+		}
+	}
 
 	lines = append(lines,
 		"  "+border.Render(
@@ -982,11 +1020,11 @@ func (s *OnChainHomeScreen) renderLabelPopup(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
-	if !s.ctx.walletExists() {
-		return walletUnavailableHelpBindings(s.ctx)
-	}
 	if s.labelEditing {
 		return s.labelPopupBindings()
+	}
+	if !s.ctx.walletExists() {
+		return walletUnavailableHelpBindings(s.ctx)
 	}
 	switch s.focusZone {
 	case ocHomeZoneUtxos:
@@ -1020,6 +1058,9 @@ func (s *OnChainHomeScreen) utxoBindings() []key.Binding {
 }
 
 func (s *OnChainHomeScreen) labelPopupBindings() []key.Binding {
+	if s.labelPending {
+		return []key.Binding{kSidebar, kQuit}
+	}
 	if s.labelOnBtn {
 		return []key.Binding{
 			kLeftRightButtons,

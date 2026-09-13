@@ -1,7 +1,6 @@
 package lndrpc
 
 import (
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -351,48 +350,6 @@ func (c *Client) GetTransactions() ([]OnChainTx, error) {
 	})
 
 	return txs, nil
-}
-
-// ── Label transaction ───────────────────────────────────
-
-func (c *Client) LabelTransaction(
-	txid string, label string, overwrite bool,
-) error {
-	c.mu.RLock()
-	conn := c.conn
-	c.mu.RUnlock()
-	if conn == nil {
-		return errNotConnected
-	}
-
-	// Convert hex txid to reversed bytes
-	// (LND expects internal byte order)
-	txidBytes, err := hex.DecodeString(txid)
-	if err != nil {
-		return fmt.Errorf("invalid txid: %w", err)
-	}
-	if len(txidBytes) == 32 {
-		for i, j := 0, 31; i < j; i, j = i+1, j-1 {
-			txidBytes[i], txidBytes[j] =
-				txidBytes[j], txidBytes[i]
-		}
-	}
-
-	walletClient := walletrpc.NewWalletKitClient(conn)
-	ctx, cancel := c.callCtx(defaultTimeout)
-	defer cancel()
-
-	_, err = walletClient.LabelTransaction(ctx,
-		&walletrpc.LabelTransactionRequest{
-			Txid:      txidBytes,
-			Label:     label,
-			Overwrite: overwrite,
-		})
-	if err != nil {
-		c.handleError(err)
-		return err
-	}
-	return nil
 }
 
 // ── Helpers for transaction labeling ─────────────────────

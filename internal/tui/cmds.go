@@ -265,15 +265,17 @@ func sendCoinsCmd(client app.OnChainSendClient, attempt *onChainSendAttempt) tea
 }
 
 func fetchOnChainTxCmd(
-	client *lndrpc.Client,
+	client *lndrpc.Client, owner *OnChainContext,
 ) tea.Cmd {
+	owner.txRevision++
+	revision := owner.txRevision
 	return func() tea.Msg {
 		if client == nil {
-			return onChainTxMsg{err: fmt.Errorf(
+			return onChainTxMsg{owner: owner, revision: revision, err: fmt.Errorf(
 				"LND not connected")}
 		}
 		txs, err := client.GetTransactions()
-		return onChainTxMsg{txs: txs, err: err}
+		return onChainTxMsg{owner: owner, revision: revision, txs: txs, err: err}
 	}
 }
 
@@ -290,17 +292,10 @@ func fetchFeeTiersCmd(
 
 // ── Transaction labeling ─────────────────────────────────
 
-func labelTxCmd(
-	client *lndrpc.Client, txid, label string,
-) tea.Cmd {
+func labelTxCmd(owner *OnChainHomeScreen, client app.TransactionLabelClient, prepared app.PreparedTransactionLabel) tea.Cmd {
+	attempt := owner.labelAttempt
 	return func() tea.Msg {
-		if client == nil {
-			return labelTxMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		err := client.LabelTransaction(
-			txid, label, true)
-		return labelTxMsg{err: err}
+		return labelTxMsg{owner: owner, attempt: attempt, result: app.SaveTransactionLabel(client, prepared)}
 	}
 }
 
