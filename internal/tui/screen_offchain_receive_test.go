@@ -59,7 +59,7 @@ func TestReceiveCreatesOnceAndMonitorsTheCreatedInvoice(t *testing.T) {
 	if check == nil || len(client.requests) != 1 || client.requests[0] != (app.InvoiceRequest{AmountSats: 42, Memo: "coffee", Blinded: true}) {
 		t.Fatalf("invoice submission changed: %+v", client.requests)
 	}
-	check()
+	createdInvoiceCheck(t, check)()
 	if len(client.hashes) != 1 || client.hashes[0] != fmt.Sprintf("%064x", 1) {
 		t.Fatalf("monitored the wrong invoice: %v", client.hashes)
 	}
@@ -77,13 +77,13 @@ func TestReceiveRejectsResultsFromReplacedScreen(t *testing.T) {
 		t.Fatal("old creation reached the replacement screen")
 	}
 	_, checkCurrent := current.HandleMsg(createCurrent())
-	if _, cmd := current.HandleMsg(checkOld()); cmd != nil || current.step != recvStepWaiting {
+	if _, cmd := current.HandleMsg(createdInvoiceCheck(t, checkOld)()); cmd != nil || current.step != recvStepWaiting {
 		t.Fatal("old settlement completed the replacement invoice")
 	}
 	if _, cmd := current.HandleMsg(invoiceCheckMsg{attempt: old.attempt}); cmd != nil {
 		t.Fatal("old timer scheduled another lookup")
 	}
-	current.HandleMsg(checkCurrent())
+	current.HandleMsg(createdInvoiceCheck(t, checkCurrent)())
 	if current.step != recvStepPaid {
 		t.Fatal("current settlement was not accepted")
 	}
@@ -101,6 +101,7 @@ func TestReceiveContinuesAfterPendingOrUnavailableStatus(t *testing.T) {
 	client.err = nil
 	_, create = s.submitInvoice()
 	_, check := s.HandleMsg(create())
+	check = createdInvoiceCheck(t, check)
 	for _, lookupError := range []error{errors.New("connection lost"), nil} {
 		client.err = lookupError
 		client.status = &lndrpc.Invoice{}
@@ -124,7 +125,7 @@ func TestReceiveContinuesAfterPendingOrUnavailableStatus(t *testing.T) {
 		}
 	}
 	client.status = &lndrpc.Invoice{Settled: true}
-	if _, next := s.HandleMsg(check()); next != nil || s.step != recvStepPaid {
+	if _, next := s.HandleMsg(check()); !isHistoryChange(next) || s.step != recvStepPaid {
 		t.Fatal("settlement did not stop monitoring")
 	}
 }
@@ -134,7 +135,7 @@ func TestReceiveExpiryStopsMonitoring(t *testing.T) {
 	s := receiveScreen(client)
 	_, create := s.submitInvoice()
 	_, check := s.HandleMsg(create())
-	if _, next := s.HandleMsg(check()); next != nil || s.step != recvStepExpired {
+	if _, next := s.HandleMsg(createdInvoiceCheck(t, check)()); !isHistoryChange(next) || s.step != recvStepExpired {
 		t.Fatal("expiry did not stop monitoring")
 	}
 	if _, next := s.HandleMsg(invoiceCheckMsg{attempt: s.attempt}); next != nil {
@@ -154,8 +155,23 @@ func TestReceiveMonitoringSurvivesSectionChangeAndStopsOnClose(t *testing.T) {
 	if check == nil || s.step != recvStepWaiting {
 		t.Fatal("hidden receive tab lost its creation result")
 	}
-	updated, next := m.Update(check())
-	m = updated.(Model)
+	r := &historyTestReader{next: historySnapshot(nil, nil)}
+	s.ctx.PaymentHistory = &paymentHistoryContext{reader: r, scope: s.ctx.walletObservationScope()}
+	var next tea.Cmd
+	for _, command := range check().(tea.BatchMsg) {
+		switch msg := command().(type) {
+		case refreshPaymentHistoryMsg:
+			read := statusUpdate(&m, msg)
+			statusUpdate(&m, read())
+		case invoiceStatusMsg:
+			next = statusUpdate(&m, msg)
+		default:
+			t.Fatalf("unexpected creation command %T", msg)
+		}
+	}
+	if r.calls != 1 || !s.ctx.PaymentHistory.Fresh() {
+		t.Fatal("hidden creation did not refresh history")
+	}
 	if next == nil {
 		t.Fatal("hidden receive tab stopped polling")
 	}
@@ -176,4 +192,47 @@ func TestReceiveMonitoringSurvivesSectionChangeAndStopsOnClose(t *testing.T) {
 	if len(client.hashes) != 2 {
 		t.Fatal("unexpected lookup after close")
 	}
+}
+
+// Creation must both monitor the exact new invoice and invalidate shared history.
+// Inspect the actual batch without depending on execution order.
+func createdInvoiceCheck(t *testing.T, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("creation lost monitoring and history refresh")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("creation did not schedule monitoring and history refresh")
+	}
+	return func() tea.Msg {
+		var status tea.Msg
+		changes := 0
+		for _, c := range batch {
+			switch msg := c().(type) {
+			case refreshPaymentHistoryMsg:
+				if !msg.changed {
+					t.Fatal("creation did not invalidate history")
+				}
+				changes++
+			case invoiceStatusMsg:
+				status = msg
+			default:
+				t.Fatalf("unexpected creation command %T", msg)
+			}
+		}
+		if status == nil || changes != 1 {
+			t.Fatal("creation omitted monitoring or duplicated refresh")
+		}
+		return status
+	}
+
+}
+
+func isHistoryChange(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	msg, ok := cmd().(refreshPaymentHistoryMsg)
+	return ok && msg.changed
 }

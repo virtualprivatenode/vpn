@@ -48,6 +48,7 @@ type Screen interface {
 // read the current observation when rendering; no screen owns a second copy.
 
 type ScreenContext struct {
+	PaymentHistory      *paymentHistoryContext
 	OnChain             *OnChainContext
 	AutoUnlock          autoUnlockChanges
 	LoginPasswords      loginPasswordChanges
@@ -116,6 +117,9 @@ func (c *ScreenContext) invalidateWalletObservations() {
 	c.walletRevision++
 	c.walletGeneration++
 	c.Status = nil
+	if c.PaymentHistory != nil {
+		c.PaymentHistory.PaymentHistorySnapshot = app.PaymentHistorySnapshot{}
+	}
 	if c.OnChain != nil {
 		c.OnChain.OnChainSnapshot = app.OnChainSnapshot{}
 		c.OnChain.Selection.Clear()
@@ -161,7 +165,7 @@ type OnChainContext struct {
 	Selection    app.CoinSelection
 	SendFeeTiers [4]feeTier
 	reader       onChainReader
-	scope        onChainScope
+	scope        walletObservationScope
 	active       *onChainRequest
 	pending      bool
 }

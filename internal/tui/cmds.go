@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 
@@ -184,49 +183,6 @@ func sendPaymentCmd(client app.LightningPaymentClient, attempt *paymentAttempt, 
 	return func() tea.Msg {
 		result, err := app.SendLightningPayment(client, payment)
 		return sendPaymentResultMsg{attempt: attempt, result: result, err: err}
-	}
-}
-
-// fetchPaymentHistoryCmd merges ListInvoices and
-// ListPayments into one paymentHistoryMsg. Each RPC's err
-// is tracked independently and rolled up into rpcErr so
-// the handler's `if msg.err == nil` partial-data guard
-// doesn't overwrite last-good entries on a flaky fetch.
-func fetchPaymentHistoryCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return paymentHistoryMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		invoices, invErr := client.ListInvoices(50)
-		if invErr != nil {
-			logger.TUI("ListInvoices: %v", invErr)
-		}
-		payments, payErr := client.ListPayments(50)
-		if payErr != nil {
-			logger.TUI("ListPayments: %v", payErr)
-		}
-		var all []lndrpc.PaymentEntry
-		all = append(all, invoices...)
-		all = append(all, payments...)
-		sort.Slice(all, func(i, j int) bool {
-			return all[i].CreationDate >
-				all[j].CreationDate
-		})
-		var rpcErr error
-		switch {
-		case invErr != nil && payErr != nil:
-			rpcErr = fmt.Errorf(
-				"invoices and payments: %v", invErr)
-		case invErr != nil:
-			rpcErr = fmt.Errorf("invoices: %v", invErr)
-		case payErr != nil:
-			rpcErr = fmt.Errorf("payments: %v", payErr)
-		}
-		return paymentHistoryMsg{
-			entries: all, err: rpcErr}
 	}
 }
 

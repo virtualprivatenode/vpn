@@ -70,11 +70,13 @@ func TestOpenDetailsFollowAutomaticListObservations(t *testing.T) {
 		// This exercises list timers without contacting the host helper.
 		m.statusScope = m.currentStatusScope()
 		statusUpdate(&m, requestStatusCmd())
+		var tick tea.Msg = tickMsg(time.Now())
 		refresh := func(next app.OnChainSnapshot) {
 			t.Helper()
 			reader.next = next
 			calls := reader.calls
-			batch := statusUpdate(&m, tickMsg(time.Now()))().(tea.BatchMsg)
+			batch := statusUpdate(&m, tick)().(tea.BatchMsg)
+			tick = nil
 			for _, command := range batch {
 				switch msg := command().(type) {
 				case refreshOnChainMsg:
@@ -83,13 +85,15 @@ func TestOpenDetailsFollowAutomaticListObservations(t *testing.T) {
 						t.Fatal("timer did not admit list collection")
 					}
 					statusUpdate(&m, read())
-				case refreshStatusMsg, tickMsg:
+				case tickMsg:
+					tick = msg
+				case refreshStatusMsg:
 				default:
 					t.Fatalf("unexpected timer result %T", msg)
 				}
 			}
-			if reader.calls != calls+1 {
-				t.Fatal("timer did not execute one list collection")
+			if reader.calls != calls+1 || tick == nil {
+				t.Fatal("timer did not read lists or schedule its successor")
 			}
 		}
 		for _, index := range []int{1, 2} {

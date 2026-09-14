@@ -645,7 +645,7 @@ func (s *OnChainHomeScreen) View(
 
 	if len(utxos) == 0 {
 		utxoMidLines = append(utxoMidLines,
-			" "+theme.Dim.Render(onChainEmptyText(s.ocCtx.Utxos, "No UTXOs found.")))
+			" "+theme.Dim.Render(observedEmptyText(s.ocCtx.Utxos, "No UTXOs found.")))
 	} else {
 		for i, u := range utxos {
 			isSelected := isFocused &&
@@ -793,7 +793,7 @@ func (s *OnChainHomeScreen) View(
 	if len(txs) == 0 {
 		txMidLines = append(txMidLines,
 			" "+theme.Dim.Render(
-				onChainEmptyText(s.ocCtx.OnChainTxs, "No on-chain transactions.")))
+				observedEmptyText(s.ocCtx.OnChainTxs, "No on-chain transactions.")))
 	} else {
 		for i, tx := range txs {
 			isSelected := isFocused &&

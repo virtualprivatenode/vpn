@@ -356,9 +356,7 @@ func (s *SendScreen) handleResultKey(
 	case "enter":
 		return s, tea.Batch(
 			emitCloseTab,
-			emitRefreshStatus,
-			fetchPaymentHistoryCmd(
-				s.ctx.LndClient))
+			emitRefreshStatus)
 	case "left":
 		return s, emitFocusSidebar
 	case "up", "shift+tab":
@@ -425,7 +423,7 @@ func (s *SendScreen) handleSendResult(
 		s.result.Error = "Check Payment History before retrying."
 	}
 	s.step = sendStepResult
-	return s, nil
+	return s, paymentHistoryChangedCmd
 }
 
 // ── Views ───────────────────────────────────────────────

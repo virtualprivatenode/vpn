@@ -1,47 +1,21 @@
 package tui
 
-import "github.com/virtualprivatenode/vpn/internal/app"
-
 // A detail keeps its identity and opening scope, never a second record cache.
 // Rendering follows the same retained observations as the list.
 type onChainDetail struct {
 	ctx   *ScreenContext
 	owner *OnChainContext
-	scope onChainScope
+	scope walletObservationScope
 	key   string
 }
 
 func newOnChainDetail(ctx *ScreenContext, key string) onChainDetail {
-	return onChainDetail{ctx: ctx, owner: ctx.OnChain, scope: ctx.onChainScope(), key: key}
+	return onChainDetail{ctx: ctx, owner: ctx.OnChain, scope: ctx.walletObservationScope(), key: key}
 }
 
 func (d onChainDetail) current() bool {
 	return d.owner != nil && d.owner == d.ctx.OnChain &&
-		d.scope == d.ctx.onChainScope() && d.scope == d.owner.scope
-}
-
-const previousOnChainDetail = "This detail belongs to a previous wallet session. Reopen it from the current list."
-
-func onChainDetailRecord[T any](observation app.Observation[[]T], match func(T) bool) (T, string, bool) {
-	if observation.Known() {
-		for _, record := range observation.Value {
-			if match(record) {
-				notice := ""
-				if observation.Err != nil {
-					notice = "Showing stale data. Retrying..."
-				}
-				return record, notice, true
-			}
-		}
-	}
-	var zero T
-	if observation.Err != nil {
-		return zero, "List unavailable. Retrying...", false
-	}
-	if !observation.Known() {
-		return zero, "Loading...", false
-	}
-	return zero, "Not in the latest successful list.", false
+		d.scope == d.ctx.walletObservationScope() && d.scope == d.owner.scope
 }
 
 func onChainDetailKey(screen Screen, kind tabKind) string {

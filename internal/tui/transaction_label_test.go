@@ -33,7 +33,7 @@ func labelModel() (Model, *OnChainHomeScreen, *labelSaveClient) {
 		}),
 	}}
 	ctx.OnChain = oc
-	oc.scope = ctx.onChainScope()
+	oc.scope = ctx.walletObservationScope()
 	client := &labelSaveClient{result: lndrpc.TransactionLabelResult{Submitted: true}}
 	s := NewOnChainHomeScreen(ctx, oc)
 	s.labels = client

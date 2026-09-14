@@ -66,7 +66,7 @@ func (s *UtxoDetailScreen) View(
 		p.labelLine("Outpoint:").monoWrap(s.key)
 		return p.render()
 	}
-	tx, _, txFound := onChainDetailRecord(s.owner.OnChainTxs, func(tx lndrpc.OnChainTx) bool { return tx.Txid == u.Txid })
+	tx, _, txFound := observedListRecord(s.owner.OnChainTxs, func(tx lndrpc.OnChainTx) bool { return tx.Txid == u.Txid })
 	date, label := "unavailable", "unavailable"
 	if txFound {
 		date, label = formatDateShort(tx.Timestamp), tx.Label
@@ -115,7 +115,7 @@ func (s *UtxoDetailScreen) HelpBindings() []key.Binding {
 
 func (s *UtxoDetailScreen) record() (lndrpc.UTXO, string, bool) {
 	if !s.current() {
-		return lndrpc.UTXO{}, previousOnChainDetail, false
+		return lndrpc.UTXO{}, previousWalletDetail, false
 	}
-	return onChainDetailRecord(s.owner.Utxos, func(u lndrpc.UTXO) bool { return fmt.Sprintf("%s:%d", u.Txid, u.Vout) == s.key })
+	return observedListRecord(s.owner.Utxos, func(u lndrpc.UTXO) bool { return fmt.Sprintf("%s:%d", u.Txid, u.Vout) == s.key })
 }
