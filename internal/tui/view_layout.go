@@ -420,6 +420,9 @@ func (m Model) effectiveTabs() []openTab {
 			if t.Kind == tabUtxoDetail || t.Kind == tabOnChainTx {
 				t.Label = onChainDetailLabel(t.Screen)
 			}
+			if detail, ok := t.Screen.(*PaymentDetailScreen); ok {
+				t.Label = detail.label()
+			}
 			tabs = append(tabs, t)
 		}
 	}

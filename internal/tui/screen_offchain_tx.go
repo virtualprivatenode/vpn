@@ -3,28 +3,54 @@ package tui
 import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── PaymentDetailScreen ────────────────────────────────
-// View-only tab showing a single payment's details.
-// No buttons — navigate away via backspace (parent).
-
+// PaymentDetailScreen follows one daemon record in its original wallet scope.
 type PaymentDetailScreen struct {
-	ctx   *ScreenContext
-	entry lndrpc.PaymentEntry
+	ctx      *ScreenContext
+	owner    *paymentHistoryContext
+	scope    walletObservationScope
+	key      string
+	incoming bool
 }
 
-func NewPaymentDetailScreen(
-	ctx *ScreenContext,
-	entry lndrpc.PaymentEntry,
-) *PaymentDetailScreen {
-	return &PaymentDetailScreen{
-		ctx:   ctx,
-		entry: entry,
+func NewPaymentDetailScreen(ctx *ScreenContext, entry lndrpc.PaymentEntry) *PaymentDetailScreen {
+	return &PaymentDetailScreen{ctx: ctx, owner: ctx.PaymentHistory, scope: ctx.walletObservationScope(), key: paymentHistoryKey(entry), incoming: entry.IsIncoming}
+}
+
+func (s *PaymentDetailScreen) current() bool {
+	return s.owner != nil && s.owner == s.ctx.PaymentHistory && s.scope == s.ctx.walletObservationScope() && s.scope == s.owner.scope
+}
+
+func (s *PaymentDetailScreen) record() (lndrpc.PaymentEntry, string, bool) {
+	if !s.current() {
+		return lndrpc.PaymentEntry{}, previousWalletDetail, false
 	}
+	observation := s.owner.Payments
+	if s.incoming {
+		observation = s.owner.Invoices
+	}
+	return observedListRecord(observation, func(entry lndrpc.PaymentEntry) bool { return paymentHistoryKey(entry) == s.key })
+}
+
+func (s *PaymentDetailScreen) label() string {
+	entry, _, found := s.record()
+	label := "Payment"
+	if found {
+		label = entry.Memo
+		if label == "" {
+			prefix := "↑ "
+			if entry.IsIncoming {
+				prefix = "↓ "
+			}
+			label = prefix + formatSats(entry.AmountSats)
+		}
+	}
+	return ansi.Truncate(label, 14, "..")
 }
 
 // ── Screen interface ────────────────────────────────────
@@ -63,8 +89,12 @@ func (s *PaymentDetailScreen) HandleMsg(
 func (s *PaymentDetailScreen) View(
 	w, h int,
 ) string {
-	entry := s.entry
 	p := newPane(w)
+	entry, notice, found := s.record()
+	if !found {
+		p.title(theme.Header, "Payment Detail").warnWrap(notice)
+		return p.render()
+	}
 
 	if entry.IsIncoming {
 		switch entry.Status {
@@ -88,9 +118,21 @@ func (s *PaymentDetailScreen) View(
 				"Incoming Invoice")
 		}
 	} else {
-		p.title(theme.Warning, "Sent Payment")
+		switch entry.Status {
+		case "SUCCEEDED":
+			p.title(theme.Success, "Sent Payment")
+		case "FAILED":
+			p.title(theme.Warning, "Failed Payment")
+		case "IN_FLIGHT", "INITIATED":
+			p.title(theme.Header, "Pending Payment")
+		default:
+			p.title(theme.Warning, "Payment Status Unknown")
+		}
 	}
 
+	if notice != "" {
+		p.warnWrap(notice).blank()
+	}
 	p.field("Amount:  ",
 		formatSats(entry.AmountSats)+" sats")
 	if entry.FeeSats > 0 {

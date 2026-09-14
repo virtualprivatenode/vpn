@@ -266,7 +266,7 @@ func (s *OnChainTxScreen) HelpBindings() []key.Binding {
 
 func (s *OnChainTxScreen) record() (lndrpc.OnChainTx, string, bool) {
 	if !s.current() {
-		return lndrpc.OnChainTx{}, previousOnChainDetail, false
+		return lndrpc.OnChainTx{}, previousWalletDetail, false
 	}
-	return onChainDetailRecord(s.owner.OnChainTxs, func(tx lndrpc.OnChainTx) bool { return tx.Txid == s.key })
+	return observedListRecord(s.owner.OnChainTxs, func(tx lndrpc.OnChainTx) bool { return tx.Txid == s.key })
 }

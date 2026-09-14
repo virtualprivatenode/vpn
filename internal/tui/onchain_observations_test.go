@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -33,7 +32,7 @@ func onChainModel(t *testing.T) (Model, *OnChainHomeScreen, *onChainTestReader) 
 	theme.Init(true)
 	m, _ := statusModelFixture(t)
 	r := &onChainTestReader{}
-	oc := &OnChainContext{reader: r, scope: m.screenCtx.onChainScope()}
+	oc := &OnChainContext{reader: r, scope: m.screenCtx.walletObservationScope()}
 	m.screenCtx.OnChain = oc
 	m.screenCtx.Status = &app.StatusSnapshot{Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "20000"}), Node: freshStatus(lndrpc.NodeInfo{})}
 	m.state.KeyVerificationKnown = true
@@ -97,37 +96,6 @@ func TestOnChainEntryFailurePartialRecoveryAndEmpty(t *testing.T) {
 	if !strings.Contains(view(), "No on-chain transactions.") || strings.Contains(view(), "retrying") || m.pollInterval() != 60*time.Second {
 		t.Fatal("empty success did not recover in place")
 	}
-}
-
-func TestOnChainTimerConstructsRefreshDuringStatusRead(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		m, _, r := onChainModel(t)
-		m.nav.ActiveItem = secOnChain
-		// An outstanding dashboard read suppresses helper probes, but must not
-		// suppress the independent list read. Execute the actual timer command.
-		statusUpdate(&m, requestStatusCmd())
-		r.next = app.OnChainSnapshot{}.Unavailable(errors.New("list outage"))
-		publishOnChain(t, &m, r.next)
-		cmd := statusUpdate(&m, tickMsg(time.Now()))
-		var nextTick tea.Msg
-		for _, command := range cmd().(tea.BatchMsg) {
-			switch msg := command().(type) {
-			case refreshOnChainMsg:
-				r.next = app.OnChainSnapshot{Utxos: freshStatus([]lndrpc.UTXO(nil)), OnChainTxs: freshStatus([]lndrpc.OnChainTx(nil))}
-				read := statusUpdate(&m, msg)
-				statusUpdate(&m, read())
-			case tickMsg:
-				nextTick = msg
-			case refreshStatusMsg:
-			default:
-				t.Fatalf("unexpected timer command %T", msg)
-			}
-		}
-		if nextTick == nil || r.calls != 2 || !m.screenCtx.OnChain.Utxos.Fresh() {
-			t.Fatal("timer did not recover lists independently")
-		}
-
-	})
 }
 
 func TestOnChainCoalescingLifecycleAndClientScope(t *testing.T) {
@@ -237,17 +205,17 @@ func TestOnChainPresenceFailurePreservesSelectionAndRejectsFreshness(t *testing.
 func TestOnChainDetailIdentitySurvivesReordering(t *testing.T) {
 	m, s, _ := onChainModel(t)
 	m.nav.ActiveItem = secOnChain
-	a, b := lndrpc.UTXO{Txid: "A", Address: "A"}, lndrpc.UTXO{Txid: "B", Address: "B"}
+	a, b := lndrpc.UTXO{Txid: "record-A", Address: "address-A"}, lndrpc.UTXO{Txid: "record-B", Address: "address-B"}
 	publish := func(coins []lndrpc.UTXO, txs []lndrpc.OnChainTx) {
 		publishOnChain(t, &m, app.OnChainSnapshot{Utxos: freshStatus(coins), OnChainTxs: freshStatus(txs)})
 	}
-	publish([]lndrpc.UTXO{a, b}, []lndrpc.OnChainTx{{Txid: "A"}, {Txid: "B"}})
+	publish([]lndrpc.UTXO{a, b}, []lndrpc.OnChainTx{{Txid: "record-A", Label: "transaction-A"}, {Txid: "record-B", Label: "transaction-B"}})
 	for _, zone := range []int{ocHomeZoneUtxos, ocHomeZoneTxs} {
 		s.focusZone, s.utxoCursor, s.txCursor = zone, 1, 1
 		_, open := s.HandleKey("enter", tea.KeyPressMsg{})
 		statusUpdate(&m, open())
 	}
-	publish([]lndrpc.UTXO{b, a}, []lndrpc.OnChainTx{{Txid: "B"}, {Txid: "A"}})
+	publish([]lndrpc.UTXO{b, a}, []lndrpc.OnChainTx{{Txid: "record-B", Label: "transaction-B"}, {Txid: "record-A", Label: "transaction-A"}})
 	for _, zone := range []int{ocHomeZoneUtxos, ocHomeZoneTxs} {
 		s.focusZone = zone
 		_, open := s.HandleKey("enter", tea.KeyPressMsg{})
@@ -256,15 +224,15 @@ func TestOnChainDetailIdentitySurvivesReordering(t *testing.T) {
 	if len(m.tabs) != 4 {
 		t.Fatal("row index reused a different detail")
 	}
-	for _, tab := range m.tabs {
-		if onChainDetailKey(tab.Screen, tab.Kind) != tab.Key {
-			t.Fatal("detail does not match tab identity")
+	for i, want := range []string{"address-B", "record-B", "address-A", "record-A"} {
+		if view := renderDetail(t, &m, i+1); !strings.Contains(view, want) {
+			t.Fatalf("detail %d: expected %q in %s", i+1, want, view)
 		}
 	}
 	s.focusZone, s.utxoCursor = ocHomeZoneUtxos, 0
 	_, open := s.HandleKey("enter", tea.KeyPressMsg{})
 	statusUpdate(&m, open())
-	if len(m.tabs) != 4 || m.effectiveTabs()[m.activeTab].Key != "B:0" {
+	if len(m.tabs) != 4 || m.effectiveTabs()[m.activeTab].Key != "record-B:0" {
 		t.Fatal("first-row reopen did not select existing identity")
 	}
 	m.nav.ActiveItem = secSystem

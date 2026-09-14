@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/helper"
@@ -104,19 +106,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tea.ResumeMsg:
-		if m.cfg.HasLND() && m.state.WalletKnown &&
-			m.state.WalletExists &&
-			m.lndClient != nil {
-			return m, tea.Batch(
-				requestStatusCmd,
-				fetchPaymentHistoryCmd(m.lndClient),
-				m.visibleOnChainCmd(),
-				fetchWalletStateCmd(m.screenCtx),
-				fetchKeyVerificationStateCmd())
-		}
 		return m, tea.Batch(
 			requestStatusCmd,
-			m.visibleOnChainCmd(),
+			m.visibleWalletListsCmd(),
 			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd())
 	case tea.KeyPressMsg:
@@ -325,8 +317,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.Kind == tabPayment {
+			detail, ok := msg.Screen.(*PaymentDetailScreen)
+			if !ok || !detail.current() || msg.Key == "" || detail.key != msg.Key || m.nav.ActiveSection() != secWallet {
+				return m, nil
+			}
+			for i, tab := range m.effectiveTabs() {
+				if tab.Kind == tabPayment && tab.Key == msg.Key {
+					m.setTabScreen(i, msg.Screen)
+					m.activeTab = i
+					m.rememberTabPosition()
+					m.focusTabBar()
+					m.tabCursorX = 0
+					return m, nil
+				}
+			}
+		}
+
 		// Dedup by kind + index if Index is set
-		if msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index != 0 {
+		if msg.Kind != tabPayment && msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index != 0 {
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
 				if t.Kind == msg.Kind &&
@@ -344,7 +353,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// Dedup flow tabs by kind + section
-		if msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index == 0 {
+		if msg.Kind != tabPayment && msg.Kind != tabUtxoDetail && msg.Kind != tabOnChainTx && msg.Kind != tabChannel && msg.Kind != tabSSHKeyDetail && msg.Kind != tabSyncthingDevice && msg.Index == 0 {
 			sec := m.nav.ActiveSection()
 			tabs := m.effectiveTabs()
 			for i, t := range tabs {
@@ -421,6 +430,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.state.WalletKnown = false
+			if m.screenCtx.PaymentHistory != nil {
+				m.screenCtx.PaymentHistory.PaymentHistorySnapshot = m.screenCtx.PaymentHistory.Unavailable(msg.err)
+			}
 			if m.screenCtx.OnChain != nil {
 				m.screenCtx.OnChain.OnChainSnapshot = m.screenCtx.OnChain.Unavailable(msg.err)
 			}
@@ -441,10 +453,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cfg.HasLND() && m.screenCtx.walletCreationOwner == nil {
 			m.lndClient = lndrpc.New()
 			m.screenCtx.LndClient = m.lndClient
-			return m, tea.Batch(requestStatusCmd, m.visibleOnChainCmd())
+			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd())
 		}
 		if recovered {
-			return m, m.visibleOnChainCmd()
+			return m, m.visibleWalletListsCmd()
 		}
 		return m, nil
 	case keyVerificationStateMsg:
@@ -530,13 +542,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.dispatchToTab(tabSend, msg)
 	case sendPaymentResultMsg:
 		return m.dispatchToTab(tabSend, msg)
-	case paymentHistoryMsg:
-		// Route to wallet home screen
-		if cmd, ok := m.routeToSectionScreen(
-			secWallet, msg); ok {
-			return m, cmd
+	case refreshPaymentHistoryMsg:
+		if msg.changed && m.screenCtx.PaymentHistory != nil {
+			m.screenCtx.PaymentHistory.revision++
+			m.screenCtx.PaymentHistory.PaymentHistorySnapshot = m.screenCtx.PaymentHistory.Unavailable(errors.New("history changed"))
 		}
-		return m, nil
+		return m, m.admitPaymentHistory()
+	case paymentHistoryResultMsg:
+		return m, m.completePaymentHistory(msg)
 	case refreshOnChainMsg:
 		return m, m.admitOnChain()
 	case onChainResultMsg:
@@ -689,10 +702,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		if m.statusActive != nil {
-			return m, tea.Batch(requestStatusCmd, m.visibleOnChainCmd(), tickEveryCmd(m.pollInterval()))
+			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd(), tickEveryCmd(m.pollInterval()))
 		}
 		cmds := []tea.Cmd{
-			m.visibleOnChainCmd(),
+			m.visibleWalletListsCmd(),
 			requestStatusCmd,
 			fetchWalletStateCmd(m.screenCtx),
 			fetchKeyVerificationStateCmd(),
@@ -937,7 +950,7 @@ func (m Model) previewSection(
 			requestStatusCmd
 	case secWallet:
 		return m,
-			fetchPaymentHistoryCmd(m.lndClient)
+			requestPaymentHistoryCmd
 	case secOnChain:
 		return m, requestOnChainCmd
 	}

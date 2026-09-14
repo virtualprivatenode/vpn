@@ -35,7 +35,7 @@ func onChainScreen(t *testing.T) (*OnChainSendScreen, *screenOnChainClient) {
 	ocCtx.Selection.Toggle(coin)
 	s := NewOnChainSendScreen(&ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}}, ocCtx)
 	s.ctx.OnChain = ocCtx
-	ocCtx.scope = s.ctx.onChainScope()
+	ocCtx.scope = s.ctx.walletObservationScope()
 	s.client = client
 	addr, err := btcutil.NewAddressWitnessPubKeyHash(make([]byte, 20), &chaincfg.MainNetParams)
 	if err != nil {

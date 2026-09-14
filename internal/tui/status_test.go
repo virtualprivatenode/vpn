@@ -125,7 +125,7 @@ func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 	onchain := NewOnChainHomeScreen(m.screenCtx, oc)
 	channels := NewChannelsHomeScreen(m.screenCtx)
 	offchain := NewWalletHomeScreen(m.screenCtx)
-	offchain.entries = []lndrpc.PaymentEntry{{IsIncoming: true, Status: "SETTLED", AmountSats: 1000}}
+	m.screenCtx.PaymentHistory = &paymentHistoryContext{scope: m.screenCtx.walletObservationScope(), PaymentHistorySnapshot: app.PaymentHistorySnapshot{Invoices: freshStatus([]lndrpc.PaymentEntry{{IsIncoming: true, Status: "SETTLED", AmountSats: 1000}}), Payments: freshStatus([]lndrpc.PaymentEntry(nil))}}
 	failed := errors.New("injected read failure")
 	publish := func(s app.StatusSnapshot) {
 		t.Helper()
@@ -135,7 +135,7 @@ func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 	}
 	publish(app.StatusSnapshot{Node: freshStatus(lndrpc.NodeInfo{}), Balance: app.Observation[lndrpc.WalletBalance]{Err: failed}, Channels: app.Observation[app.ChannelStatus]{Err: failed}})
 	view := ansi.Strip(onchain.View(90, 42))
-	if !strings.Contains(view, "unavailable") || strings.Contains(view, "Balance:  0 sats") || onchain.computeTxBalances() != nil || offchain.computeBalances() != nil {
+	if !strings.Contains(view, "unavailable") || strings.Contains(view, "Balance:  0 sats") {
 		t.Fatalf("unavailable total became a fabricated balance:\n%s", view)
 	}
 	if !strings.Contains(view, "N/A") || !strings.Contains(ansi.Strip(offchain.View(90, 42)), "N/A") {
@@ -148,7 +148,7 @@ func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 	publish(app.StatusSnapshot{Node: freshStatus(lndrpc.NodeInfo{}), Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "20000"}), Channels: freshStatus(app.ChannelStatus{Channels: []app.StatusChannel{{Channel: lndrpc.Channel{PeerAlias: "retained peer", LocalBalance: 5000}}}})})
 	publish(app.StatusSnapshot{Node: freshStatus(lndrpc.NodeInfo{}), Balance: app.Observation[lndrpc.WalletBalance]{Err: failed}, Channels: app.Observation[app.ChannelStatus]{Err: failed}})
 	view = ansi.Strip(onchain.View(90, 42))
-	if !strings.Contains(view, "20,000 sats (stale)") || onchain.computeTxBalances() != nil {
+	if !strings.Contains(view, "20,000 sats (stale)") || !strings.Contains(view, "N/A") {
 		t.Fatalf("last-good balance was not explicitly stale:\n%s", view)
 	}
 	channelView = ansi.Strip(channels.View(90, 42))

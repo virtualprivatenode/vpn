@@ -442,8 +442,7 @@ func (s *ReceiveScreen) handleResultKey(keyStr string) (Screen, tea.Cmd) {
 		return s, tea.Quit
 	case "enter":
 		if s.step == recvStepPaid {
-			return s, tea.Batch(emitCloseTab, emitRefreshStatus,
-				fetchPaymentHistoryCmd(s.ctx.LndClient))
+			return s, tea.Batch(emitCloseTab, emitRefreshStatus)
 		}
 		return s, emitCloseTab
 	case "left":
@@ -490,7 +489,7 @@ func (s *ReceiveScreen) handleInvoiceCreated(msg invoiceCreatedMsg) (Screen, tea
 	s.invoice = msg.invoice
 	s.step = recvStepWaiting
 	s.checking = true
-	return s, checkInvoiceCmd(s.invoices, s.attempt, s.invoice)
+	return s, tea.Batch(checkInvoiceCmd(s.invoices, s.attempt, s.invoice), paymentHistoryChangedCmd)
 }
 
 func (s *ReceiveScreen) handleInvoiceStatus(msg invoiceStatusMsg) (Screen, tea.Cmd) {
@@ -505,10 +504,10 @@ func (s *ReceiveScreen) handleInvoiceStatus(msg invoiceStatusMsg) (Screen, tea.C
 		switch msg.state {
 		case app.InvoicePaid:
 			s.step = recvStepPaid
-			return s, nil
+			return s, paymentHistoryChangedCmd
 		case app.InvoiceExpired:
 			s.step = recvStepExpired
-			return s, nil
+			return s, paymentHistoryChangedCmd
 		}
 	}
 	// Only this screen schedules the next lookup. Closing its tab drops the

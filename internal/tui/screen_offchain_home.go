@@ -7,18 +7,14 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── WalletHomeScreen ──────────────────────────────────
-// Section home for Wallet. Two focus zones: buttons
-// (Send, Receive, Pairing) and scrollable payment
-// history table. Reads live status through ctx.Status
-// pointer. Payment history entries arrive via
-// HandleMsg(paymentHistoryMsg) — same pattern as
-// ChannelHistoryScreen.
+// WalletHomeScreen owns navigation over shared invoice/payment observations.
 
 const (
 	walletHomeZoneButtons = 0
@@ -30,7 +26,6 @@ type WalletHomeScreen struct {
 	btnIdx    int // 0=Send, 1=Receive, 2=Pairing
 	focusZone int // 0=buttons, 1=payment list
 	cursor    int // position in payment list
-	entries   []lndrpc.PaymentEntry
 }
 
 func NewWalletHomeScreen(
@@ -51,6 +46,7 @@ func (s *WalletHomeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
 	s.clampCursor()
+	entries := s.ctx.paymentHistory().Entries()
 
 	switch keyStr {
 	case "ctrl+c":
@@ -86,14 +82,14 @@ func (s *WalletHomeScreen) HandleKey(
 		return s, nil
 	case "down", "tab":
 		if s.focusZone == walletHomeZoneButtons {
-			if len(s.entries) > 0 {
+			if len(entries) > 0 {
 				s.focusZone = walletHomeZoneList
 				s.cursor = 0
 			}
 			return s, nil
 		}
 		if s.focusZone == walletHomeZoneList {
-			if s.cursor < len(s.entries)-1 {
+			if s.cursor < len(entries)-1 {
 				s.cursor++
 			}
 		}
@@ -133,6 +129,7 @@ func (s *WalletHomeScreen) HandleKey(
 func (s *WalletHomeScreen) handleEnter() (
 	Screen, tea.Cmd,
 ) {
+	entries := s.ctx.paymentHistory().Entries()
 	if s.focusZone == walletHomeZoneButtons {
 		switch s.btnIdx {
 		case 0: // Send
@@ -145,30 +142,15 @@ func (s *WalletHomeScreen) handleEnter() (
 		return s, nil
 	}
 
-	// Payment list — open payment detail
-	if s.cursor < len(s.entries) {
-		entry := s.entries[s.cursor]
-		label := entry.Memo
-		if label == "" {
-			if entry.IsIncoming {
-				label = "↓ " + formatSats(
-					entry.AmountSats)
-			} else {
-				label = "↑ " + formatSats(
-					entry.AmountSats)
-			}
-		}
-		if len(label) > 14 {
-			label = label[:12] + ".."
-		}
-		screen := NewPaymentDetailScreen(
-			s.ctx, entry)
-		idx := s.cursor
+	// Open the selected daemon record.
+	if s.cursor < len(entries) {
+		entry := entries[s.cursor]
+		screen := NewPaymentDetailScreen(s.ctx, entry)
 		return s, func() tea.Msg {
 			return openTabMsg{
 				Kind:        tabPayment,
-				Label:       label,
-				Index:       idx,
+				Label:       screen.label(),
+				Key:         screen.key,
 				Screen:      screen,
 				FocusTabBar: true,
 			}
@@ -232,12 +214,6 @@ func (s *WalletHomeScreen) openPairing() (
 func (s *WalletHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
-	switch msg := msg.(type) {
-	case paymentHistoryMsg:
-		if msg.err == nil {
-			s.entries = msg.entries
-		}
-	}
 	return s, nil
 }
 
@@ -247,6 +223,8 @@ func (s *WalletHomeScreen) View(
 	w, h int,
 ) string {
 	s.clampCursor()
+	history := s.ctx.paymentHistory()
+	entries := history.Entries()
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
@@ -276,6 +254,19 @@ func (s *WalletHomeScreen) View(
 		balanceSummaryLines(status, w)...)
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines, "")
+
+	for _, source := range []struct {
+		name        string
+		observation app.Observation[[]lndrpc.PaymentEntry]
+	}{{"Invoices", history.Invoices}, {"Payments", history.Payments}} {
+		if !source.observation.Fresh() {
+			notice := source.name + ": " + observedEmptyText(source.observation, "")
+			if source.observation.Known() {
+				notice = source.name + " stale. Retrying..."
+			}
+			headerLines = append(headerLines, " "+theme.Warning.Render(notice))
+		}
+	}
 
 	// ── Buttons ──────────────────────────────────
 	isOnButton := isFocused &&
@@ -324,11 +315,11 @@ func (s *WalletHomeScreen) View(
 	// ── Scrollable middle (payment rows) ─────────
 	var midLines []string
 
-	if len(s.entries) == 0 {
+	if len(entries) == 0 {
 		midLines = append(midLines,
-			" "+theme.Dim.Render("No payments yet."))
+			" "+theme.Dim.Render(paymentHistoryEmptyText(history)))
 	} else {
-		balances := s.computeBalances()
+		balances := s.computeBalances(entries)
 
 		negStyle := lipgloss.NewStyle().
 			Foreground(theme.ColorDanger)
@@ -337,7 +328,7 @@ func (s *WalletHomeScreen) View(
 		dimStyle := theme.Dim
 		selBg := theme.NavActive
 
-		for i, entry := range s.entries {
+		for i, entry := range entries {
 			isSelected := i == s.cursor &&
 				isFocused &&
 				s.focusZone == walletHomeZoneList
@@ -347,50 +338,35 @@ func (s *WalletHomeScreen) View(
 			dateStr := fmt.Sprintf("%-*s",
 				dateW, date)
 
-			// Failed/in-flight outgoing payments
-			// didn't move funds — flag for special
-			// rendering below.
-			isFailed := !entry.IsIncoming &&
-				entry.Status != "SUCCEEDED"
+			// Unresolved payments are not failures or proof that no funds moved.
+			unresolved := !entry.IsIncoming && entry.Status != "SUCCEEDED"
 
 			memo := entry.Memo
-			if memo == "" {
-				if entry.IsIncoming &&
-					entry.Status == "OPEN" {
+			if unresolved {
+				memo = "(" + paymentStateLabel(entry.Status) + ") " + memo
+			} else if memo == "" {
+				switch entry.Status {
+				case "OPEN":
 					memo = "(pending)"
-				} else if entry.IsIncoming &&
-					entry.Status == "EXPIRED" {
+				case "EXPIRED":
 					memo = "(expired)"
-				} else if entry.IsIncoming &&
-					entry.Status == "CANCELED" {
+				case "CANCELED":
 					memo = "(canceled)"
-				} else if entry.IsIncoming &&
-					entry.Status == "ACCEPTED" {
+				case "ACCEPTED":
 					memo = "(accepted)"
-				} else if isFailed {
-					memo = "(failed)"
-				} else {
-					memo = "—"
+				default:
+					memo = "-"
 				}
-			} else if isFailed {
-				// Has a memo but still failed —
-				// prepend status.
-				if len(memo) > memoW-11 {
-					memo = memo[:memoW-12] + ".."
-				}
-				memo = "(failed) " + memo
 			}
-			if len(memo) > memoW-1 {
-				memo = memo[:memoW-2] + ".."
-			}
-			memoStr := fmt.Sprintf("%-*s",
-				memoW, memo)
+
+			memo = ansi.Truncate(memo, memoW-1, "..")
+			memoStr := pad(memo, memoW)
 
 			var valStr string
-			if isFailed {
-				// No funds moved — show dash
+			if unresolved {
+				// Do not present unresolved transfers as settled value.
 				valStr = fmt.Sprintf("%*s",
-					valW, "—")
+					valW, "-")
 			} else if entry.IsIncoming {
 				valStr = fmt.Sprintf("%*s", valW,
 					formatSats(entry.AmountSats))
@@ -400,13 +376,12 @@ func (s *WalletHomeScreen) View(
 						entry.AmountSats))
 			}
 
-			// OPEN/EXPIRED incoming and failed
-			// outgoing: no balance impact
+			// Only settled records participate in the existing balance display.
 			var balStr string
 			if (entry.IsIncoming &&
 				entry.Status != "SETTLED") ||
-				isFailed {
-				balStr = fmt.Sprintf("%*s", balW, "—")
+				unresolved {
+				balStr = fmt.Sprintf("%*s", balW, "-")
 			} else if i >= len(balances) {
 				balStr = fmt.Sprintf("%*s", balW, "N/A")
 			} else {
@@ -424,8 +399,8 @@ func (s *WalletHomeScreen) View(
 						selBg.Render(memoStr)+
 						selBg.Render(valStr)+
 						selBg.Render(balStr))
-			} else if isFailed {
-				// Entire row dimmed for failed
+			} else if unresolved {
+				// Keep unsettled outgoing records visually subdued.
 				midLines = append(midLines,
 					marker+
 						dimStyle.Render(dateStr)+
@@ -439,7 +414,7 @@ func (s *WalletHomeScreen) View(
 					valRendered =
 						posStyle.Render(valStr)
 				} else if entry.IsIncoming {
-					// OPEN or EXPIRED — dim
+					// Unsettled invoice value is still a requested amount.
 					valRendered =
 						dimStyle.Render(valStr)
 				} else {
@@ -486,7 +461,7 @@ func (s *WalletHomeScreen) View(
 	vpRendered := renderViewport(
 		midContent, w, vpH, s.cursor,
 		len(midLines),
-		len(s.entries) > 0 &&
+		len(entries) > 0 &&
 			s.focusZone == walletHomeZoneList)
 
 	// ── Assemble output ──────────────────────────
@@ -509,18 +484,19 @@ func (s *WalletHomeScreen) HelpBindings() []key.Binding {
 
 // ── Helpers ─────────────────────────────────────────────
 
-func (s *WalletHomeScreen) computeBalances() []int64 {
-	if s.ctx.Status == nil || !s.ctx.Status.Channels.Fresh() {
+func (s *WalletHomeScreen) computeBalances(entries []lndrpc.PaymentEntry) []int64 {
+	history := s.ctx.paymentHistory()
+	if !history.Fresh() || s.ctx.Status == nil || !s.ctx.Status.Channels.Fresh() {
 		return nil
 	}
-	balances := make([]int64, len(s.entries))
+	balances := make([]int64, len(entries))
 	var runBal int64
 	for _, ch := range s.ctx.Status.Channels.Value.Channels {
 		runBal += ch.LocalBalance
 	}
-	for i := 0; i < len(s.entries); i++ {
+	for i := 0; i < len(entries); i++ {
 		balances[i] = runBal
-		entry := s.entries[i]
+		entry := entries[i]
 		if entry.IsIncoming &&
 			entry.Status == "SETTLED" {
 			runBal -= entry.AmountSats
@@ -536,14 +512,39 @@ func (s *WalletHomeScreen) computeBalances() []int64 {
 }
 
 func (s *WalletHomeScreen) clampCursor() {
-	if len(s.entries) == 0 {
+	history := s.ctx.paymentHistory()
+	count := len(history.Invoices.Value) + len(history.Payments.Value)
+	if count == 0 {
 		s.cursor = 0
 		return
 	}
-	if s.cursor >= len(s.entries) {
-		s.cursor = len(s.entries) - 1
+	if s.cursor >= count {
+		s.cursor = count - 1
 	}
 	if s.cursor < 0 {
 		s.cursor = 0
+	}
+}
+
+func paymentHistoryEmptyText(history app.PaymentHistorySnapshot) string {
+	if history.Fresh() {
+		return "No payments in the recent history window."
+	}
+	if history.Invoices.Err != nil || history.Payments.Err != nil {
+		return "History unavailable. Retrying..."
+	}
+	return "Loading..."
+}
+
+func paymentStateLabel(state string) string {
+	switch state {
+	case "FAILED":
+		return "failed"
+	case "IN_FLIGHT":
+		return "in flight"
+	case "INITIATED":
+		return "initiated"
+	default:
+		return "unknown"
 	}
 }

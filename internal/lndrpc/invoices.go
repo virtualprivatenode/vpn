@@ -1,6 +1,7 @@
 package lndrpc
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -32,10 +33,11 @@ type DecodedPayReq struct {
 }
 
 type PaymentEntry struct {
+	Index          uint64 // LND invoice add index or outgoing payment index.
 	PaymentHash    string
 	AmountSats     int64
 	FeeSats        int64
-	Status         string // SUCCEEDED, FAILED, IN_FLIGHT
+	Status         string // Native payment/invoice state, with EXPIRED derived for open invoices.
 	CreationDate   int64
 	Preimage       string
 	PaymentRequest string
@@ -89,11 +91,15 @@ func (c *Client) AddInvoice(amountSats int64, memo string, blind bool) (*Invoice
 
 // DecodePayReq decodes a bolt11 payment request without paying it.
 func (c *Client) DecodePayReq(payReq string) (*DecodedPayReq, error) {
+	return c.decodePayReqContext(context.Background(), payReq)
+}
+
+func (c *Client) decodePayReqContext(parent context.Context, payReq string) (*DecodedPayReq, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.DecodePayReq(ctx, &lnrpc.PayReqString{
@@ -166,13 +172,13 @@ func (c *Client) LookupInvoice(paymentHash []byte) (*Invoice, error) {
 
 // ── Invoice listing ──────────────────────────────────────
 
-// ListInvoices returns recent invoices (received payments).
-func (c *Client) ListInvoices(limit uint64) ([]PaymentEntry, error) {
+// ListInvoicesContext returns the recent invoice window, including unsettled invoices.
+func (c *Client) ListInvoicesContext(parent context.Context, limit uint64) ([]PaymentEntry, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.ListInvoices(ctx, &lnrpc.ListInvoiceRequest{
@@ -210,12 +216,17 @@ func (c *Client) ListInvoices(limit uint64) ([]PaymentEntry, error) {
 				status = "EXPIRED"
 			}
 		default:
-			status = "OPEN"
+			status = inv.GetState().String()
 		}
 
+		amount := inv.GetValue()
+		if inv.GetState() == lnrpc.Invoice_SETTLED {
+			amount = inv.GetAmtPaidSat()
+		}
 		entries = append(entries, PaymentEntry{
+			Index:        inv.GetAddIndex(),
 			PaymentHash:  fmt.Sprintf("%x", inv.GetRHash()),
-			AmountSats:   inv.GetValue(),
+			AmountSats:   amount,
 			Status:       status,
 			CreationDate: inv.GetCreationDate(),
 			IsIncoming:   true,
@@ -227,13 +238,13 @@ func (c *Client) ListInvoices(limit uint64) ([]PaymentEntry, error) {
 
 // ── Payment listing ──────────────────────────────────────
 
-// ListPayments returns recent outgoing payments.
-func (c *Client) ListPayments(limit uint64) ([]PaymentEntry, error) {
+// ListPaymentsContext returns recent outgoing payments, including incomplete attempts.
+func (c *Client) ListPaymentsContext(parent context.Context, limit uint64) ([]PaymentEntry, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.ListPayments(ctx, &lnrpc.ListPaymentsRequest{
@@ -249,6 +260,7 @@ func (c *Client) ListPayments(limit uint64) ([]PaymentEntry, error) {
 	var entries []PaymentEntry
 	for _, pay := range resp.GetPayments() {
 		entry := PaymentEntry{
+			Index:          pay.GetPaymentIndex(),
 			PaymentHash:    pay.GetPaymentHash(),
 			AmountSats:     pay.GetValueSat(),
 			FeeSats:        pay.GetFeeSat(),
@@ -275,18 +287,23 @@ func (c *Client) ListPayments(limit uint64) ([]PaymentEntry, error) {
 			}
 		}
 		for i := range entry.Hops {
-			entry.Hops[i].Alias = c.getPeerAlias(
-				entry.Hops[i].PubKey)
+			entry.Hops[i].Alias = c.getPeerAliasContext(ctx, entry.Hops[i].PubKey)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 		}
 
 		// Decode payment request for memo
-		if entry.PaymentRequest != "" && c.rpc() != nil {
-			decoded, err := c.DecodePayReq(entry.PaymentRequest)
+		if entry.PaymentRequest != "" {
+			decoded, err := c.decodePayReqContext(ctx, entry.PaymentRequest)
 			if err == nil {
 				entry.Memo = decoded.Description
 			}
 		}
 
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		entries = append(entries, entry)
 	}
 	return entries, nil

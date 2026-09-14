@@ -185,11 +185,6 @@ type sendPaymentResultMsg struct {
 	result  *lndrpc.SendPaymentResult
 	err     error
 }
-type paymentHistoryMsg struct {
-	entries []lndrpc.PaymentEntry
-	err     error
-}
-
 type onChainSendAttempt struct{ prepared app.PreparedOnChainSend }
 
 type sendCoinsResultMsg struct {
@@ -319,6 +314,7 @@ func NewModel(
 		Version:         version,
 	}
 	m.screenCtx.OnChain = &OnChainContext{reader: app.NewOnChainReader()}
+	m.screenCtx.PaymentHistory = &paymentHistoryContext{reader: app.NewPaymentHistoryReader()}
 	m.sectionScreens[secChannels] =
 		NewChannelsHomeScreen(m.screenCtx)
 	m.sectionScreens[secWallet] =
@@ -356,6 +352,9 @@ func (m Model) pollInterval() time.Duration {
 		(m.screenCtx.OnChain.Utxos.Err != nil || m.screenCtx.OnChain.OnChainTxs.Err != nil) {
 		return 5 * time.Second
 	}
+	if m.nav.ActiveSection() == secWallet && m.screenCtx.PaymentHistory != nil && !m.screenCtx.PaymentHistory.Fresh() {
+		return 5 * time.Second
+	}
 	return 60 * time.Second
 }
 
@@ -368,6 +367,7 @@ func Show(
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
 		m.screenCtx.OnChain.reader.Close()
+		m.screenCtx.PaymentHistory.reader.Close()
 		m.statusCollector.Close()
 		if m.screenCtx.AutoUnlock != nil {
 			m.screenCtx.AutoUnlock.Close()

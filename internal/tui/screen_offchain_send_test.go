@@ -115,7 +115,7 @@ func TestPaymentResponseCannotCrossScreenInstances(t *testing.T) {
 	}
 }
 
-func TestPaymentOutcomeHeadings(t *testing.T) {
+func TestPaymentOutcomesReachHiddenWalletAndRefreshHistory(t *testing.T) {
 	theme.Init(true)
 	for _, tc := range []struct {
 		name, status, heading string
@@ -130,10 +130,25 @@ func TestPaymentOutcomeHeadings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &screenPaymentClient{result: &lndrpc.SendPaymentResult{Status: tc.status}, err: tc.err}
 			s := paymentScreen(client)
+			r := &historyTestReader{next: historySnapshot(nil, nil)}
+			s.ctx.PaymentHistory = &paymentHistoryContext{reader: r, scope: s.ctx.walletObservationScope()}
+			m := Model{nav: NewNavSidebar(), screenCtx: s.ctx, tabs: []openTab{{Kind: tabSend, Section: secWallet, Screen: s}}}
 			decode := submitInvoice(t, s, "lnbc1example")
-			s.HandleMsg(decode())
+			statusUpdate(&m, decode())
+			if s.step != sendStepConfirm {
+				t.Fatal("hidden payment tab lost its decoded invoice")
+			}
 			_, send := s.handleConfirmKey("enter")
-			s.HandleMsg(send())
+			result := send()
+			changed := statusUpdate(&m, result)
+			if !isHistoryChange(changed) {
+				t.Fatal("accepted payment result omitted history invalidation")
+			}
+			read := statusUpdate(&m, changed())
+			statusUpdate(&m, read())
+			if r.calls != 1 || !s.ctx.PaymentHistory.Fresh() || statusUpdate(&m, result) != nil {
+				t.Fatal("hidden payment result lost history or duplicate triggered refresh")
+			}
 			view := s.View(82, 34)
 			if !strings.Contains(view, tc.heading) {
 				t.Fatalf("missing %q in %s", tc.heading, view)
@@ -148,23 +163,5 @@ func TestPaymentOutcomeHeadings(t *testing.T) {
 				t.Fatal("retried a payment")
 			}
 		})
-	}
-}
-
-func TestPaymentResultsReachHiddenWalletSection(t *testing.T) {
-	client := &screenPaymentClient{result: &lndrpc.SendPaymentResult{Status: "SUCCEEDED"}}
-	s := paymentScreen(client)
-	m := Model{nav: NewNavSidebar(), screenCtx: s.ctx,
-		tabs: []openTab{{Kind: tabSend, Section: secWallet, Screen: s}}}
-	decode := submitInvoice(t, s, "lnbc1approved")
-	updated, _ := m.Update(decode())
-	m = updated.(Model)
-	if s.step != sendStepConfirm {
-		t.Fatal("hidden payment tab lost its decoded invoice")
-	}
-	_, send := s.HandleKey("enter", tea.KeyPressMsg{})
-	m.Update(send())
-	if s.step != sendStepResult || s.result.Status != "SUCCEEDED" {
-		t.Fatal("hidden payment tab lost its payment result")
 	}
 }

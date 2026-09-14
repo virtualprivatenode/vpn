@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
 type onChainReader interface {
@@ -14,16 +13,9 @@ type onChainReader interface {
 	Close()
 }
 
-type onChainScope struct {
-	network      string
-	walletExists bool
-	generation   uint64
-	client       *lndrpc.Client
-}
-
 type onChainRequest struct {
 	owner    *OnChainContext
-	scope    onChainScope
+	scope    walletObservationScope
 	revision uint64
 }
 
@@ -34,17 +26,6 @@ type onChainResultMsg struct {
 }
 
 func requestOnChainCmd() tea.Msg { return refreshOnChainMsg{} }
-
-func (c *ScreenContext) onChainScope() onChainScope {
-	scope := onChainScope{generation: c.walletGeneration, client: c.LndClient}
-	if c.Cfg != nil {
-		scope.network = c.Cfg.Network
-	}
-	if c.State != nil {
-		scope.walletExists = c.State.WalletExists
-	}
-	return scope
-}
 
 func (m Model) visibleOnChainCmd() tea.Cmd {
 	if m.nav.ActiveSection() == secOnChain {
@@ -60,7 +41,7 @@ func (m *Model) admitOnChain() tea.Cmd {
 	if oc == nil || oc.reader == nil {
 		return nil
 	}
-	current := m.screenCtx.onChainScope()
+	current := m.screenCtx.walletObservationScope()
 	if oc.scope != current {
 		oc.OnChainSnapshot = app.OnChainSnapshot{}
 		oc.Selection.Clear()
@@ -91,7 +72,7 @@ func (m *Model) completeOnChain(msg onChainResultMsg) tea.Cmd {
 		return nil
 	}
 	oc.active = nil
-	current := m.screenCtx.onChainScope()
+	current := m.screenCtx.walletObservationScope()
 	if msg.request.scope == current && msg.request.revision == oc.revision {
 		msg.snapshot = msg.snapshot.Retain(oc.OnChainSnapshot)
 		if !m.screenCtx.walletKnown() {
@@ -113,16 +94,6 @@ func onChainListTitle[T any](name string, observation app.Observation[T]) string
 		return name + " (stale, retrying)"
 	}
 	return name
-}
-
-func onChainEmptyText[T any](observation app.Observation[T], empty string) string {
-	if observation.Fresh() {
-		return empty
-	}
-	if observation.Err != nil {
-		return "Unavailable. Retrying..."
-	}
-	return "Loading..."
 }
 
 func (s *OnChainHomeScreen) utxoCountText() string {
