@@ -48,6 +48,7 @@ type Screen interface {
 // read the current observation when rendering; no screen owns a second copy.
 
 type ScreenContext struct {
+	ChannelHistory      *channelHistoryContext
 	PaymentHistory      *paymentHistoryContext
 	OnChain             *OnChainContext
 	AutoUnlock          autoUnlockChanges
@@ -117,6 +118,9 @@ func (c *ScreenContext) invalidateWalletObservations() {
 	c.walletRevision++
 	c.walletGeneration++
 	c.Status = nil
+	if c.ChannelHistory != nil {
+		c.ChannelHistory.ChannelHistorySnapshot = app.ChannelHistorySnapshot{}
+	}
 	if c.PaymentHistory != nil {
 		c.PaymentHistory.PaymentHistorySnapshot = app.PaymentHistorySnapshot{}
 	}

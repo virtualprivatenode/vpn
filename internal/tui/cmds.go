@@ -3,7 +3,6 @@
 package tui
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
@@ -135,20 +133,6 @@ func closeFeeTiersCmd(screen *ChannelCloseScreen) tea.Cmd {
 	return func() tea.Msg {
 		msg := fetch().(feeTiersMsg)
 		return channelCloseFeesMsg{screen: screen, tiers: msg.tiers, err: msg.err}
-	}
-}
-
-func fetchClosedChannelsCmd(
-	client *lndrpc.Client,
-) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return closedChannelsMsg{
-				err: fmt.Errorf("LND not connected")}
-		}
-		channels, err := client.ListClosedChannels()
-		return closedChannelsMsg{
-			channels: channels, err: err}
 	}
 }
 

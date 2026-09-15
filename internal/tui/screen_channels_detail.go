@@ -7,15 +7,17 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
 // ChannelDetailScreen retains the selected funding outpoint and owns its close
 // flow. The embedded screen owns approval and the result for that channel.
 type ChannelDetailScreen struct {
-	ctx         *ScreenContext
-	channel     channelInfo
-	unavailable bool
+	ctx   *ScreenContext
+	point string
+	scope walletObservationScope
 
 	// Button index for detail view (0=Cancel, 1=Close)
 	viewBtnIdx int
@@ -31,8 +33,9 @@ func NewChannelDetailScreen(
 	ch channelInfo,
 ) *ChannelDetailScreen {
 	return &ChannelDetailScreen{
-		ctx:     ctx,
-		channel: ch,
+		ctx:   ctx,
+		point: ch.ChannelPoint,
+		scope: ctx.walletObservationScope(),
 	}
 }
 
@@ -56,13 +59,21 @@ func (s *ChannelDetailScreen) HandleKey(
 		return s, cmd
 	}
 
-	// Pending or unavailable channels have no close action.
-	if s.channel.Pending || s.unavailable {
+	ch, _, found := s.record()
+	if !found || ch.Pending {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
+		case "left":
+			return s, emitFocusSidebar
+		case "backspace":
+			return s, emitFocusParent
+		case "up", "shift+tab":
+			if s.ctx.HasTabs {
+				return s, emitFocusTabBar
+			}
 		}
-		return s, emitFocusTabBar
+		return s, nil
 	}
 
 	// Non-pending: Cancel / Close Channel buttons
@@ -107,25 +118,7 @@ func (s *ChannelDetailScreen) HandleMsg(
 		s.closeScreen = newClose.(*ChannelCloseScreen)
 		return s, cmd
 	}
-	switch msg.(type) {
-	case tabActivatedMsg:
-		// Re-find the channel in live status data
-		// so the detail view reflects any changes
-		// since this tab was last viewed (e.g.
-		// balance change after payment settlement).
-		if s.ctx.Status != nil && s.ctx.Status.Channels.Known() {
-			s.unavailable = true
-			for _, ch := range s.ctx.Status.Channels.Value.Channels {
-				if ch.ChannelPoint ==
-					s.channel.ChannelPoint {
-					s.unavailable = false
-					s.channel = ch
-					break
-				}
-			}
-		}
-		return s, nil
-	}
+
 	return s, nil
 }
 
@@ -136,8 +129,11 @@ func (s *ChannelDetailScreen) View(
 		return s.closeScreen.View(w, h)
 	}
 
-	ch := s.channel
+	ch, notice, found := s.record()
 	p := newPane(w)
+	if !found {
+		return p.title(theme.Header, "Channel Detail").warnWrap(notice).render()
+	}
 
 	name := ch.PeerAlias
 	if name == "" {
@@ -146,7 +142,7 @@ func (s *ChannelDetailScreen) View(
 			name = name[:16] + "..."
 		}
 	}
-	p.title(theme.Header, name)
+	p.title(theme.Header, ansi.Truncate(name, max(0, w-2), "..."))
 
 	status := theme.Success.Render("active")
 	if !ch.Active {
@@ -155,12 +151,9 @@ func (s *ChannelDetailScreen) View(
 	if ch.Pending {
 		status = theme.Dim.Render("pending")
 	}
-	if s.unavailable {
-		status = theme.Warning.Render("unavailable; check pending channels and history")
-	}
 
-	if s.ctx.Status != nil && !s.ctx.Status.Channels.Fresh() {
-		p.warn("Channel data stale; refresh unavailable.")
+	if notice != "" {
+		p.warnWrap(notice)
 	}
 	p.line(" " + theme.Label.Render("Status:    ") +
 		status)
@@ -206,7 +199,7 @@ func (s *ChannelDetailScreen) View(
 	}
 
 	// Only available open channels offer a close action.
-	if !ch.Pending && !s.unavailable {
+	if !ch.Pending {
 		btnFocused := s.ctx.ContentFocused
 		return p.renderWithBottomButtons(
 			[]string{"Cancel", "Close Channel"},
@@ -220,7 +213,8 @@ func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
 	if s.closeScreen != nil {
 		return s.closeScreen.HelpBindings()
 	}
-	if s.channel.Pending || s.unavailable {
+	ch, _, found := s.record()
+	if !found || ch.Pending {
 		return viewDetailBindings(s.ctx.HasTabs)
 	}
 	return detailActionBindings(
@@ -232,14 +226,37 @@ func (s *ChannelDetailScreen) HelpBindings() []key.Binding {
 func (s *ChannelDetailScreen) launchClose() (
 	Screen, tea.Cmd,
 ) {
-	if s.unavailable || s.channel.Pending || !s.ctx.walletExists() {
+	ch, _, found := s.record()
+	if !found || ch.Pending || !s.ctx.walletExists() {
 		return s, nil
 	}
 	s.closeScreen = NewChannelCloseScreen(
 		s.ctx,
-		s.channel.ChannelPoint,
-		s.channel.PeerAlias,
-		s.channel.Capacity,
-		s.channel.LocalBalance)
+		ch.ChannelPoint,
+		ch.PeerAlias,
+		ch.Capacity,
+		ch.LocalBalance)
 	return s, closeFeeTiersCmd(s.closeScreen)
+}
+
+func (s *ChannelDetailScreen) current() bool { return s.scope == s.ctx.walletObservationScope() }
+
+func (s *ChannelDetailScreen) record() (channelInfo, string, bool) {
+	if !s.current() {
+		return channelInfo{}, previousWalletDetail, false
+	}
+	observation := s.ctx.channelObservation()
+	return observedListRecord(app.Observation[[]channelInfo]{Value: observation.Value.Channels, ObservedAt: observation.ObservedAt, Err: observation.Err}, func(ch channelInfo) bool { return ch.ChannelPoint == s.point })
+}
+
+func (s *ChannelDetailScreen) label() string {
+	ch, _, found := s.record()
+	if !found {
+		return "Channel"
+	}
+	label := ch.PeerAlias
+	if label == "" {
+		label = ch.RemotePubkey
+	}
+	return ansi.Truncate(label, 20, "...")
 }

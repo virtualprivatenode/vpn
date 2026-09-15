@@ -288,13 +288,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if msg.Kind == tabChannelHistory {
+			history, ok := msg.Screen.(*ChannelHistoryScreen)
+			if !ok || history.ctx != m.screenCtx || !history.current() || m.nav.ActiveSection() != secChannels {
+				return m, nil
+			}
+			for _, tab := range m.effectiveTabs() {
+				if old, ok := tab.Screen.(*ChannelHistoryScreen); ok && !old.current() {
+					msg.Replace = true
+				}
+			}
+		}
 		if msg.Kind == tabChannel {
 			detail, ok := msg.Screen.(*ChannelDetailScreen)
-			if !ok || msg.Key == "" || detail.channel.ChannelPoint != msg.Key || m.nav.ActiveSection() != secChannels {
+			if !ok || msg.Key == "" || detail.point != msg.Key || detail.ctx != m.screenCtx || !detail.current() || m.nav.ActiveSection() != secChannels {
 				return m, nil
 			}
 			for i, tab := range m.effectiveTabs() {
 				if tab.Kind == tabChannel && tab.Key == msg.Key {
+					// Explicit reopening can adopt the current wallet scope. An
+					// existing close flow keeps its reviewed identity and result.
+					if old, ok := tab.Screen.(*ChannelDetailScreen); ok && !old.current() && old.closeScreen == nil {
+						m.setTabScreen(i, msg.Screen)
+					}
 					m.activeTab = i
 					m.rememberTabPosition()
 					m.focusContent()
@@ -430,6 +446,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.state.WalletKnown = false
+			if m.screenCtx.ChannelHistory != nil {
+				m.screenCtx.ChannelHistory.Closed.Err = msg.err
+			}
 			if m.screenCtx.PaymentHistory != nil {
 				m.screenCtx.PaymentHistory.PaymentHistorySnapshot = m.screenCtx.PaymentHistory.Unavailable(msg.err)
 			}
@@ -571,9 +590,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
-	case closedChannelsMsg:
-		// Route to history screen so it gets the data
-		return m.dispatchToTab(tabChannelHistory, msg)
+	case refreshChannelHistoryMsg:
+		if msg.changed {
+			m.statusRevision++
+			if m.screenCtx.Status != nil {
+				m.screenCtx.Status.Channels.Err = errors.New("channel state changed")
+			}
+			if history := m.screenCtx.ChannelHistory; history != nil {
+				history.revision++
+				history.Closed.Err = errors.New("channel state changed")
+			}
+			return m, tea.Batch(requestStatusCmd, m.admitChannelHistory())
+		}
+		return m, m.admitChannelHistory()
+	case channelHistoryResultMsg:
+		return m, m.completeChannelHistory(msg)
 	case labelTxMsg:
 		if msg.owner != nil && m.sectionScreens[secOnChain] == msg.owner {
 			_, cmd := msg.owner.HandleMsg(msg)
@@ -776,111 +807,6 @@ func (m Model) handleKey(
 	return m, nil
 }
 
-func buildChannelHistoryEntries(
-	channels []channelInfo,
-	waiting []lndrpc.WaitingCloseChannel,
-	pending []lndrpc.PendingForceCloseChannel,
-	closed []lndrpc.ClosedChannel,
-) []channelHistoryEntry {
-	var entries []channelHistoryEntry
-
-	// Active and inactive channels
-	for _, ch := range channels {
-		if ch.Pending {
-			entries = append(entries,
-				channelHistoryEntry{
-					PeerAlias:    ch.PeerAlias,
-					RemotePubkey: ch.RemotePubkey,
-					Capacity:     ch.Capacity,
-					LocalBalance: ch.LocalBalance,
-					Status:       "pending open",
-					CloseType:    "—",
-					Active:       false,
-				})
-			continue
-		}
-		status := "active"
-		if !ch.Active {
-			status = "inactive"
-		}
-		entries = append(entries,
-			channelHistoryEntry{
-				PeerAlias:    ch.PeerAlias,
-				RemotePubkey: ch.RemotePubkey,
-				Capacity:     ch.Capacity,
-				LocalBalance: ch.LocalBalance,
-				Status:       status,
-				CloseType:    "—",
-				Active:       ch.Active,
-			})
-	}
-
-	// Waiting close channels (close tx broadcast,
-	// not yet confirmed)
-	for _, wc := range waiting {
-		entries = append(entries,
-			channelHistoryEntry{
-				PeerAlias:    wc.PeerAlias,
-				RemotePubkey: wc.RemotePubkey,
-				Capacity:     wc.Capacity,
-				LocalBalance: wc.LocalBalance,
-				LimboBalance: wc.LimboBalance,
-				Status:       "waiting close",
-				CloseType:    "closing",
-				ClosingTxid:  wc.ClosingTxid,
-				Active:       false,
-			})
-	}
-
-	// Pending force close channels
-	for _, fc := range pending {
-		entries = append(entries,
-			channelHistoryEntry{
-				PeerAlias:       fc.PeerAlias,
-				RemotePubkey:    fc.RemotePubkey,
-				Capacity:        fc.Capacity,
-				LocalBalance:    fc.LocalBalance,
-				LimboBalance:    fc.LimboBalance,
-				Status:          "force close",
-				CloseType:       "force",
-				ClosingTxid:     fc.ClosingTxid,
-				BlocksRemaining: fc.BlocksRemaining,
-				Active:          false,
-			})
-	}
-
-	// Closed channels
-	for _, ch := range closed {
-		closeLabel := ch.CloseType
-		switch closeLabel {
-		case "cooperative":
-			closeLabel = "coop"
-		case "force":
-			closeLabel = "force"
-		case "breach":
-			closeLabel = "breach"
-		case "canceled":
-			closeLabel = "canceled"
-		case "abandoned":
-			closeLabel = "abandoned"
-		}
-
-		entries = append(entries,
-			channelHistoryEntry{
-				PeerAlias:    ch.PeerAlias,
-				RemotePubkey: ch.RemotePubkey,
-				Capacity:     ch.Capacity,
-				Status:       "closed",
-				CloseType:    closeLabel,
-				ClosingTxid:  ch.ClosingTxid,
-				SettledBal:   ch.SettledBal,
-				CloseHeight:  ch.CloseHeight,
-			})
-	}
-
-	return entries
-}
-
 // ── Sidebar keys ─────────────────────────────────────────
 
 func (m Model) handleSidebarKey(
@@ -946,8 +872,7 @@ func (m Model) previewSection(
 ) (tea.Model, tea.Cmd) {
 	switch sec {
 	case secChannels:
-		return m,
-			requestStatusCmd
+		return m, tea.Batch(requestStatusCmd, m.visibleChannelHistoryCmd())
 	case secWallet:
 		return m,
 			requestPaymentHistoryCmd

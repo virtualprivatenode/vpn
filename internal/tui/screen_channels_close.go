@@ -411,7 +411,7 @@ func (s *ChannelCloseScreen) handleCloseResult(msg channelCloseResultMsg) (Scree
 	}
 	s.result = msg.result
 	s.step = closeStepResult
-	return s, emitRefreshStatus
+	return s, channelHistoryChangedCmd
 }
 
 func (s *ChannelCloseScreen) prepareClose() (Screen, tea.Cmd) {

@@ -191,13 +191,14 @@ func TestChannelRefreshAndResultOwnership(t *testing.T) {
 		t.Fatal("old attempt completed another screen")
 	}
 	m := Model{nav: NewNavSidebar(), screenCtx: current.ctx, activeTab: 1, tabs: []openTab{{Kind: tabOpenChannel, Section: secChannels, Screen: current}}}
+	m.nav.ActiveItem = secChannels
 	closed, _ := m.closeTab(1)
 	if len(closed.(Model).tabs) != 1 {
 		t.Fatal("closed a pending channel submission")
 	}
 	replaced, _ := m.Update(openTabMsg{Kind: tabOpenChannel, Screen: s, Replace: true})
 	m = replaced.(Model)
-	if m.tabs[0].Screen != current {
+	if len(m.tabs) != 1 || m.tabs[0].Screen != current {
 		t.Fatal("replaced a pending channel submission")
 	}
 	// Hide Channels so completion must reach the retained tab across sections.

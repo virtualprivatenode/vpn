@@ -7,38 +7,68 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── ChannelHistoryScreen ───────────────────────────────
-// Scrollable table of closed channels.
-
+// ChannelHistoryScreen renders independently observed current and closed channels.
 type ChannelHistoryScreen struct {
-	ctx     *ScreenContext
-	entries []channelHistoryEntry
-	cursor  int
+	ctx            *ScreenContext
+	owner          *channelHistoryContext
+	scope          walletObservationScope
+	cursor         int
+	selectedPoint  string
+	selectedClosed bool
 }
 
-func NewChannelHistoryScreen(
-	ctx *ScreenContext,
-	entries []channelHistoryEntry,
-) *ChannelHistoryScreen {
-	return &ChannelHistoryScreen{
-		ctx:     ctx,
-		entries: entries,
+func NewChannelHistoryScreen(ctx *ScreenContext) *ChannelHistoryScreen {
+	return &ChannelHistoryScreen{ctx: ctx, owner: ctx.ChannelHistory, scope: ctx.walletObservationScope()}
+}
+
+func (s *ChannelHistoryScreen) current() bool {
+	return s.owner != nil && s.owner == s.ctx.ChannelHistory && s.scope == s.ctx.walletObservationScope()
+}
+
+func (s *ChannelHistoryScreen) entries() []app.ChannelHistoryEntry {
+	if !s.current() {
+		return nil
 	}
+	history := s.owner.ChannelHistorySnapshot
+	if s.owner.scope != s.scope {
+		history = app.ChannelHistorySnapshot{}
+	}
+	return history.Entries(s.ctx.channelObservation())
+}
+
+func (s *ChannelHistoryScreen) followSelection(entries []app.ChannelHistoryEntry) {
+	for i, entry := range entries {
+		if s.selectedPoint != "" && entry.ChannelPoint == s.selectedPoint && (entry.Status == "closed") == s.selectedClosed {
+			s.cursor = i
+			return
+		}
+	}
+	s.cursor = min(s.cursor, max(0, len(entries)-1))
 }
 
 // ── Screen interface ────────────────────────────────────
 
 func (s *ChannelHistoryScreen) Init() tea.Cmd {
-	return nil
+	return tea.Batch(requestStatusCmd, requestChannelHistoryCmd)
 }
 
 func (s *ChannelHistoryScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
+	entries := s.entries()
+	s.followSelection(entries)
+	defer func() {
+		if len(entries) > 0 {
+			s.selectedPoint = entries[s.cursor].ChannelPoint
+			s.selectedClosed = entries[s.cursor].Status == "closed"
+		}
+	}()
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
@@ -51,7 +81,7 @@ func (s *ChannelHistoryScreen) HandleKey(
 			return s, emitFocusTabBar
 		}
 	case "down", "tab":
-		if s.cursor < len(s.entries)-1 {
+		if s.cursor < len(entries)-1 {
 			s.cursor++
 		}
 	case "shift+tab":
@@ -67,34 +97,8 @@ func (s *ChannelHistoryScreen) HandleKey(
 func (s *ChannelHistoryScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tabActivatedMsg:
-		// Re-fetch closed channels so the table
-		// reflects any changes since this tab was
-		// last viewed (e.g. a channel closed from
-		// the detail tab). The closedChannelsMsg
-		// handler below rebuilds entries from
-		// current status + fresh closed data.
-		return s, fetchClosedChannelsCmd(
-			s.ctx.LndClient)
-	case closedChannelsMsg:
-		if msg.err == nil {
-			// Rebuild entries with current channel
-			// data from status + closed channels
-			var channels []channelInfo
-			var waiting []lndrpc.WaitingCloseChannel
-			var pending []lndrpc.PendingForceCloseChannel
-			if s.ctx.Status != nil {
-				channels = s.ctx.Status.Channels.Value.Channels
-				waiting =
-					s.ctx.Status.Channels.Value.Pending.WaitingCloseChannels
-				pending =
-					s.ctx.Status.Channels.Value.Pending.PendingForceCloseChannels
-			}
-			s.entries = buildChannelHistoryEntries(
-				channels, waiting, pending,
-				msg.channels)
-		}
+	if _, ok := msg.(tabActivatedMsg); ok && s.current() {
+		return s, tea.Batch(requestStatusCmd, requestChannelHistoryCmd)
 	}
 	return s, nil
 }
@@ -102,6 +106,15 @@ func (s *ChannelHistoryScreen) HandleMsg(
 func (s *ChannelHistoryScreen) View(
 	w, h int,
 ) string {
+	entries := s.entries()
+	s.followSelection(entries)
+	if len(entries) > 0 {
+		s.selectedPoint = entries[s.cursor].ChannelPoint
+		s.selectedClosed = entries[s.cursor].Status == "closed"
+	}
+	if !s.current() {
+		return newPane(w).title(theme.Header, "Channel History").warnWrap(previousWalletDetail).render()
+	}
 	var headerLines []string
 	headerLines = append(headerLines, "")
 	headerLines = append(headerLines,
@@ -110,10 +123,23 @@ func (s *ChannelHistoryScreen) View(
 			w))
 	headerLines = append(headerLines, "")
 
-	if len(s.entries) == 0 {
+	current := s.ctx.channelObservation()
+	closed := s.owner.Closed
+	if s.owner.scope != s.scope {
+		closed = app.Observation[[]lndrpc.ClosedChannel]{}
+	}
+	for _, notice := range []string{channelSourceNotice("Current channels", current.Known(), current.Err), channelSourceNotice("Closed channels", closed.Known(), closed.Err)} {
+		if notice != "" {
+			headerLines = append(headerLines, " "+theme.Warning.Render(notice))
+		}
+	}
+	if len(entries) == 0 {
+		empty := "Channel history is not fully available."
+		if current.Fresh() && closed.Fresh() {
+			empty = "No channel history."
+		}
 		headerLines = append(headerLines,
-			" "+theme.Dim.Render(
-				"No channel history."))
+			" "+theme.Dim.Render(empty))
 		return strings.Join(headerLines, "\n")
 	}
 
@@ -151,7 +177,7 @@ func (s *ChannelHistoryScreen) View(
 
 	selStyle := theme.NavActive
 
-	for i, ch := range s.entries {
+	for i, ch := range entries {
 		isSelected := isFocused &&
 			s.cursor == i
 
@@ -163,9 +189,7 @@ func (s *ChannelHistoryScreen) View(
 				peer = ch.RemotePubkey
 			}
 		}
-		if len(peer) > peerW-1 {
-			peer = peer[:peerW-2] + ".."
-		}
+		peer = ansi.Truncate(peer, peerW-1, "..")
 		peerStr := pad(peer, peerW)
 
 		capStr := fmt.Sprintf("%*s", capW,
@@ -173,9 +197,13 @@ func (s *ChannelHistoryScreen) View(
 
 		statusStr := pad("  "+ch.Status, statusW)
 		closeLabel := ch.CloseType
-		if ch.Status == "waiting close" {
-			closeLabel = "unconfirmed"
-		} else if ch.BlocksRemaining > 0 {
+		if closeLabel == "" {
+			closeLabel = "-"
+		}
+		if closeLabel == "cooperative" {
+			closeLabel = "coop"
+		}
+		if ch.BlocksRemaining > 0 {
 			closeLabel = fmt.Sprintf("~%d blks",
 				ch.BlocksRemaining)
 		}
@@ -240,7 +268,7 @@ func (s *ChannelHistoryScreen) View(
 	vpRendered := renderViewport(
 		midContent, w, vpH, s.cursor,
 		len(midLines),
-		len(s.entries) > 0 && isFocused)
+		len(entries) > 0 && isFocused)
 
 	return header + "\n" + vpRendered
 }
@@ -252,4 +280,17 @@ func (s *ChannelHistoryScreen) HelpBindings() []key.Binding {
 	}
 	binds = append(binds, kQuit)
 	return binds
+}
+
+func channelSourceNotice(name string, known bool, err error) string {
+	if err != nil {
+		if known {
+			return name + " stale; retrying."
+		}
+		return name + " unavailable; retrying."
+	}
+	if !known {
+		return name + " loading..."
+	}
+	return ""
 }

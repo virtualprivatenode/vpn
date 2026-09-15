@@ -202,11 +202,6 @@ type channelCloseResultMsg struct {
 	result  app.ChannelCloseResult
 }
 
-type closedChannelsMsg struct {
-	channels []lndrpc.ClosedChannel
-	err      error
-}
-
 type labelTxMsg struct {
 	owner   *OnChainHomeScreen
 	attempt uint64
@@ -214,21 +209,6 @@ type labelTxMsg struct {
 }
 
 type channelInfo = app.StatusChannel
-
-type channelHistoryEntry struct {
-	PeerAlias       string
-	RemotePubkey    string
-	Capacity        int64
-	LocalBalance    int64
-	Status          string // "active", "inactive", "pending open", etc.
-	CloseType       string // "coop", "force", "breach", "—"
-	ClosingTxid     string
-	SettledBal      int64
-	CloseHeight     int32
-	BlocksRemaining int32
-	LimboBalance    int64
-	Active          bool
-}
 
 type peerOption struct {
 	Pubkey      string
@@ -262,6 +242,7 @@ type Model struct {
 	statusActive    *statusRequest
 	statusPending   bool
 	statusScope     statusScope
+	statusRevision  uint64
 
 	// QR fullscreen (Model-owned overlay)
 	urlTarget string
@@ -313,6 +294,7 @@ func NewModel(
 		LndClient:       client,
 		Version:         version,
 	}
+	m.screenCtx.ChannelHistory = &channelHistoryContext{reader: app.NewChannelHistoryReader()}
 	m.screenCtx.OnChain = &OnChainContext{reader: app.NewOnChainReader()}
 	m.screenCtx.PaymentHistory = &paymentHistoryContext{reader: app.NewPaymentHistoryReader()}
 	m.sectionScreens[secChannels] =
@@ -355,6 +337,12 @@ func (m Model) pollInterval() time.Duration {
 	if m.nav.ActiveSection() == secWallet && m.screenCtx.PaymentHistory != nil && !m.screenCtx.PaymentHistory.Fresh() {
 		return 5 * time.Second
 	}
+	if m.visibleChannelHistoryCmd() != nil && !m.screenCtx.ChannelHistory.Closed.Fresh() {
+		return 5 * time.Second
+	}
+	if m.nav.ActiveSection() == secChannels && !m.screenCtx.Status.Channels.Fresh() {
+		return 5 * time.Second
+	}
 	return 60 * time.Second
 }
 
@@ -366,6 +354,7 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		m.screenCtx.ChannelHistory.reader.Close()
 		m.screenCtx.OnChain.reader.Close()
 		m.screenCtx.PaymentHistory.reader.Close()
 		m.statusCollector.Close()

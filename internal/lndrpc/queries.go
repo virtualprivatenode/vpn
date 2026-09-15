@@ -60,6 +60,7 @@ type PendingChannelInfo struct {
 }
 
 type PendingChannel struct {
+	ChannelPoint string
 	RemotePubkey string
 	Capacity     int64
 	LocalBalance int64
@@ -292,6 +293,7 @@ func (c *Client) GetPendingChannelsContext(parent context.Context) (*PendingChan
 		if ch != nil {
 			alias := c.getPeerAliasContext(ctx, ch.GetRemoteNodePub())
 			pendingChans = append(pendingChans, PendingChannel{
+				ChannelPoint: ch.GetChannelPoint(),
 				RemotePubkey: ch.GetRemoteNodePub(),
 				Capacity:     ch.GetCapacity(),
 				LocalBalance: ch.GetLocalBalance(),
@@ -361,11 +363,15 @@ func (c *Client) GetPendingChannelsContext(parent context.Context) (*PendingChan
 func (c *Client) ListClosedChannels() (
 	[]ClosedChannel, error,
 ) {
+	return c.ListClosedChannelsContext(context.Background())
+}
+
+func (c *Client) ListClosedChannelsContext(parent context.Context) ([]ClosedChannel, error) {
 	rpc := c.rpc()
 	if rpc == nil {
 		return nil, errNotConnected
 	}
-	ctx, cancel := c.callCtx(defaultTimeout)
+	ctx, cancel := c.callCtxFrom(parent, defaultTimeout)
 	defer cancel()
 
 	resp, err := rpc.ClosedChannels(ctx,
@@ -393,8 +399,7 @@ func (c *Client) ListClosedChannels() (
 			closeType = "abandoned"
 		}
 
-		alias := c.getPeerAlias(
-			ch.GetRemotePubkey())
+		alias := c.getPeerAliasContext(ctx, ch.GetRemotePubkey())
 		if alias == "" {
 			pk := ch.GetRemotePubkey()
 			if len(pk) > 12 {
@@ -416,6 +421,9 @@ func (c *Client) ListClosedChannels() (
 		})
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return channels, nil
 }
 
