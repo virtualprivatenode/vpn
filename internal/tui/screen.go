@@ -55,6 +55,7 @@ type ScreenContext struct {
 	AutoUnlock          autoUnlockChanges
 	LoginPasswords      loginPasswordChanges
 	ServiceControls     serviceControls
+	PackageUpdates      packageUpdates
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
@@ -285,4 +286,16 @@ func (c *ScreenContext) autoUnlock() autoUnlockChanges {
 		c.AutoUnlock = app.NewAutoUnlockChanges()
 	}
 	return c.AutoUnlock
+}
+
+type packageUpdates interface {
+	Update() <-chan app.PackageUpdateResult
+	Close()
+}
+
+func (c *ScreenContext) packageUpdates() packageUpdates {
+	if c.PackageUpdates == nil {
+		c.PackageUpdates = app.NewPackageUpdates()
+	}
+	return c.PackageUpdates
 }

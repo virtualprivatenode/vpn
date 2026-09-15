@@ -525,18 +525,6 @@ func installBasePackages() error {
 		"sudo", "gnupg", "tor", "torsocks", "wget", "ufw")
 }
 
-// upgradeBasePackages brings the base image current (fresh VPS
-// images are often weeks old with unpatched CVEs). Runs AFTER
-// the firewall step per ruling xvi(b): default-deny now covers
-// the longest pre-Tor phase instead of following it. confdef +
-// confold keep existing config files on conflict — the safe
-// default on a fresh image.
-func upgradeBasePackages() error {
-	return system.SudoRun("apt-get", "upgrade", "-y", "-qq",
-		"-o", "Dpkg::Options::=--force-confdef",
-		"-o", "Dpkg::Options::=--force-confold")
-}
-
 // prepareHost absorbs the script's host fixes: hostname
 // resolution (prevents sudo delays) and NTP clock sync (Bitcoin
 // Core and LND depend on accurate time for block timestamps,
@@ -609,7 +597,7 @@ func buildInstallSteps(
 			Fn: func() error { return configureInitialFirewall(cfg) }},
 		{Key: "base.upgrade",
 			Name: "Upgrading base packages",
-			Fn:   upgradeBasePackages},
+			Fn:   host.UpgradePackages},
 		{Key: "host.prep",
 			Name: "Configuring hostname and clock sync",
 			Fn:   prepareHost},

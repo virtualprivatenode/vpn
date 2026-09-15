@@ -22,7 +22,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // StageLNDTLSCert copies LND's TLS certificate (the public
@@ -161,19 +160,4 @@ func StageBoardAll() error {
 	}
 	logger.Install("staging board complete at %s", paths.StateDir)
 	return nil
-}
-
-// PackageUpdateSteps is the package-update operation as steps
-// (the helper streams their completion to the TUI's renderer).
-// Environment (non-interactive frontend, needrestart auto) is
-// process-level, set at helper start.
-func PackageUpdateSteps() []InstallStep {
-	return []InstallStep{
-		{Name: "Refreshing package lists",
-			Fn: func() error {
-				return system.SudoRun("apt-get", "update", "-qq")
-			}},
-		{Name: "Upgrading packages",
-			Fn: upgradeBasePackages},
-	}
 }

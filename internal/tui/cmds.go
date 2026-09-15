@@ -337,24 +337,6 @@ func showNodeURIsCmd(uris []string) tea.Cmd {
 
 // ── System actions ───────────────────────────────────────
 
-// runUpdatePackagesCmd requests the helper's package-update
-// operation (apt refresh + upgrade, non-interactive, with a
-// dpkg consistency check after). The helper streams step
-// progress; this button's UX is a single busy state, so the
-// call simply blocks until the terminator.
-func runUpdatePackagesCmd() tea.Cmd {
-	return func() tea.Msg {
-		logger.Install("Update packages started")
-		err := helper.Call(helper.VerbPackageUpdate, nil, nil)
-		if err != nil {
-			logger.Install("Update packages failed: %v", err)
-		} else {
-			logger.Install("Update packages completed")
-		}
-		return pkgUpdateDoneMsg{}
-	}
-}
-
 func runRebootCmd() tea.Cmd {
 	return func() tea.Msg {
 		// The helper answers, then reboots — the connection
