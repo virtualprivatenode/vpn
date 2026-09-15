@@ -601,7 +601,7 @@ func (s *ChannelOpenScreen) handleOpenResult(
 	}
 	s.result = msg.result
 	s.step = coStepResult
-	return s, emitRefreshStatus
+	return s, channelHistoryChangedCmd
 }
 
 func (s *ChannelOpenScreen) handleFeeTiers(

@@ -154,27 +154,17 @@ func (s *ChannelsHomeScreen) handleEnter() (
 		return s, nil
 	}
 
-	// Channel list — open channel detail
+	// Open the selected channel by funding outpoint.
 	channels := s.channels()
 	if s.cursor < len(channels) &&
 		!channels[s.cursor].Pending {
 		ch := channels[s.cursor]
-		label := ch.PeerAlias
-		if label == "" {
-			label = ch.RemotePubkey
-			if len(label) > 12 {
-				label = label[:12] + ".."
-			}
-		}
-		if len(label) > 17 {
-			label = label[:17] + "..."
-		}
 		screen := NewChannelDetailScreen(
 			s.ctx, ch)
 		return s, func() tea.Msg {
 			return openTabMsg{
 				Kind:   tabChannel,
-				Label:  label,
+				Label:  screen.label(),
 				Key:    ch.ChannelPoint,
 				Screen: screen,
 			}
@@ -228,17 +218,10 @@ func (s *ChannelsHomeScreen) openNodeInfo() (
 func (s *ChannelsHomeScreen) openHistory() (
 	Screen, tea.Cmd,
 ) {
-	screen := NewChannelHistoryScreen(
-		s.ctx, nil) // entries populated by closedChannelsMsg
-	openCmd := func() tea.Msg {
-		return openTabMsg{
-			Kind:   tabChannelHistory,
-			Label:  "History",
-			Screen: screen,
-		}
+	screen := NewChannelHistoryScreen(s.ctx)
+	return s, func() tea.Msg {
+		return openTabMsg{Kind: tabChannelHistory, Label: "History", Screen: screen}
 	}
-	return s, tea.Batch(openCmd,
-		fetchClosedChannelsCmd(s.ctx.LndClient))
 }
 
 func (s *ChannelsHomeScreen) handleZeroBalanceKey(

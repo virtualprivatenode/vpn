@@ -42,6 +42,9 @@ func (m Model) visibleWalletListsCmd() tea.Cmd {
 	if m.nav.ActiveSection() == secWallet {
 		return requestPaymentHistoryCmd
 	}
+	if m.nav.ActiveSection() == secChannels {
+		return m.visibleChannelHistoryCmd()
+	}
 	return m.visibleOnChainCmd()
 }
 

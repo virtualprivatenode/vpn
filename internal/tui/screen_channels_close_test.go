@@ -29,6 +29,7 @@ func (c *screenCloseClient) CloseChannel(req lndrpc.ChannelCloseRequest) lndrpc.
 func closeScreenFixture(point string) (*ChannelDetailScreen, *screenCloseClient) {
 	ctx := &ScreenContext{Cfg: config.Default(), State: &RuntimeState{WalletKnown: true, WalletExists: true}, HasTabs: true, ContentFocused: true}
 	ch := channelInfo{Channel: lndrpc.Channel{ChannelPoint: point, PeerAlias: "same peer", RemotePubkey: strings.Repeat("a", 66), Capacity: 30000, LocalBalance: 20000, Active: true}}
+	ctx.Status = &statusSnapshot{Channels: freshStatus(app.ChannelStatus{Channels: []channelInfo{ch}})}
 	detail := NewChannelDetailScreen(ctx, ch)
 	detail.launchClose()
 	c := &screenCloseClient{result: lndrpc.ChannelCloseResult{Submitted: true, ClosingTxid: strings.Repeat("c", 64)}}
@@ -164,9 +165,8 @@ func TestChannelTabIdentitySurvivesReorderAndRemoval(t *testing.T) {
 		t.Fatal("reorder changed channel tab identity")
 	}
 	ctx.Status.Channels.Value.Channels = []channelInfo{a}
-	m.activateTab()
 	stale := first.(*ChannelDetailScreen)
-	if !stale.unavailable {
+	if !strings.Contains(stale.View(67, 30), "Not in the latest successful list.") {
 		t.Fatal("vanished channel still presented as available")
 	}
 	stale.launchClose()
@@ -182,10 +182,11 @@ func TestChannelTabIdentitySurvivesReorderAndRemoval(t *testing.T) {
 func TestChannelCloseOwnershipAcrossTabsAndSections(t *testing.T) {
 	a, _ := closeScreenFixture(strings.Repeat("a", 64) + ":0")
 	b, secondClient := closeScreenFixture(strings.Repeat("b", 64) + ":0")
+	b.ctx, b.closeScreen.ctx = a.ctx, a.ctx
 	secondClient.result = lndrpc.ChannelCloseResult{Submitted: true, Err: errors.New("close stream: deadline exceeded")}
 	m := Model{nav: NewNavSidebar(), screenCtx: a.ctx, activeTab: 1, tabs: []openTab{
-		{Kind: tabChannel, Key: a.channel.ChannelPoint, Section: secChannels, Screen: a},
-		{Kind: tabChannel, Key: b.channel.ChannelPoint, Section: secChannels, Screen: b},
+		{Kind: tabChannel, Key: a.point, Section: secChannels, Screen: a},
+		{Kind: tabChannel, Key: b.point, Section: secChannels, Screen: b},
 	}}
 	m.nav.ActiveItem = secChannels
 	m.Update(channelCloseFeesMsg{screen: b.closeScreen, tiers: [4]feeTier{{SatPerVB: 13}}})
@@ -199,10 +200,12 @@ func TestChannelCloseOwnershipAcrossTabsAndSections(t *testing.T) {
 	if len(closed.(Model).tabs) != 2 {
 		t.Fatal("submitted close tab could be removed")
 	}
-	replacement, _ := closeScreenFixture(a.channel.ChannelPoint)
-	updated, _ := m.Update(openTabMsg{Kind: tabChannel, Key: a.channel.ChannelPoint, Screen: replacement, Replace: true})
+	replacement, _ := closeScreenFixture(a.point)
+	a.ctx.invalidateWalletObservations()
+	replacement.ctx, replacement.scope = a.ctx, a.ctx.walletObservationScope()
+	updated, _ := m.Update(openTabMsg{Kind: tabChannel, Key: a.point, Screen: replacement, Replace: true})
 	m = updated.(Model)
-	if m.tabs[0].Screen != a {
+	if len(m.tabs) != 2 || m.tabs[0].Screen != a {
 		t.Fatal("submitted close tab was replaced")
 	}
 	// Hide Channels while the first attempt finishes and another is only reviewed.

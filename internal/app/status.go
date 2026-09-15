@@ -253,7 +253,7 @@ func (c *StatusCollector) Collect(cfg config.AppConfig, walletExists bool, clien
 				}
 				for _, ch := range pending.PendingOpenChannels {
 					value.Channels = append(value.Channels, StatusChannel{Pending: true, Channel: lndrpc.Channel{
-						RemotePubkey: ch.RemotePubkey, PeerAlias: ch.PeerAlias, Capacity: ch.Capacity, LocalBalance: ch.LocalBalance,
+						ChannelPoint: ch.ChannelPoint, RemotePubkey: ch.RemotePubkey, PeerAlias: ch.PeerAlias, Capacity: ch.Capacity, LocalBalance: ch.LocalBalance,
 					}})
 				}
 				s.Channels = observe(value, nil)

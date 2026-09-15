@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -63,9 +64,13 @@ func TestStatusPartialFailureAndRecovery(t *testing.T) {
 	rpc.balanceErr, rpc.channelsErr = nil, nil
 	rpc.balance = "20000"
 	rpc.channels = []lndrpc.Channel{{ChannelPoint: "funding:0", LocalBalance: 1000}}
+	rpc.pending.PendingOpenChannels = []lndrpc.PendingChannel{{ChannelPoint: "pending:1"}}
 	good := c.Collect(*config.Default(), true, rpc).Retain(first)
-	if !good.Balance.Fresh() || !good.Channels.Fresh() || len(good.Channels.Value.Channels) != 1 {
+	if !good.Balance.Fresh() || !good.Channels.Fresh() || len(good.Channels.Value.Channels) != 2 {
 		t.Fatal("successful observation did not recover")
+	}
+	if !slices.ContainsFunc(good.Channels.Value.Channels, func(ch StatusChannel) bool { return ch.Pending && ch.ChannelPoint == "pending:1" }) {
+		t.Fatal("pending channel lost its funding identity during status composition")
 	}
 	// One half of the channel read succeeds with an empty list. This must not
 	// delete the previous channel while the pending-channel read is unavailable.
@@ -74,13 +79,14 @@ func TestStatusPartialFailureAndRecovery(t *testing.T) {
 	c.sources.disk = func(context.Context, string) (system.DiskInfo, error) { return system.DiskInfo{}, failed }
 	partial := c.Collect(*config.Default(), true, rpc).Retain(good)
 	if partial.Balance.Fresh() || partial.Balance.Value.TotalBalance != "20000" || partial.Balance.ObservedAt != good.Balance.ObservedAt ||
-		partial.Channels.Fresh() || len(partial.Channels.Value.Channels) != 1 || !partial.Node.Fresh() || partial.Disk.Fresh() || partial.Disk.Value.Used != "1G" {
+		partial.Channels.Fresh() || len(partial.Channels.Value.Channels) != 2 || !partial.Node.Fresh() || partial.Disk.Fresh() || partial.Disk.Value.Used != "1G" {
 		t.Fatal("partial failure lost last-good data or mislabeled its freshness")
 	}
-	if !good.Balance.Fresh() || len(good.Channels.Value.Channels) != 1 {
+	if !good.Balance.Fresh() || len(good.Channels.Value.Channels) != 2 {
 		t.Fatal("publication mutated the previous snapshot")
 	}
 	rpc.pendingErr, rpc.balanceErr = nil, nil
+	rpc.pending.PendingOpenChannels = nil
 	rpc.balance = "0"
 	recovered := c.Collect(*config.Default(), true, rpc).Retain(partial)
 	if !recovered.Balance.Fresh() || recovered.Balance.Value.TotalBalance != "0" || !recovered.Channels.Fresh() || len(recovered.Channels.Value.Channels) != 0 {

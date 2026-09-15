@@ -21,7 +21,10 @@ type statusScope struct {
 	client           *lndrpc.Client
 }
 
-type statusRequest struct{ scope statusScope }
+type statusRequest struct {
+	scope    statusScope
+	revision uint64
+}
 type statusResultMsg struct {
 	request  *statusRequest
 	snapshot app.StatusSnapshot
@@ -46,7 +49,7 @@ func (m *Model) admitStatus() tea.Cmd {
 		m.statusPending = true
 		return nil
 	}
-	request := &statusRequest{scope: current}
+	request := &statusRequest{scope: current, revision: m.statusRevision}
 	m.statusActive = request
 	collector := m.statusCollector
 	return func() tea.Msg {
@@ -65,7 +68,7 @@ func (m *Model) completeStatus(msg statusResultMsg) tea.Cmd {
 	}
 	m.statusActive = nil
 	current := m.currentStatusScope()
-	if msg.request.scope == current {
+	if msg.request.scope == current && msg.request.revision == m.statusRevision {
 		if m.screenCtx.Status != nil && m.statusScope == current {
 			msg.snapshot = msg.snapshot.Retain(*m.screenCtx.Status)
 		}
