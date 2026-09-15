@@ -423,8 +423,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case svcActionDoneMsg:
-		m.routeToSectionScreen(secSystem, msg)
+	case serviceActionRequestMsg:
+		return m, m.startServiceAction(msg)
+	case serviceActionResultMsg:
+		return m, m.completeServiceAction(msg)
+	case systemRefreshMsg:
 		return m, requestStatusCmd
 	case pkgUpdateDoneMsg:
 		m.routeToSectionScreen(secSystem, msg)

@@ -75,19 +75,26 @@ func parseMemory(data string) (MemInfo, error) {
 
 // ReadServiceActive separates an inactive unit from a failed systemd query.
 func ReadServiceActive(ctx context.Context, name string) (bool, error) {
+	state, err := ReadServiceState(ctx, name)
+	return state == "active" || state == "reloading" || state == "refreshing", err
+}
+
+// ReadServiceState retains transitional states for mutation postconditions.
+func ReadServiceState(ctx context.Context, name string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState", "--value", name).Output()
+	cmd := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState", "--value", name)
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.Output()
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	switch strings.TrimSpace(string(out)) {
-	case "active", "reloading", "refreshing":
-		return true, nil
-	case "inactive", "failed", "activating", "deactivating", "maintenance":
-		return false, nil
+	state := strings.TrimSpace(string(out))
+	switch state {
+	case "active", "reloading", "refreshing", "inactive", "failed", "activating", "deactivating", "maintenance":
+		return state, nil
 	default:
-		return false, errors.New("unavailable service state")
+		return "", errors.New("unavailable service state")
 	}
 }
 

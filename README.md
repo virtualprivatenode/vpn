@@ -181,6 +181,17 @@ five sections plus a dark/light theme toggle:
 - **Add-On** — install and manage Syncthing (channel backup)
 - **System** — service status and logs; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
 
+System service actions keep their confirmed target while you navigate. Completion
+means systemd reported `active` after Start or Restart, or `inactive` after Stop.
+LND Start and Restart also refresh the staged TLS certificate. These checks do
+not establish wallet unlock, blockchain synchronization or network reachability.
+Tor control, status and logs refer to the `tor@default.service` worker.
+
+An unconfirmed outcome can mean the helper connection was lost while the host
+continued working. Check status and logs before retrying; leaving the TUI does
+not undo an accepted action. An older helper that supplies no verified result
+also produces an unconfirmed outcome. Run the TUI and helper from the same build.
+
 Detail views open in tabs within each section. Press `ctrl+c` to quit
 and drop to a shell:
 

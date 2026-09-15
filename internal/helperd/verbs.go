@@ -19,6 +19,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
@@ -94,7 +95,8 @@ var (
 		return helper.WriteBoard(paths.StateSyncthingWebPassword,
 			[]byte(password+"\n"))
 	}
-	restageFacts = restage
+	restageFacts       = restage
+	controlNodeService = host.ControlService
 )
 
 // decode unmarshals params strictly: unknown fields are an
@@ -132,60 +134,28 @@ func loadConfig() (*config.AppConfig, error) {
 
 // ── Service control ──────────────────────────────────────
 
-var allowedUnits = map[string]bool{
-	"tor": true, "bitcoind": true, "lnd": true, "syncthing": true,
-}
-var allowedActions = map[string]bool{
-	"start": true, "stop": true, "restart": true,
-}
-
 func verbServiceAction(_ *verbCtx, params json.RawMessage) (any, error) {
 	var p helper.ServiceActionParams
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	if !allowedUnits[p.Unit] {
-		return nil, fmt.Errorf("unit %q is not managed here", p.Unit)
-	}
-	if !allowedActions[p.Action] {
-		return nil, fmt.Errorf("action %q is not supported", p.Action)
-	}
-	if err := system.SudoRun("systemctl", p.Action, p.Unit); err != nil {
+	// Revalidate the untrusted IPC input before privileged execution.
+	request, err := servicecontrol.New(p.Unit, p.Action)
+	if err != nil {
 		return nil, err
 	}
-	// Postcondition: rc=0 means systemctl ran, not that the
-	// world changed. Ask systemd what state the unit is
-	// actually in now.
-	active := system.IsServiceActive(p.Unit)
-	switch p.Action {
-	case "stop":
-		if active {
-			return nil, fmt.Errorf(
-				"%s is still active after stop", p.Unit)
-		}
-	default:
-		if !active {
-			return nil, fmt.Errorf(
-				"%s is not active after %s — check: journalctl "+
-					"-u %s", p.Unit, p.Action, p.Unit)
-		}
+	completion, err := controlNodeService(request)
+	if err != nil {
+		return nil, err
 	}
-	// LND replaces an expired TLS certificate during startup;
-	// tlsautorefresh also replaces it when configured SAN inputs
-	// changed. A start or restart of
-	// the lnd unit can invalidate the staged certificate copy
-	// the TUI reads. Re-stage it so the board keeps
-	// matching the certificate LND actually serves. The
-	// freshness matrix carries this as service-action's entry;
-	// the unit condition lives here because whether the
-	// invalidation happened depends on a verb parameter, which
-	// the verb-keyed table cannot express alone.
-	if p.Unit == "lnd" && p.Action != "stop" {
+	// LND may replace its TLS certificate at startup. Publish the matching
+	// staged copy before reporting completion to the terminal.
+	if request.Service() == "lnd" && request.Action() != "stop" {
 		if err := restageFacts(helper.VerbServiceAction); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("lnd is active; credential refresh failed: %w", err)
 		}
 	}
-	return nil, nil
+	return completion, nil
 }
 
 func verbReboot(ctx *verbCtx, _ json.RawMessage) (any, error) {

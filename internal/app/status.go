@@ -10,6 +10,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
@@ -122,10 +123,18 @@ type StatusCollector struct {
 	sizeAttempt time.Time
 }
 
+func readNodeService(ctx context.Context, name string) (bool, error) {
+	unit := servicecontrol.Unit(name)
+	if unit == "" {
+		return false, errors.New("unknown node service")
+	}
+	return system.ReadServiceActive(ctx, unit)
+}
+
 func NewStatusCollector() *StatusCollector {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &StatusCollector{ctx: ctx, cancel: cancel, sources: statusSources{
-		service: system.ReadServiceActive, disk: system.ReadDisk,
+		service: readNodeService, disk: system.ReadDisk,
 		memory: system.ReadMemory, bitcoin: bitcoin.GetBlockchainInfo,
 		reboot: system.ReadRebootRequired, publicIP: system.ReadPublicIPv4,
 		size: func(ctx context.Context) (string, error) {

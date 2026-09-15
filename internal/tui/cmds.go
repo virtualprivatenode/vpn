@@ -241,7 +241,7 @@ func showMacaroonCmd() tea.Cmd {
 			` && printf '\033[2J\033[3J\033[H'`)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
-		return svcActionDoneMsg{}
+		return systemRefreshMsg{}
 	})
 }
 
@@ -267,7 +267,7 @@ func showInvoiceCmd(invoice string) tea.Cmd {
 			" && clear")
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
-		return svcActionDoneMsg{}
+		return systemRefreshMsg{}
 	})
 }
 
@@ -331,38 +331,11 @@ func showNodeURIsCmd(uris []string) tea.Cmd {
 			" && clear")
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		_ = os.Remove(tmpPath)
-		return svcActionDoneMsg{}
+		return systemRefreshMsg{}
 	})
 }
 
 // ── System actions ───────────────────────────────────────
-
-// runSvcActionCmd requests a service start/stop/restart from
-// the root helper. The helper validates the unit and action
-// against closed sets and verifies the unit's state afterward;
-// this side just reports the outcome.
-func runSvcActionCmd(action, svc string) tea.Cmd {
-	var verb string
-	switch action {
-	case "Restart":
-		verb = "restart"
-	case "Stop":
-		verb = "stop"
-	case "Start":
-		verb = "start"
-	default:
-		return nil
-	}
-	return func() tea.Msg {
-		if err := helper.Call(helper.VerbServiceAction,
-			helper.ServiceActionParams{
-				Unit: svc, Action: verb,
-			}, nil); err != nil {
-			logger.Install("%s %s: %v", verb, svc, err)
-		}
-		return svcActionDoneMsg{}
-	}
-}
 
 // runUpdatePackagesCmd requests the helper's package-update
 // operation (apt refresh + upgrade, non-interactive, with a
@@ -390,6 +363,6 @@ func runRebootCmd() tea.Cmd {
 		if err := helper.Call(helper.VerbReboot, nil, nil); err != nil {
 			logger.Install("reboot: %v", err)
 		}
-		return svcActionDoneMsg{}
+		return systemRefreshMsg{}
 	}
 }

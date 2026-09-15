@@ -13,6 +13,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -50,13 +51,14 @@ type SystemHomeScreen struct {
 	focusZone int
 	svcCursor int
 
-	// Confirm dialogs — screen-owned
-	svcConfirm string // "Restart", "Stop", "Start"
+	// Confirmed service identity is independent of the cursor.
+	svcConfirm *servicecontrol.Request
 	sysConfirm string // "Update packages", "Reboot"
 
 	// Background service action in progress
-	svcPending  string // "restarting...", "stopping...", "starting..."
-	pkgUpdating bool   // true while apt-get runs in background
+	svcPending  *serviceAttempt
+	svcResult   string
+	pkgUpdating bool // true while apt-get runs in background
 }
 
 func NewSystemHomeScreen(
@@ -75,7 +77,7 @@ func (s *SystemHomeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
 	// Confirm dialogs intercept all keys
-	if s.svcConfirm != "" {
+	if s.svcConfirm != nil {
 		return s.handleSvcConfirm(keyStr)
 	}
 	if s.sysConfirm != "" {
@@ -83,7 +85,7 @@ func (s *SystemHomeScreen) HandleKey(
 	}
 
 	// Block service actions while one is pending
-	if s.svcPending != "" {
+	if s.svcPending != nil {
 		switch keyStr {
 		case "r", "s", "a", "p", "u":
 			return s, nil
@@ -152,22 +154,34 @@ func (s *SystemHomeScreen) HandleKey(
 		return s, nil
 	case "r":
 		if s.focusZone == sysHomeZoneServices {
-			s.svcConfirm = "Restart"
+			request, err := servicecontrol.New(s.svcName(s.svcCursor), "restart")
+			if err == nil {
+				s.svcConfirm = &request
+			}
 		}
 		return s, nil
 	case "s":
 		if s.focusZone == sysHomeZoneServices {
-			s.svcConfirm = "Stop"
+			request, err := servicecontrol.New(s.svcName(s.svcCursor), "stop")
+			if err == nil {
+				s.svcConfirm = &request
+			}
 		}
 		return s, nil
 	case "a":
 		if s.focusZone == sysHomeZoneServices {
-			s.svcConfirm = "Start"
+			request, err := servicecontrol.New(s.svcName(s.svcCursor), "start")
+			if err == nil {
+				s.svcConfirm = &request
+			}
 		}
 		return s, nil
 	case "l":
 		if s.focusZone == sysHomeZoneServices {
-			svc := s.svcName(s.svcCursor)
+			svc := servicecontrol.Unit(s.svcName(s.svcCursor))
+			if svc == "" {
+				return s, nil
+			}
 			c := exec.Command("bash", "-c",
 				"clear && journalctl -u "+svc+
 					" -n 100 --no-pager"+
@@ -176,7 +190,7 @@ func (s *SystemHomeScreen) HandleKey(
 					" && read && clear")
 			return s, tea.ExecProcess(c,
 				func(err error) tea.Msg {
-					return svcActionDoneMsg{}
+					return systemRefreshMsg{}
 				})
 		}
 		return s, nil
@@ -255,21 +269,12 @@ func (s *SystemHomeScreen) HandleKey(
 func (s *SystemHomeScreen) handleSvcConfirm(
 	keyStr string,
 ) (Screen, tea.Cmd) {
-	action := s.svcConfirm
-	s.svcConfirm = ""
-	if keyStr == "y" {
-		svc := s.svcName(s.svcCursor)
-		if svc != "" {
-			switch action {
-			case "Restart":
-				s.svcPending = "restarting..."
-			case "Stop":
-				s.svcPending = "stopping..."
-			case "Start":
-				s.svcPending = "starting..."
-			}
-			return s, runSvcActionCmd(action, svc)
-		}
+	request := s.svcConfirm
+	s.svcConfirm = nil
+	if keyStr == "y" && request != nil {
+		attempt := &serviceAttempt{request: *request}
+		s.svcPending, s.svcResult = attempt, ""
+		return s, func() tea.Msg { return serviceActionRequestMsg{owner: s, attempt: attempt} }
 	}
 	return s, nil
 }
@@ -293,8 +298,6 @@ func (s *SystemHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch msg.(type) {
-	case svcActionDoneMsg:
-		s.svcPending = ""
 	case pkgUpdateDoneMsg:
 		s.pkgUpdating = false
 	}
@@ -367,6 +370,11 @@ func (s *SystemHomeScreen) View(
 		headerLines = append(headerLines, "")
 	}
 
+	if s.svcResult != "" {
+		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(s.svcResult)
+		headerLines = append(headerLines, strings.Split(result, "\n")...)
+		headerLines = append(headerLines, "")
+	}
 	header := strings.Join(headerLines, "\n")
 	headerH := len(headerLines)
 
@@ -429,10 +437,10 @@ func (s *SystemHomeScreen) View(
 			svcLine += "  " + theme.Warning.Render("locked")
 		}
 
-		if isSelected && s.svcPending != "" {
+		if s.svcPending != nil && s.svcPending.request.Service() == name {
 			svcLine += "  " +
-				theme.Dim.Render(s.svcPending)
-		} else if isSelected {
+				theme.Dim.Render(servicePendingText(s.svcPending.request))
+		} else if isSelected && s.svcPending == nil {
 			// Standard service hints — dim
 			hint := theme.Dim.Render(
 				"  r restart  s stop  a start  l logs")
@@ -471,11 +479,11 @@ func (s *SystemHomeScreen) View(
 				border.Render("│"))
 	}
 
-	if s.svcConfirm != "" {
-		svc := s.svcName(s.svcCursor)
+	if s.svcConfirm != nil {
+		svc := s.svcConfirm.Service()
 		confirmLine := " " + theme.Warning.Render(
 			fmt.Sprintf(" %s %s? [y/n]",
-				s.svcConfirm, svc))
+				s.svcConfirm.Action(), svc))
 		confirmVis := lipgloss.Width(confirmLine)
 		confirmPad := boxW - 2 - confirmVis
 		if confirmPad < 0 {
@@ -684,7 +692,7 @@ func (s *SystemHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *SystemHomeScreen) HelpBindings() []key.Binding {
-	if s.svcConfirm != "" || s.sysConfirm != "" {
+	if s.svcConfirm != nil || s.sysConfirm != "" {
 		return confirmDialogBindings()
 	}
 	if s.focusZone == sysHomeZoneServices {
@@ -695,6 +703,10 @@ func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 }
 
 func (s *SystemHomeScreen) serviceBindings() []key.Binding {
+	if s.svcPending != nil {
+		return []key.Binding{bind("↑↓", "services", "up", "down"), bind("l", "logs", "l"), kShiftTabButtons, kSidebar, kBack, kQuit}
+	}
+
 	binds := []key.Binding{
 		bind("↑↓", "services", "up", "down"),
 		bind("r", "restart", "r"),
@@ -775,7 +787,7 @@ func (s *SystemHomeScreen) svcCount() int {
 
 func (s *SystemHomeScreen) svcName(i int) string {
 	names := serviceNames(s.ctx.Cfg)
-	if i < len(names) {
+	if i >= 0 && i < len(names) {
 		return names[i]
 	}
 	return ""

@@ -10,6 +10,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/syncthing"
 )
 
@@ -53,6 +54,7 @@ type ScreenContext struct {
 	OnChain             *OnChainContext
 	AutoUnlock          autoUnlockChanges
 	LoginPasswords      loginPasswordChanges
+	ServiceControls     serviceControls
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
@@ -71,6 +73,18 @@ type ScreenContext struct {
 	ContentFocused      bool   // true when content pane has focus (not tab bar, not sidebar)
 	Version             string // set once at construction
 	LatestVersion       string // updated by latestVersionMsg handler
+}
+
+type serviceControls interface {
+	Control(servicecontrol.Request) <-chan app.ServiceActionResult
+	Close()
+}
+
+func (c *ScreenContext) serviceControls() serviceControls {
+	if c.ServiceControls == nil {
+		c.ServiceControls = app.NewServiceControls()
+	}
+	return c.ServiceControls
 }
 
 type loginPasswordChanges interface {
