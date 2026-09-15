@@ -14,10 +14,11 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 )
 
-// Every verb on the menu carries a deadline: an operation with
-// no ceiling could hold the serialized queue forever.
+// Every verb has a socket deadline. Execution bounds must also be enforced by
+// the operation; a connection deadline alone cannot stop privileged work.
 func TestEveryVerbHasDeadline(t *testing.T) {
 	if len(verbs) == 0 {
 		t.Fatal("empty verb menu")
@@ -338,10 +339,15 @@ func raw(t *testing.T, v any) json.RawMessage {
 	return b
 }
 
-// Parameter validation refuses everything outside the closed
-// sets, before any side effect. (Only refusal paths run here —
-// success paths mutate a system and belong to the live run.)
+// Invalid IPC input must be refused before privileged execution.
 func TestServiceActionValidation(t *testing.T) {
+	old := controlNodeService
+	t.Cleanup(func() { controlNodeService = old })
+	controlNodeService = func(servicecontrol.Request) (servicecontrol.Completion, error) {
+		t.Fatal("invalid request reached privileged execution")
+		return servicecontrol.Completion{}, nil
+	}
+
 	ctx := &verbCtx{}
 	cases := []helper.ServiceActionParams{
 		{Unit: "sshd", Action: "restart"},     // not a managed unit
@@ -358,6 +364,62 @@ func TestServiceActionValidation(t *testing.T) {
 	if _, err := verbServiceAction(ctx, json.RawMessage(
 		`{"unit":"tor","action":"restart","extra":1}`)); err == nil {
 		t.Error("accepted unknown params field")
+	}
+}
+
+func TestServiceActionStagesCredentialsOnlyAfterLNDStarts(t *testing.T) {
+	oldControl, oldRestage := controlNodeService, restageFacts
+	t.Cleanup(func() { controlNodeService, restageFacts = oldControl, oldRestage })
+	for _, tc := range []struct {
+		unit, action         string
+		controlErr, stageErr error
+		stage                bool
+	}{
+		{unit: "lnd", action: "start", stage: true},
+		{unit: "lnd", action: "restart", stage: true},
+		{unit: "lnd", action: "stop"},
+		{unit: "tor", action: "restart"},
+		{unit: "lnd", action: "restart", controlErr: errors.New("state unavailable")},
+		{unit: "lnd", action: "start", stageErr: errors.New("staging failed"), stage: true},
+	} {
+		controlled, staged := false, false
+		state := "active"
+		if tc.action == "stop" {
+			state = "inactive"
+		}
+		unit := tc.unit + ".service"
+		if tc.unit == "tor" {
+			unit = "tor@default.service"
+		}
+		completion := servicecontrol.Completion{Unit: unit, Action: tc.action, State: state}
+		controlNodeService = func(request servicecontrol.Request) (servicecontrol.Completion, error) {
+			if request.Service() != tc.unit || request.Action() != tc.action {
+				t.Fatal("helper changed request")
+			}
+			controlled = true
+			return completion, tc.controlErr
+		}
+		restageFacts = func(verb string) error {
+			if !controlled || tc.controlErr != nil || verb != helper.VerbServiceAction {
+				t.Fatal("staged before verified control")
+			}
+			staged = true
+			return tc.stageErr
+		}
+		result, err := verbServiceAction(&verbCtx{}, raw(t, helper.ServiceActionParams{Unit: tc.unit, Action: tc.action}))
+		if !controlled || staged != tc.stage || (err != nil) != (tc.controlErr != nil || tc.stageErr != nil) {
+			t.Fatalf("%s %s: staged %v, err %v", tc.unit, tc.action, staged, err)
+		}
+		if err == nil {
+			if result != completion {
+				t.Fatalf("completion changed: got %+v, want %+v", result, completion)
+			}
+		} else if result != nil {
+			t.Fatal("failed operation returned success evidence")
+		}
+		if tc.stageErr != nil && !strings.Contains(err.Error(), "lnd is active; credential refresh failed") {
+			t.Fatalf("partial success hidden: %v", err)
+		}
 	}
 }
 

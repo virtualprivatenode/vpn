@@ -90,7 +90,7 @@ type feeTier struct {
 	Label    string  // "~1 blk", "~3 blk", etc.
 }
 
-type svcActionDoneMsg struct{}
+type systemRefreshMsg struct{}
 type pkgUpdateDoneMsg struct{}
 type tickMsg time.Time
 type latestVersionMsg string
@@ -354,6 +354,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.ServiceControls != nil {
+			m.screenCtx.ServiceControls.Close()
+		}
 		m.screenCtx.ChannelHistory.reader.Close()
 		m.screenCtx.OnChain.reader.Close()
 		m.screenCtx.PaymentHistory.reader.Close()
