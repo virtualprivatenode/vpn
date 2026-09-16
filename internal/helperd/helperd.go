@@ -312,12 +312,6 @@ func (s *server) handleConn(c *net.UnixConn) (exitAfter bool) {
 	audit(req.Verb, `{"event":"outcome","verb":%q,"uid":%d,"outcome":"ok","ms":%d}`,
 		req.Verb, cred.Uid, ms)
 
-	if ctx.afterEnd != nil {
-		// Post-terminator action (reboot; self-update's exit).
-		// The client already has its answer.
-		c.Close()
-		ctx.afterEnd()
-	}
 	return ctx.exitAfterEnd
 }
 
@@ -326,9 +320,6 @@ type verbCtx struct {
 	conn    *net.UnixConn
 	version string
 
-	// afterEnd runs after the ok terminator is written and the
-	// connection is closed (reboot, self-update exit).
-	afterEnd func()
 	// exitAfterEnd makes the process exit after this
 	// connection — the self-update contract: the next
 	// activation runs the freshly installed binary.

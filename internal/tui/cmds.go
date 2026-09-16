@@ -334,17 +334,3 @@ func showNodeURIsCmd(uris []string) tea.Cmd {
 		return systemRefreshMsg{}
 	})
 }
-
-// ── System actions ───────────────────────────────────────
-
-func runRebootCmd() tea.Cmd {
-	return func() tea.Msg {
-		// The helper answers, then reboots — the connection
-		// outliving the box is not expected, so any error here
-		// is only logged.
-		if err := helper.Call(helper.VerbReboot, nil, nil); err != nil {
-			logger.Install("reboot: %v", err)
-		}
-		return systemRefreshMsg{}
-	}
-}

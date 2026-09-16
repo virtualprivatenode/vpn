@@ -429,6 +429,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.completeServiceAction(msg)
 	case systemRefreshMsg:
 		return m, requestStatusCmd
+	case rebootRequestMsg:
+		return m, m.startReboot(msg)
+	case rebootResultMsg:
+		return m, m.completeReboot(msg)
 	case packageUpdateRequestMsg:
 		return m, m.startPackageUpdate(msg)
 	case packageUpdateResultMsg:

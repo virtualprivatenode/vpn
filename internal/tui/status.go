@@ -86,3 +86,17 @@ func (m *Model) completeStatus(msg statusResultMsg) tea.Cmd {
 	}
 	return nil
 }
+
+func (m *Model) invalidateHostStatus(err error) {
+	m.statusRevision++
+	if status := m.screenCtx.Status; status != nil {
+		// Preserve last-good values and wallet identity while new reads recover.
+		for name, observation := range status.Services {
+			observation.Err = err
+			status.Services[name] = observation
+		}
+		status.Reboot.Err, status.Disk.Err, status.Memory.Err = err, err, err
+		status.Bitcoin.Err = err
+		*status = status.WalletUnavailable(err)
+	}
+}

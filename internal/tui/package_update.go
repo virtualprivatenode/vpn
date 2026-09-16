@@ -64,17 +64,5 @@ func (m *Model) completePackageUpdate(msg packageUpdateResultMsg) tea.Cmd {
 }
 
 func (m *Model) invalidatePackageStatus() {
-	m.statusRevision++
-	if status := m.screenCtx.Status; status != nil {
-		// Package configuration can restart services and change resource usage.
-		// Preserve last-good values and wallet identity while new reads recover.
-		err := errors.New("package update may have changed host state")
-		for name, observation := range status.Services {
-			observation.Err = err
-			status.Services[name] = observation
-		}
-		status.Reboot.Err, status.Disk.Err, status.Memory.Err = err, err, err
-		status.Bitcoin.Err = err
-		*status = status.WalletUnavailable(err)
-	}
+	m.invalidateHostStatus(errors.New("package update may have changed host state"))
 }
