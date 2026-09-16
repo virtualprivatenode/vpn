@@ -97,6 +97,7 @@ var (
 	}
 	restageFacts       = restage
 	controlNodeService = host.ControlService
+	updatePackages     = host.UpdatePackages
 )
 
 // decode unmarshals params strictly: unknown fields are an
@@ -364,20 +365,11 @@ func runSteps(ctx *verbCtx, steps []installer.InstallStep) error {
 	return nil
 }
 
-func verbPackageUpdate(ctx *verbCtx, _ json.RawMessage) (any, error) {
-	steps := installer.PackageUpdateSteps()
-	if err := runSteps(ctx, steps); err != nil {
+func verbPackageUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
+	if err := rejectParams(params); err != nil {
 		return nil, err
 	}
-	// Postcondition: no packages left half-configured.
-	if out, err := system.RunOutput("dpkg", "--audit"); err != nil ||
-		strings.TrimSpace(out) != "" {
-		return nil, fmt.Errorf(
-			"packages left in an inconsistent state after "+
-				"upgrade (dpkg --audit: %v %s)", err,
-			strings.TrimSpace(out))
-	}
-	return nil, nil
+	return nil, updatePackages(ctx.emitStep)
 }
 
 func verbSelfUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {

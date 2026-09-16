@@ -429,9 +429,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.completeServiceAction(msg)
 	case systemRefreshMsg:
 		return m, requestStatusCmd
-	case pkgUpdateDoneMsg:
-		m.routeToSectionScreen(secSystem, msg)
-		return m, requestStatusCmd
+	case packageUpdateRequestMsg:
+		return m, m.startPackageUpdate(msg)
+	case packageUpdateResultMsg:
+		return m, m.completePackageUpdate(msg)
 	case statusResultMsg:
 		cmd := m.completeStatus(msg)
 		return m, cmd
@@ -1168,36 +1169,6 @@ func (m Model) routeToScreen(kind tabKind, msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 	}
 	return m, nil, false
-}
-
-// routeToSectionScreen delivers a message to the section
-// home screen at the given index. Same pattern as
-// routeToScreen but keyed on section index instead of
-// tab kind. Returns (cmd, true) if routed, or
-// (nil, false) if no screen is mounted.
-//
-// Pointer receiver is load-bearing: m.sectionScreens is
-// a fixed-size array, not a slice, so a value receiver
-// would write the new screen into a copy and discard it
-// on return. This bit us historically when a caller
-// forgot to capture the Model return; making the
-// receiver a pointer eliminates the class of bug.
-// routeToScreen (above) can stay a value receiver
-// because it mutates m.tabs, which is a slice and
-// shares its backing array across copies.
-func (m *Model) routeToSectionScreen(
-	sec int, msg tea.Msg,
-) (tea.Cmd, bool) {
-	if sec < 0 || sec >= numSections ||
-		m.sectionScreens[sec] == nil {
-		return nil, false
-	}
-	m.screenCtx.HasTabs = m.hasDetailTabs()
-	m.screenCtx.ContentFocused = m.contentFocused
-	newScreen, cmd :=
-		m.sectionScreens[sec].HandleMsg(msg)
-	m.sectionScreens[sec] = newScreen
-	return cmd, true
 }
 
 // dispatchToTab routes msg to the screen on the tab of the

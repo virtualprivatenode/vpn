@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -56,9 +57,10 @@ type SystemHomeScreen struct {
 	sysConfirm string // "Update packages", "Reboot"
 
 	// Background service action in progress
-	svcPending  *serviceAttempt
-	svcResult   string
-	pkgUpdating bool // true while apt-get runs in background
+	svcPending *serviceAttempt
+	svcResult  string
+	pkgPending *packageAttempt
+	pkgResult  string
 }
 
 func NewSystemHomeScreen(
@@ -233,7 +235,7 @@ func (s *SystemHomeScreen) HandleKey(
 			s.btnIdx < len(actions) {
 			switch actions[s.btnIdx] {
 			case sysBtnUpdatePkg:
-				if !s.pkgUpdating {
+				if s.pkgPending == nil {
 					s.sysConfirm = "Update packages"
 				}
 			case sysBtnSSHKeys:
@@ -288,8 +290,12 @@ func (s *SystemHomeScreen) handleSysConfirm(
 		if action == "Reboot" {
 			return s, runRebootCmd()
 		}
-		s.pkgUpdating = true
-		return s, runUpdatePackagesCmd()
+		if s.pkgPending != nil {
+			return s, nil
+		}
+		s.pkgPending = &packageAttempt{}
+		s.pkgResult = ""
+		return s, packageUpdateCmd(s, s.pkgPending)
 	}
 	return s, nil
 }
@@ -297,10 +303,6 @@ func (s *SystemHomeScreen) handleSysConfirm(
 func (s *SystemHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
-	switch msg.(type) {
-	case pkgUpdateDoneMsg:
-		s.pkgUpdating = false
-	}
 	return s, nil
 }
 
@@ -372,6 +374,11 @@ func (s *SystemHomeScreen) View(
 
 	if s.svcResult != "" {
 		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(s.svcResult)
+		headerLines = append(headerLines, strings.Split(result, "\n")...)
+		headerLines = append(headerLines, "")
+	}
+	if s.pkgResult != "" {
+		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(s.pkgResult)
 		headerLines = append(headerLines, strings.Split(result, "\n")...)
 		headerLines = append(headerLines, "")
 	}
@@ -698,8 +705,16 @@ func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 	if s.focusZone == sysHomeZoneServices {
 		return s.serviceBindings()
 	}
-	return homeButtonBindings(
-		"services", s.btnIdx, s.ctx.HasTabs)
+	bindings := homeButtonBindings("services", s.btnIdx, s.ctx.HasTabs)
+	if s.pkgPending != nil && s.btnIdx == 0 {
+		for i := range bindings {
+			if slices.Contains(bindings[i].Keys(), "enter") {
+				bindings = slices.Delete(bindings, i, i+1)
+				break
+			}
+		}
+	}
+	return bindings
 }
 
 func (s *SystemHomeScreen) serviceBindings() []key.Binding {
@@ -774,7 +789,7 @@ func (s *SystemHomeScreen) buttonLabels() []string {
 	labels := make([]string, len(actions))
 	for i, a := range actions {
 		labels[i] = sysBtnLabel[a]
-		if a == sysBtnUpdatePkg && s.pkgUpdating {
+		if a == sysBtnUpdatePkg && s.pkgPending != nil {
 			labels[i] = "Updating..."
 		}
 	}

@@ -221,12 +221,6 @@ func TestSelfUpdateStepNamesAligned(t *testing.T) {
 		helper.SelfUpdateStepNames(v))
 }
 
-func TestPackageUpdateStepNamesAligned(t *testing.T) {
-	assertNamesEqual(t, helper.VerbPackageUpdate,
-		stepNames(installer.PackageUpdateSteps()),
-		helper.PackageUpdateStepNames())
-}
-
 func TestUpgradeP2PToHybridStepNamesAligned(t *testing.T) {
 	cfg := config.Default()
 	cfg.P2PMode = "hybrid"
