@@ -353,6 +353,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.Reboots != nil {
+			m.screenCtx.Reboots.Close()
+		}
 		if m.screenCtx.PackageUpdates != nil {
 			m.screenCtx.PackageUpdates.Close()
 		}

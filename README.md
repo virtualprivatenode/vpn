@@ -200,6 +200,14 @@ is needed. A failed refresh stops the upgrade. If the outcome is unconfirmed,
 ask your administrator to check package state and logs before retrying. Closing
 the TUI stops local observation while accepted package work continues on the host.
 
+Reboot reports “Reboot requested” only after systemd accepts the request. This
+confirms neither shutdown nor a successful restart. The outcome stays on System
+across navigation, and pending or accepted requests cannot be submitted again in
+that terminal session. If the reply is lost, including when SSH closes during
+shutdown, the outcome is unconfirmed. Reconnect after the host restarts, or ask
+your administrator to check host state before retrying. Closing the TUI stops
+local observation; it cannot undo a reboot already accepted by systemd.
+
 Detail views open in tabs within each section. Press `ctrl+c` to quit
 and drop to a shell:
 

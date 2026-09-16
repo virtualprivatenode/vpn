@@ -57,10 +57,13 @@ type SystemHomeScreen struct {
 	sysConfirm string // "Update packages", "Reboot"
 
 	// Background service action in progress
-	svcPending *serviceAttempt
-	svcResult  string
-	pkgPending *packageAttempt
-	pkgResult  string
+	svcPending     *serviceAttempt
+	svcResult      string
+	pkgPending     *packageAttempt
+	pkgResult      string
+	rebootPending  *rebootAttempt
+	rebootResult   string
+	rebootAccepted bool
 }
 
 func NewSystemHomeScreen(
@@ -258,7 +261,9 @@ func (s *SystemHomeScreen) HandleKey(
 					}
 				}
 			case sysBtnReboot:
-				s.sysConfirm = "Reboot"
+				if s.rebootPending == nil && !s.rebootAccepted {
+					s.sysConfirm = "Reboot"
+				}
 			}
 		}
 		return s, nil
@@ -288,7 +293,12 @@ func (s *SystemHomeScreen) handleSysConfirm(
 	s.sysConfirm = ""
 	if keyStr == "y" {
 		if action == "Reboot" {
-			return s, runRebootCmd()
+			if s.rebootPending != nil || s.rebootAccepted {
+				return s, nil
+			}
+			attempt := &rebootAttempt{}
+			s.rebootPending, s.rebootResult = attempt, ""
+			return s, func() tea.Msg { return rebootRequestMsg{owner: s, attempt: attempt} }
 		}
 		if s.pkgPending != nil {
 			return s, nil
@@ -379,6 +389,15 @@ func (s *SystemHomeScreen) View(
 	}
 	if s.pkgResult != "" {
 		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(s.pkgResult)
+		headerLines = append(headerLines, strings.Split(result, "\n")...)
+		headerLines = append(headerLines, "")
+	}
+	rebootText := s.rebootResult
+	if s.rebootPending != nil {
+		rebootText = "Requesting reboot..."
+	}
+	if rebootText != "" {
+		result := lipgloss.NewStyle().Width(max(1, w-4)).Render(rebootText)
 		headerLines = append(headerLines, strings.Split(result, "\n")...)
 		headerLines = append(headerLines, "")
 	}
@@ -706,7 +725,11 @@ func (s *SystemHomeScreen) HelpBindings() []key.Binding {
 		return s.serviceBindings()
 	}
 	bindings := homeButtonBindings("services", s.btnIdx, s.ctx.HasTabs)
-	if s.pkgPending != nil && s.btnIdx == 0 {
+	actions := s.buttonActions()
+	blocked := s.btnIdx < len(actions) &&
+		((actions[s.btnIdx] == sysBtnUpdatePkg && s.pkgPending != nil) ||
+			(actions[s.btnIdx] == sysBtnReboot && (s.rebootPending != nil || s.rebootAccepted)))
+	if blocked {
 		for i := range bindings {
 			if slices.Contains(bindings[i].Keys(), "enter") {
 				bindings = slices.Delete(bindings, i, i+1)
@@ -770,8 +793,8 @@ func (s *SystemHomeScreen) buttonActions() []sysBtn {
 	if s.hasUpdate() && s.updateInstallable() {
 		actions = append(actions, sysBtnUpdateNode)
 	}
-	if s.ctx.Status != nil &&
-		s.ctx.Status.Reboot.Value {
+	if s.rebootPending != nil || s.rebootAccepted ||
+		(s.ctx.Status != nil && s.ctx.Status.Reboot.Value) {
 		actions = append(actions, sysBtnReboot)
 	}
 	return actions
@@ -791,6 +814,13 @@ func (s *SystemHomeScreen) buttonLabels() []string {
 		labels[i] = sysBtnLabel[a]
 		if a == sysBtnUpdatePkg && s.pkgPending != nil {
 			labels[i] = "Updating..."
+		}
+		if a == sysBtnReboot {
+			if s.rebootPending != nil {
+				labels[i] = "Reboot..."
+			} else if s.rebootAccepted {
+				labels[i] = "Requested"
+			}
 		}
 	}
 	return labels

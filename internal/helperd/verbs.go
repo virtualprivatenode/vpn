@@ -98,6 +98,7 @@ var (
 	restageFacts       = restage
 	controlNodeService = host.ControlService
 	updatePackages     = host.UpdatePackages
+	requestReboot      = host.RequestReboot
 )
 
 // decode unmarshals params strictly: unknown fields are an
@@ -159,16 +160,14 @@ func verbServiceAction(_ *verbCtx, params json.RawMessage) (any, error) {
 	return completion, nil
 }
 
-func verbReboot(ctx *verbCtx, _ json.RawMessage) (any, error) {
-	// Answer first, reboot after: the client gets its
-	// terminator before the box goes down.
-	ctx.afterEnd = func() {
-		if err := system.SudoRun("systemctl", "reboot"); err != nil {
-			auditErr("reboot",
-				`{"event":"error","detail":"reboot failed: %v"}`, err)
-		}
+func verbReboot(_ *verbCtx, params json.RawMessage) (any, error) {
+	if err := rejectParams(params); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	if err := requestReboot(); err != nil {
+		return nil, err
+	}
+	return helper.RebootResult{Accepted: true}, nil
 }
 
 // ── Sizes ────────────────────────────────────────────────

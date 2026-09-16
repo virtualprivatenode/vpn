@@ -56,6 +56,7 @@ type ScreenContext struct {
 	LoginPasswords      loginPasswordChanges
 	ServiceControls     serviceControls
 	PackageUpdates      packageUpdates
+	Reboots             reboots
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
@@ -298,4 +299,17 @@ func (c *ScreenContext) packageUpdates() packageUpdates {
 		c.PackageUpdates = app.NewPackageUpdates()
 	}
 	return c.PackageUpdates
+}
+
+// reboots releases local helper observation when the terminal exits.
+type reboots interface {
+	Request() <-chan app.RebootResult
+	Close()
+}
+
+func (c *ScreenContext) reboots() reboots {
+	if c.Reboots == nil {
+		c.Reboots = app.NewReboots()
+	}
+	return c.Reboots
 }

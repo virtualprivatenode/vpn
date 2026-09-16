@@ -27,6 +27,11 @@ import (
 	"strings"
 )
 
+// RebootResult confirms systemd accepted the request, not that the host rebooted.
+type RebootResult struct {
+	Accepted bool `json:"accepted"`
+}
+
 // Verb names. The helper serves this fixed menu and nothing
 // else — there is no verb that runs a caller-supplied command,
 // and no verb that returns a caller-chosen file. Every verb
