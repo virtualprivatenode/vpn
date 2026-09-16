@@ -1,52 +1,33 @@
 package tui
 
 import (
-	"fmt"
+	"net"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── PairingScreen ──────────────────────────────────────
-// Zeus wallet pairing: shows LND REST connection info
-// with QR (Tor), Macaroon, and optional QR (Clearnet)
-// buttons.
-//
-// The REST onion address is live-read at screen entry (no
-// stored copy exists anywhere) and held only for this
-// screen's lifetime.
-
+// PairingScreen displays one owned observation of the REST endpoint and staged
+// macaroon. Re-entry refreshes it; rendering performs no credential reads.
 type PairingScreen struct {
-	ctx       *ScreenContext
-	btnIdx    int
-	restOnion string
-	fetched   bool // the live read answered
-	fetchErr  bool // ...with an error (already logged)
+	ctx        *ScreenContext
+	btnIdx     int
+	connection connectionInfoState
 }
 
-func NewPairingScreen(
-	ctx *ScreenContext,
-) *PairingScreen {
-	return &PairingScreen{
-		ctx: ctx,
-	}
-}
-
-// ── Screen interface ────────────────────────────────────
+func NewPairingScreen(ctx *ScreenContext) *PairingScreen { return &PairingScreen{ctx: ctx} }
 
 func (s *PairingScreen) Init() tea.Cmd {
-	return fetchNodeAddressesCmd(tabPairing)
+	if s.connection.request != nil {
+		return nil
+	}
+	return s.connection.refresh(s, s.ctx, app.LNDRESTConnection)
 }
 
-func (s *PairingScreen) maxBtn() int {
-	return len(s.buttons()) - 1
-}
-
-func (s *PairingScreen) HandleKey(
-	keyStr string, msg tea.KeyPressMsg,
-) (Screen, tea.Cmd) {
+func (s *PairingScreen) HandleKey(keyStr string, msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	switch keyStr {
 	case "ctrl+c":
 		return s, tea.Quit
@@ -57,175 +38,130 @@ func (s *PairingScreen) HandleKey(
 		}
 		return s, emitFocusSidebar
 	case "right":
-		if s.btnIdx < s.maxBtn() {
+		if s.btnIdx < len(s.buttons())-1 {
 			s.btnIdx++
 		}
-		return s, nil
 	case "up", "shift+tab":
 		if s.ctx.HasTabs {
 			return s, emitFocusTabBar
 		}
-		return s, nil
-	case "down", "tab":
-		return s, nil
 	case "backspace":
 		return s, emitFocusParent
 	case "enter":
-		return s.handleEnter()
+		return s, s.enter()
 	}
 	return s, nil
+}
+
+func (s *PairingScreen) available() bool {
+	return s.ctx.walletExists() && s.ctx.Status != nil && s.ctx.Status.Node.Fresh()
 }
 
 func (s *PairingScreen) buttons() []string {
-	btns := []string{"Show QR (Tor)"}
-	if s.ctx.Cfg.P2PMode == "hybrid" {
-		btns = append(btns, "Show QR (Clearnet)")
+	if !s.available() {
+		return nil
 	}
-	btns = append(btns, "Copyable Macaroon")
-	return btns
+	if !s.connection.loaded {
+		return []string{"Reading..."}
+	}
+	if !s.connection.current(s.ctx) {
+		return []string{"Retry"}
+	}
+	info := s.connection.info
+	var buttons []string
+	if info.HasCredential() {
+		if info.AddressErr == nil {
+			buttons = append(buttons, "Show QR (Tor)")
+		}
+		if s.ctx.Cfg.P2PMode == "hybrid" && s.ctx.Status.PublicIP.Fresh() && s.ctx.Status.PublicIP.Value != "" {
+			buttons = append(buttons, "Show QR (Clearnet)")
+		}
+		buttons = append(buttons, "Copyable Macaroon")
+	}
+	if s.connection.retry(s.ctx) {
+		buttons = append(buttons, "Retry")
+	}
+	return buttons
 }
 
-func (s *PairingScreen) handleEnter() (Screen, tea.Cmd) {
-	if !s.ctx.walletExists() {
-		return s, nil
+func (s *PairingScreen) enter() tea.Cmd {
+	buttons := s.buttons()
+	if s.btnIdx < 0 || s.btnIdx >= len(buttons) {
+		return nil
 	}
-	btns := s.buttons()
-	if s.btnIdx < 0 || s.btnIdx >= len(btns) {
-		return s, nil
-	}
-	switch btns[s.btnIdx] {
+	switch buttons[s.btnIdx] {
+	case "Retry":
+		s.btnIdx = 0
+		return s.connection.refresh(s, s.ctx, app.LNDRESTConnection)
 	case "Show QR (Tor)":
-		restOnion := s.restOnion
-		mac := readMacaroonHex()
-		if restOnion != "" && mac != "" {
-			url := fmt.Sprintf(
-				"lndconnect://%s:8080?macaroon=%s",
-				restOnion, hexToBase64URL(mac))
-			return s, func() tea.Msg {
-				return showQRMsg{
-					URL:   url,
-					Label: "LND Connect — Tor",
-				}
-			}
-		}
+		return connectionActionCmd(s.connection.request, connectionTorQR, s.connection.info.Address)
 	case "Show QR (Clearnet)":
-		if s.ctx.Cfg.P2PMode == "hybrid" &&
-			s.ctx.Status != nil &&
-			s.ctx.Status.PublicIP.Fresh() && s.ctx.Status.PublicIP.Value != "" {
-			mac := readMacaroonHex()
-			if mac != "" {
-				url := fmt.Sprintf(
-					"lndconnect://%s:8080"+
-						"?macaroon=%s",
-					s.ctx.Status.PublicIP.Value,
-					hexToBase64URL(mac))
-				return s, func() tea.Msg {
-					return showQRMsg{
-						URL:   url,
-						Label: "LND Connect — Clearnet",
-					}
-				}
-			}
-		}
+		return connectionActionCmd(s.connection.request, connectionClearnetQR, s.ctx.Status.PublicIP.Value)
 	case "Copyable Macaroon":
-		return s, showMacaroonCmd()
+		return connectionActionCmd(s.connection.request, connectionMacaroon, "")
+	}
+	return nil
+}
+
+func (s *PairingScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
+	if _, ok := msg.(tabActivatedMsg); ok {
+		s.btnIdx = 0
+		return s, s.connection.refresh(s, s.ctx, app.LNDRESTConnection)
 	}
 	return s, nil
 }
 
-func (s *PairingScreen) HandleMsg(
-	msg tea.Msg,
-) (Screen, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tabActivatedMsg:
-		// Re-entering the tab re-asks: screen entry is the
-		// cadence at which live-read facts are read.
-		return s, fetchNodeAddressesCmd(tabPairing)
-	case nodeAddressesMsg:
-		s.restOnion = msg.addrs.LNDRESTOnion
-		s.fetched = true
-		s.fetchErr = msg.err != nil
-	}
-	return s, nil
-}
-
-func (s *PairingScreen) View(
-	w, h int,
-) string {
-	cfg := s.ctx.Cfg
-	status := s.ctx.Status
-
+func (s *PairingScreen) View(w, h int) string {
 	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 		return renderWalletStateUnavailable(w, h)
 	}
-	if !cfg.HasLND() || !s.ctx.walletDisplayAvailable() {
-		p := newPane(w)
-		p.title(theme.Lightning, "⚡ Zeus Wallet")
-		p.dim("Create LND wallet first")
-		return p.renderWithBottomButtons(
-			[]string{"Done"}, 0, false, h)
-	}
-
-	if status == nil || !status.Node.Fresh() {
-		p := newPane(w)
-		p.title(theme.Lightning, "⚡ Zeus Wallet")
-		p.dim("Waiting for LND...")
-		return p.renderWithBottomButtons(
-			[]string{"Waiting..."}, 0, false, h)
-	}
-
 	p := newPane(w)
-	p.title(theme.Lightning, "⚡ Zeus — LND REST")
-
-	restOnion := s.restOnion
-
-	if cfg.P2PMode == "hybrid" {
-		p.line(" " + theme.Header.Render(
-			"Clearnet"))
-		if status.PublicIP.Value != "" {
-			p.labelLine("Server:")
-			p.monoWrap(observationText(status.PublicIP, status.PublicIP.Value))
+	p.title(theme.Lightning, "⚡ Zeus - LND REST")
+	switch {
+	case !s.ctx.Cfg.HasLND() || !s.ctx.walletDisplayAvailable():
+		p.dim("Create LND wallet first.")
+	case !s.available():
+		p.dim("Waiting for LND...")
+	case !s.connection.loaded:
+		p.dim("Reading connection information...")
+	case !s.connection.current(s.ctx):
+		p.warnWrap("Connection information changed. Retry to read it again.")
+	default:
+		info := s.connection.info
+		if s.ctx.Cfg.P2PMode == "hybrid" {
+			p.labelLine("Clearnet:")
+			if s.ctx.Status.PublicIP.Fresh() && s.ctx.Status.PublicIP.Value != "" {
+				p.monoWrap(net.JoinHostPort(s.ctx.Status.PublicIP.Value, "8080"))
+			} else {
+				p.dim("Server address unavailable.")
+			}
 			p.blank()
-			p.labelLine("Port:")
-			p.monoWrap("8080")
+		}
+		p.labelLine("Tor:")
+		if info.AddressErr != nil {
+			p.warnWrap("Tor address unavailable. Retry to read it again.")
 		} else {
-			p.dim("Server address unavailable.")
+			p.monoWrap(info.Address)
+			p.monoField("Port: ", "8080")
 		}
 		p.blank()
-		p.line(" " + theme.Header.Render("Tor"))
-	}
-
-	if restOnion == "" {
-		switch {
-		case !s.fetched:
-			p.dim("Reading the node's Tor address...")
-		case s.fetchErr:
-			p.warn("Cannot read the node's Tor address — " +
-				"check: journalctl -u vpn-helperd")
-		default:
-			p.warn("Tor not available")
+		if info.HasCredential() {
+			mac := info.CredentialText()
+			p.labelLine("Macaroon:")
+			p.monoWrap(mac[:min(24, len(mac))] + "...")
+		} else {
+			p.warnWrap("Staged macaroon unavailable. Check the helper service, then retry.")
 		}
-	} else {
-		p.labelLine("Server:")
-		p.monoWrap(restOnion)
-		p.blank()
-		p.labelLine("Port:")
-		p.monoWrap("8080")
+		if s.connection.displayFailed {
+			p.warnWrap("Macaroon display did not complete. Try Copyable Macaroon again.")
+		}
 	}
-
-	mac := readMacaroonHex()
-	if mac != "" {
-		p.blank()
-		preview := mac[:min(24, len(mac))] + "..."
-		p.labelLine("Macaroon:")
-		p.monoWrap(preview)
-	}
-
-	return p.renderWithBottomButtons(
-		s.buttons(), s.btnIdx,
-		s.ctx.ContentFocused, h)
+	return p.renderWithBottomButtons(s.buttons(), s.btnIdx, s.ctx.ContentFocused && s.connection.loaded, h)
 }
 
 func (s *PairingScreen) HelpBindings() []key.Binding {
+	if !s.available() || !s.connection.loaded {
+		return viewDetailBindings(s.ctx.HasTabs)
+	}
 	return tabButtonBindings(s.ctx.HasTabs)
 }

@@ -220,13 +220,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusContent()
 		return m, nil
 	case showQRMsg:
+		m.connectionDisplay = nil
 		m.urlTarget = msg.URL
 		m.qrLabel = msg.Label
 		m.subview = svQR
-		return m, nil
-	case showFullURLMsg:
-		m.urlTarget = msg.URL
-		m.subview = svFullURL
 		return m, nil
 	case refreshStatusMsg:
 		cmd := m.admitStatus()
@@ -444,10 +441,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latestVersion = string(msg)
 		m.screenCtx.LatestVersion = string(msg)
 		return m, nil
-	case nodeAddressesMsg:
-		// Live-read answer — deliver to the screen that asked
-		// (it recorded which tab kind it lives on).
-		return m.dispatchToTab(msg.tab, msg)
+	case connectionInfoResultMsg:
+		return m, m.completeConnectionInfo(msg)
+	case connectionActionMsg:
+		return m, m.showConnectionInfo(msg)
+	case connectionDisplayDoneMsg:
+		if msg.request != nil {
+			for _, tab := range m.tabs {
+				if tab.Screen == msg.request.owner {
+					state := connectionState(tab.Screen)
+					if state != nil && state.request == msg.request {
+						state.displayFailed = msg.err != nil
+					}
+				}
+			}
+		}
+		return m, nil
 	case walletStateMsg:
 		if msg.owner != m.screenCtx || msg.revision != m.screenCtx.walletRevision || walletCreationBusy(m.screenCtx.walletCreationOwner) {
 			return m, nil
@@ -495,8 +504,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.KeyVerificationPending = msg.state.Pending
 		m.state.KeyVerificationKnown = true
 		return m, nil
-	case syncthingWebPasswordMsg:
-		return m.dispatchToTab(tabSyncthingWebUI, msg)
 	case syncthingPairedMsg:
 		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncPairStepPairing {
 			return m, nil
@@ -558,6 +565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.subview = svQR
+		m.connectionDisplay = nil
 		m.urlTarget = msg.owner.address
 		m.qrLabel = "On-Chain Address"
 		return m, nil
@@ -1126,6 +1134,8 @@ func (m Model) handleGenericSubviewKey(
 	case "ctrl+c":
 		return m, tea.Quit
 	case "enter":
+		m.connectionDisplay = nil
+		m.urlTarget = ""
 		m.subview = svNone
 		return m, nil
 	}
