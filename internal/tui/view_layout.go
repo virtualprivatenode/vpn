@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -241,7 +240,7 @@ func (m Model) renderVerifyBanner() string {
 			theme.Dim.Render(" — check: journalctl -u vpn-helperd")
 	}
 	target := "ssh " + paths.AdminUser + "@<server-ip>"
-	if ip := system.PublicIPv4(); ip != "" {
+	if ip := m.state.KeyVerificationAddress; ip != "" {
 		target = "ssh " + paths.AdminUser + "@" + ip
 	}
 	return theme.Warning.Render("⚠ Key verification pending") +

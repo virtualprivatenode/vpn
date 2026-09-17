@@ -43,15 +43,6 @@ func fetchWalletStateCmd(owner *ScreenContext) tea.Cmd {
 	}
 }
 
-func fetchKeyVerificationStateCmd() tea.Cmd {
-	return func() tea.Msg {
-		var state helper.KeyVerificationStateResult
-		err := helper.Call(
-			helper.VerbReadKeyVerificationState, nil, &state)
-		return keyVerificationStateMsg{state: state, err: err}
-	}
-}
-
 // ── Syncthing actions ────────────────────────────────────
 
 func fetchSyncthingDevicesCmd(owner *ScreenContext) tea.Cmd {

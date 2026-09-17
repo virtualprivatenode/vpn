@@ -319,14 +319,25 @@ func TestWalletAndVerificationReadsFailIndependently(t *testing.T) {
 		t.Fatalf("verification state = %+v", verification)
 	}
 
-	verifyAdminLogin = func() (bool, bool, error) { return false, true, nil }
-	result, err = verbVerifyAdminLogin(&verbCtx{}, nil)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestVerificationRejectsParametersAndPropagatesEvidenceFailure(t *testing.T) {
+	withConfigVerbTestDeps(t)
+	calls := 0
+	failure := errors.New("journal unavailable")
+	verifyAdminLogin = func() (bool, bool, error) { calls++; return true, false, failure }
+	keyVerificationPending = func() (bool, error) { calls++; return true, nil }
+	for _, invoke := range []func(*verbCtx, json.RawMessage) (any, error){verbReadKeyVerificationState, verbVerifyAdminLogin} {
+		if _, err := invoke(&verbCtx{}, json.RawMessage(`{"user":"root","path":"/tmp/other"}`)); err == nil {
+			t.Fatal("caller-directed verification accepted")
+		}
 	}
-	verified := result.(helper.VerifyAdminLoginResult)
-	if verified.Pending || !verified.Verified {
-		t.Fatalf("verification result = %+v", verified)
+	if calls != 0 {
+		t.Fatal("invalid parameters reached root operation")
+	}
+	result, err := verbVerifyAdminLogin(&verbCtx{}, nil)
+	if !errors.Is(err, failure) || result != nil || calls != 1 {
+		t.Fatalf("failed evidence became success: %v %v", result, err)
 	}
 }
 

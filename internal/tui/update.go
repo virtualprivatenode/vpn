@@ -5,33 +5,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
-
-// ── First-run verification banner (ruling xvi) ───────────
-//
-// While the root-private verification marker exists, the layout shows a
-// banner asking the operator to verify SSH access from a SECOND
-// terminal. It clears only on journal evidence of a real sshd
-// login for the admin user — the in-session handoff console is
-// deliberately not evidence. The check rides the status tick and
-// costs one privileged journal read per poll while pending.
-
-type adminLoginVerifiedMsg struct {
-	pending bool
-	err     error
-}
-
-func checkAdminLoginCmd() tea.Cmd {
-	return func() tea.Msg {
-		var result helper.VerifyAdminLoginResult
-		err := helper.Call(helper.VerbVerifyAdminLogin, nil, &result)
-		return adminLoginVerifiedMsg{pending: result.Pending, err: err}
-	}
-}
 
 // ── Focus helpers ────────────────────────────────────────
 
@@ -110,7 +87,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			requestStatusCmd,
 			m.visibleWalletListsCmd(),
 			fetchWalletStateCmd(m.screenCtx),
-			fetchKeyVerificationStateCmd())
+			requestSSHVerificationCmd)
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	case tea.PasteMsg:
@@ -495,15 +472,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.visibleWalletListsCmd()
 		}
 		return m, nil
-	case keyVerificationStateMsg:
-		if msg.err != nil {
-			m.state.KeyVerificationKnown = false
-			logger.TUI("read key-verification state: %v", msg.err)
-			return m, nil
-		}
-		m.state.KeyVerificationPending = msg.state.Pending
-		m.state.KeyVerificationKnown = true
-		return m, nil
+	case refreshSSHVerificationMsg:
+		cmd := m.admitSSHVerification()
+		return m, cmd
+	case sshVerificationResultMsg:
+		cmd := m.completeSSHVerification(msg)
+		return m, cmd
 	case syncthingPairedMsg:
 		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncPairStepPairing {
 			return m, nil
@@ -739,28 +713,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.continueWalletCreation(msg.owner)
-	case adminLoginVerifiedMsg:
-		if msg.err != nil {
-			logger.TUI("verify admin login: %v", msg.err)
-		} else {
-			m.state.KeyVerificationPending = msg.pending
-			m.state.KeyVerificationKnown = true
-		}
-		return m, nil
 	case tickMsg:
 		if m.statusActive != nil {
-			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd(), tickEveryCmd(m.pollInterval()))
+			return m, tea.Batch(requestStatusCmd, requestSSHVerificationCmd, m.visibleWalletListsCmd(), tickEveryCmd(m.pollInterval()))
 		}
 		cmds := []tea.Cmd{
 			m.visibleWalletListsCmd(),
 			requestStatusCmd,
 			fetchWalletStateCmd(m.screenCtx),
-			fetchKeyVerificationStateCmd(),
+			requestSSHVerificationCmd,
 			tickEveryCmd(m.pollInterval()),
-		}
-		if m.state.KeyVerificationKnown &&
-			m.state.KeyVerificationPending {
-			cmds = append(cmds, checkAdminLoginCmd())
 		}
 		return m, tea.Batch(cmds...)
 	}
