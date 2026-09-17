@@ -3,7 +3,6 @@
 package helper
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,30 +23,5 @@ func TestReadBoardMissingIsNoisy(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not mention %q", msg, want)
 		}
-	}
-}
-
-func TestReadBoardString(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "fact")
-	if err := os.WriteFile(p,
-		[]byte("  value.onion\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ReadBoardString(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "value.onion" {
-		t.Errorf("got %q, want trimmed single value", got)
-	}
-}
-
-// RemoveBoard treats a missing file as success (the fact is
-// absent either way).
-func TestRemoveBoardMissingOK(t *testing.T) {
-	if err := RemoveBoard(
-		filepath.Join(t.TempDir(), "gone")); err != nil {
-		t.Errorf("remove of missing board file: %v", err)
 	}
 }

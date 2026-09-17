@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
@@ -34,9 +34,9 @@ import (
 // stagers maps each board file to the function that refreshes
 // it from current reality. All run as root.
 var stagers = map[string]func() error{
-	paths.StateLNDTLSCert:      installer.StageLNDTLSCert,
-	paths.StateLNDMacaroon:     installer.StageLNDMacaroon,
-	paths.StateSyncthingAPIKey: installer.StageSyncthingAPIKey,
+	paths.StateLNDTLSCert:      host.StageLNDTLSCert,
+	paths.StateLNDMacaroon:     host.StageLNDMacaroon,
+	paths.StateSyncthingAPIKey: host.StageSyncthingAPIKey,
 }
 
 // freshnessMatrix: verb → board facts the verb invalidates and

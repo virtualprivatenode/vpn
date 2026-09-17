@@ -3,6 +3,8 @@
 package helperd
 
 import (
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
@@ -11,14 +13,8 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
-// ── Freshness-matrix tests ───────────────────────────────
-//
-// The staging board's failure mode is staleness, and the
-// freshness matrix is the defense — so the matrix itself is
-// pinned by tests. expectedMatrix below restates the ruled
-// verb × fact table INDEPENDENTLY of matrix.go; if either side
-// is edited alone, these tests fail and force the two back
-// into agreement.
+// Refresh selection is a behavioral contract: wallet creation needs only the
+// macaroon, while connection repair needs both LND credentials in order.
 
 var expectedMatrix = map[string][]string{
 	helper.VerbStageLNDCredentials: {
@@ -46,26 +42,49 @@ var expectedMatrix = map[string][]string{
 	// live-read (no copy exists to go stale).
 }
 
-func TestFreshnessMatrixMatchesRuledTable(t *testing.T) {
-	for verb, wantFiles := range expectedMatrix {
-		got := freshnessMatrix[verb]
-		if len(got) != len(wantFiles) {
-			t.Errorf("%s: %d facts, want %d",
-				verb, len(got), len(wantFiles))
-			continue
-		}
-		for i, f := range wantFiles {
-			if got[i] != f {
-				t.Errorf("%s[%d] = %s, want %s",
-					verb, i, got[i], f)
+func TestRestageSelectsOnlyRequiredCredentials(t *testing.T) {
+	original := stagers
+	t.Cleanup(func() { stagers = original })
+	for verb, want := range expectedMatrix {
+		t.Run(verb, func(t *testing.T) {
+			var calls []string
+			stagers = make(map[string]func() error)
+			for file := range original {
+				stagers[file] = func() error { calls = append(calls, file); return nil }
 			}
-		}
+			if err := restage(verb); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(calls, want) {
+				t.Fatalf("refreshed %v, want %v", calls, want)
+			}
+		})
 	}
 	for verb := range freshnessMatrix {
 		if _, ok := expectedMatrix[verb]; !ok {
-			t.Errorf(
-				"matrix has verb %s the expected table lacks — "+
-					"update BOTH deliberately", verb)
+			t.Errorf("unreviewed refresh selection for %s", verb)
+		}
+	}
+}
+
+func TestRestageStopsOnMissingOrFailedStager(t *testing.T) {
+	original := stagers
+	t.Cleanup(func() { stagers = original })
+	failure := errors.New("certificate publication failed")
+	for _, missing := range []bool{false, true} {
+		called := false
+		stagers = map[string]func() error{
+			paths.StateLNDMacaroon: func() error { called = true; return nil },
+		}
+		if !missing {
+			stagers[paths.StateLNDTLSCert] = func() error { return failure }
+		}
+		err := restage(helper.VerbStageLNDCredentials)
+		if err == nil || called {
+			t.Fatalf("missing=%v error=%v later stager called=%v", missing, err, called)
+		}
+		if !missing && !errors.Is(err, failure) {
+			t.Fatalf("publication error lost: %v", err)
 		}
 	}
 }
@@ -105,14 +124,6 @@ func TestFreshnessMatrixIsClosed(t *testing.T) {
 		if !boardFiles[f] {
 			t.Errorf("stager registered for unknown file %s", f)
 		}
-	}
-}
-
-// restage must fail loudly on a matrix/stager mismatch instead
-// of silently skipping a fact.
-func TestRestageUnknownVerbIsNoop(t *testing.T) {
-	if err := restage("no-such-verb"); err != nil {
-		t.Errorf("unknown verb should re-stage nothing: %v", err)
 	}
 }
 

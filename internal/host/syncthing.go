@@ -1,6 +1,9 @@
 package host
 
 import (
+	"encoding/xml"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -20,4 +23,36 @@ func SyncthingDeviceID() string {
 		return ""
 	}
 	return strings.TrimSpace(output)
+}
+
+// SyncthingAPIKey reads the private configuration for root-side provisioning.
+// Runtime workflows read their staged credentials in the application layer.
+func SyncthingAPIKey() (string, error) {
+	if os.Geteuid() != 0 {
+		return "", fmt.Errorf("read Syncthing API key requires root")
+	}
+	return syncthingAPIKeyAt(paths.SyncthingConfigXML)
+}
+
+func syncthingAPIKeyAt(path string) (string, error) {
+	output, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	type guiKey struct {
+		APIKey string `xml:"apikey"`
+	}
+	type cfgFile struct {
+		XMLName xml.Name `xml:"configuration"`
+		GUI     guiKey   `xml:"gui"`
+	}
+	var cfg cfgFile
+	if err := xml.Unmarshal(output, &cfg); err != nil {
+		return "", err
+	}
+	if cfg.GUI.APIKey == "" {
+		return "", fmt.Errorf("no API key found")
+	}
+	return cfg.GUI.APIKey, nil
 }

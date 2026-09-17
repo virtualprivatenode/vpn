@@ -76,7 +76,7 @@ func main() {
 				config.DefaultPath)
 			os.Exit(1)
 		}
-		if err := installer.StageLNDTLSCert(); err != nil {
+		if err := host.StageLNDTLSCert(); err != nil {
 			fmt.Fprintf(os.Stderr, "vpn stage-lnd-cert: %v\n", err)
 			os.Exit(1)
 		}
