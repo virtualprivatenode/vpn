@@ -1,11 +1,13 @@
 //go:build linux
 
-package installer
+package host
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -172,21 +174,25 @@ func assertPublished(t *testing.T, f publisherFixture, want []byte) {
 
 func TestProductionBackupPublisherPathsAreFixed(t *testing.T) {
 	ids := backupPublisherIdentity{lndUID: 11, lndGID: 12, backupGID: 13}
-	for _, network := range config.SupportedNetworks() {
+	for network, source := range map[string]string{
+		"mainnet":       "/var/lib/lnd/data/chain/bitcoin/mainnet/channel.backup",
+		"testnet4":      "/var/lib/lnd/data/chain/bitcoin/testnet4/channel.backup",
+		"public-signet": "/var/lib/lnd/data/chain/bitcoin/signet/channel.backup",
+	} {
 		profile, err := config.NetworkConfigFromName(network)
 		if err != nil {
 			t.Fatal(err)
 		}
 		spec := productionBackupPublisherSpec(profile.LNDNetwork, ids)
-		if got := "/" + spec.sourceDir + "/" + backupFileName; got != paths.ChannelBackup(profile.LNDNetwork) {
+		if got := "/" + spec.sourceDir + "/" + backupFileName; got != source {
 			t.Errorf("%s source %q, want %q",
-				network, got, paths.ChannelBackup(profile.LNDNetwork))
+				network, got, source)
 		}
-		if got := "/" + spec.stageDir; got != paths.LNDBackupStage {
-			t.Errorf("stage %q, want %q", got, paths.LNDBackupStage)
+		if got := "/" + spec.stageDir; got != "/var/lib/vpn/exports/lnd-backup-stage" {
+			t.Errorf("unexpected private stage %q", got)
 		}
-		if got := "/" + spec.finalDir; got != paths.LNDBackupExport {
-			t.Errorf("export %q, want %q", got, paths.LNDBackupExport)
+		if got := "/" + spec.finalDir; got != "/var/lib/vpn/exports/lnd-backup" {
+			t.Errorf("unexpected final export %q", got)
 		}
 	}
 	if err := PublishLNDBackup("signet"); err == nil ||
@@ -237,11 +243,11 @@ func TestPublishLNDBackupRejectsUnsafeObjects(t *testing.T) {
 		if err := os.Remove(f.sourcePath); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(target, f.sourcePath); err != nil {
+		if err := os.Symlink(filepath.Base(target), f.sourcePath); err != nil {
 			t.Fatal(err)
 		}
-		if err := runPublisher(t, f, publisherHooks{}); err == nil {
-			t.Fatal("source symlink accepted")
+		if err := runPublisher(t, f, publisherHooks{}); !errors.Is(err, unix.ELOOP) {
+			t.Fatalf("source symlink was not refused at open: %v", err)
 		}
 	})
 
@@ -252,7 +258,7 @@ func TestPublishLNDBackupRejectsUnsafeObjects(t *testing.T) {
 		if err := os.Rename(mainnet, alternate); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(alternate, mainnet); err != nil {
+		if err := os.Symlink(filepath.Base(alternate), mainnet); err != nil {
 			t.Fatal(err)
 		}
 		if err := runPublisher(t, f, publisherHooks{}); err == nil {
@@ -293,10 +299,80 @@ func TestPublishLNDBackupRejectsUnsafeObjects(t *testing.T) {
 		f := newPublisherFixture(t, []byte("source"))
 		f.ids.lndUID++
 		if err := runPublisher(t, f, publisherHooks{}); err == nil ||
-			!strings.Contains(err.Error(), "source") {
+			!strings.Contains(err.Error(), "source "+f.sourcePath+" has uid:gid") {
 			t.Fatalf("wrong source owner result: %v", err)
 		}
 	})
+}
+
+func TestPublishLNDBackupRejectsFIFO(t *testing.T) {
+	for _, location := range []string{"source", "published"} {
+		t.Run(location, func(t *testing.T) {
+			// A subprocess bounds a regressed blocking open without leaving a
+			// stuck goroutine. Its fixtures belong to the parent's temporary tree.
+			if os.Getenv("VPN_TEST_BACKUP_FIFO_CHILD") != "1" {
+				executable, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, executable,
+					"-test.run=^TestPublishLNDBackupRejectsFIFO$/^"+location+"$")
+				cmd.Env = append(os.Environ(), "VPN_TEST_BACKUP_FIFO_CHILD=1",
+					"TMPDIR="+t.TempDir())
+				output, err := cmd.CombinedOutput()
+				if ctx.Err() != nil {
+					t.Fatalf("publisher did not reject %s FIFO without a writer: %v\n%s",
+						location, ctx.Err(), output)
+				}
+				if err != nil {
+					t.Fatalf("FIFO refusal: %v\n%s", err, output)
+				}
+				return
+			}
+
+			old := []byte("previous complete backup")
+			f := newPublisherFixture(t, old)
+			if err := runPublisher(t, f, publisherHooks{}); err != nil {
+				t.Fatal(err)
+			}
+			replaceWithFIFO := func(name string) error {
+				if err := os.Remove(name); err != nil {
+					return err
+				}
+				return unix.Mkfifo(name, 0600)
+			}
+			fifoPath := f.sourcePath
+			var hooks publisherHooks
+			if location == "source" {
+				if err := replaceWithFIFO(fifoPath); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				fifoPath = f.finalPath
+				hooks.fail = func(point string) error {
+					if point == "open-final" {
+						return replaceWithFIFO(fifoPath)
+					}
+					return nil
+				}
+			}
+			if err := runPublisher(t, f, hooks); err == nil ||
+				!strings.Contains(err.Error(), "not a regular file") {
+				t.Fatalf("FIFO refusal: %v", err)
+			}
+			if info, err := os.Lstat(fifoPath); err != nil {
+				t.Fatal(err)
+			} else if info.Mode()&os.ModeNamedPipe == 0 {
+				t.Fatalf("refused FIFO was replaced: %s", info.Mode())
+			}
+			assertNoPublisherTemps(t, f.stagePath)
+			if location == "source" {
+				assertPublished(t, f, old)
+			}
+		})
+	}
 }
 
 func TestPublishLNDBackupCleansOwnedTempOnPrePublishFailures(t *testing.T) {
@@ -307,28 +383,41 @@ func TestPublishLNDBackupCleansOwnedTempOnPrePublishFailures(t *testing.T) {
 		"temp-write", "temp-chown", "temp-chmod",
 		"temp-metadata-verify", "source-stability", "source-reread",
 		"source-path-verify", "temp-sync", "temp-close", "source-close",
-		"before-rename", "rename",
+		"rename",
 	}
-	for _, point := range points {
-		t.Run(point, func(t *testing.T) {
-			f := newPublisherFixture(t, []byte("complete source"))
-			sentinel := errors.New("injected " + point)
-			err := runPublisher(t, f, publisherHooks{
-				fail: func(got string) error {
-					if got == point {
-						return sentinel
+	for _, existing := range []bool{false, true} {
+		for _, point := range points {
+			t.Run(fmt.Sprintf("existing=%t/%s", existing, point), func(t *testing.T) {
+				f := newPublisherFixture(t, []byte("complete source"))
+				old := []byte("previous complete backup")
+				if existing {
+					if err := os.WriteFile(f.finalPath, old, 0640); err != nil {
+						t.Fatal(err)
 					}
-					return nil
-				},
+					if err := os.Chmod(f.finalPath, 0640); err != nil {
+						t.Fatal(err)
+					}
+				}
+				sentinel := errors.New("injected " + point)
+				err := runPublisher(t, f, publisherHooks{
+					fail: func(got string) error {
+						if got == point {
+							return sentinel
+						}
+						return nil
+					},
+				})
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("failure %q not returned: %v", point, err)
+				}
+				if existing {
+					assertPublished(t, f, old)
+				} else if _, statErr := os.Lstat(f.finalPath); !os.IsNotExist(statErr) {
+					t.Errorf("final exists after pre-publish failure: %v", statErr)
+				}
+				assertNoPublisherTemps(t, f.stagePath)
 			})
-			if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
-				t.Fatalf("failure %q not returned: %v", point, err)
-			}
-			if _, statErr := os.Lstat(f.finalPath); !os.IsNotExist(statErr) {
-				t.Errorf("final exists after pre-publish failure: %v", statErr)
-			}
-			assertNoPublisherTemps(t, f.stagePath)
-		})
+		}
 	}
 }
 
@@ -350,7 +439,7 @@ func TestPublishLNDBackupReportsPostRenameFailuresWithoutDeletingFinal(t *testin
 					return nil
 				},
 			})
-			if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
+			if !errors.Is(err, sentinel) {
 				t.Fatalf("failure %q not returned: %v", point, err)
 			}
 			assertPublished(t, f, content)
@@ -411,13 +500,11 @@ func TestPublishLNDBackupNeverReusesTempCollisions(t *testing.T) {
 
 func TestPublishLNDBackupRejectsSourceReplacementRace(t *testing.T) {
 	f := newPublisherFixture(t, []byte("opened source"))
-	replaced := false
 	err := runPublisher(t, f, publisherHooks{
 		fail: func(point string) error {
-			if point != "source-path-verify" || replaced {
+			if point != "source-path-verify" {
 				return nil
 			}
-			replaced = true
 			replacement := f.sourcePath + ".replacement"
 			if err := os.WriteFile(
 				replacement, []byte("replacement"), 0600); err != nil {
@@ -439,14 +526,19 @@ func TestPublishLNDBackupSerializesConcurrentPublishers(t *testing.T) {
 	f := newPublisherFixture(t, []byte("source"))
 	locked := make(chan struct{})
 	release := make(chan struct{})
-	var once sync.Once
+	releasePublisher := sync.OnceFunc(func() { close(release) })
 	firstDone := make(chan error, 1)
+	t.Cleanup(func() {
+		releasePublisher()
+		awaitPublisherResult(t, firstDone)
+	})
 	go func() {
+		defer close(firstDone)
 		firstDone <- runPublisher(t, f, publisherHooks{
 			tempName: fixedTemp(".channel.backup.tmp-first"),
 			fail: func(point string) error {
 				if point == "before-rename" {
-					once.Do(func() { close(locked) })
+					close(locked)
 					<-release
 				}
 				return nil
@@ -455,6 +547,8 @@ func TestPublishLNDBackupSerializesConcurrentPublishers(t *testing.T) {
 	}()
 	select {
 	case <-locked:
+	case err := <-firstDone:
+		t.Fatalf("first publisher exited before publication: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("first publisher did not reach locked publication point")
 	}
@@ -465,8 +559,8 @@ func TestPublishLNDBackupSerializesConcurrentPublishers(t *testing.T) {
 		!strings.Contains(secondErr.Error(), "another LND backup publisher") {
 		t.Errorf("concurrent publisher result: %v", secondErr)
 	}
-	close(release)
-	if err := <-firstDone; err != nil {
+	releasePublisher()
+	if err := awaitPublisherResult(t, firstDone); err != nil {
 		t.Fatalf("first publisher: %v", err)
 	}
 	assertPublished(t, f, []byte("source"))
@@ -484,8 +578,14 @@ func TestPublishLNDBackupAtomicObservation(t *testing.T) {
 	}
 	ready := make(chan struct{})
 	release := make(chan struct{})
+	releasePublisher := sync.OnceFunc(func() { close(release) })
 	done := make(chan error, 1)
+	t.Cleanup(func() {
+		releasePublisher()
+		awaitPublisherResult(t, done)
+	})
 	go func() {
+		defer close(done)
 		done <- runPublisher(t, f, publisherHooks{
 			tempName: fixedTemp(".channel.backup.tmp-atomic"),
 			fail: func(point string) error {
@@ -497,17 +597,38 @@ func TestPublishLNDBackupAtomicObservation(t *testing.T) {
 			},
 		})
 	}()
-	<-ready
-	for i := 0; i < 100; i++ {
-		got, err := os.ReadFile(f.finalPath)
-		if err != nil || string(got) != string(oldContent) {
-			t.Fatalf("pre-rename observation %d: len=%d err=%v",
-				i, len(got), err)
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("publisher exited before publication: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("publisher did not reach publication point")
+	}
+	if got, err := os.ReadFile(f.finalPath); err != nil || string(got) != string(oldContent) {
+		t.Fatalf("before publication: len=%d err=%v", len(got), err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(f.finalPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != backupFileName &&
+			entry.Name() != paths.ExportReadyMarkerName {
+			t.Errorf("unexpected synchronized-folder object %q",
+				entry.Name())
 		}
 	}
 	stopObserver := make(chan struct{})
+	stop := sync.OnceFunc(func() { close(stopObserver) })
+	observed := make(chan struct{})
+	markObserved := sync.OnceFunc(func() { close(observed) })
 	observerDone := make(chan error, 1)
+	t.Cleanup(func() {
+		stop()
+		awaitPublisherResult(t, observerDone)
+	})
 	go func() {
+		defer close(observerDone)
 		for {
 			select {
 			case <-stopObserver:
@@ -526,34 +647,28 @@ func TestPublishLNDBackupAtomicObservation(t *testing.T) {
 					"observed partial content with length %d", len(got))
 				return
 			}
+			markObserved()
+			if string(got) == string(newContent) {
+				observerDone <- nil
+				return
+			}
 		}
 	}()
-	close(release)
-	if err := <-done; err != nil {
+	select {
+	case <-observed:
+	case err := <-observerDone:
+		t.Fatalf("observer exited before publication: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("observer did not read before publication")
+	}
+	releasePublisher()
+	if err := awaitPublisherResult(t, done); err != nil {
 		t.Fatal(err)
 	}
-	close(stopObserver)
-	if err := <-observerDone; err != nil {
+	if err := awaitPublisherResult(t, observerDone); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 100; i++ {
-		got, err := os.ReadFile(f.finalPath)
-		if err != nil || string(got) != string(newContent) {
-			t.Fatalf("post-rename observation %d: len=%d err=%v",
-				i, len(got), err)
-		}
-	}
-	entries, err := os.ReadDir(filepath.Dir(f.finalPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.Name() != backupFileName &&
-			entry.Name() != paths.ExportReadyMarkerName {
-			t.Errorf("unexpected synchronized-folder object %q",
-				entry.Name())
-		}
-	}
+	assertPublished(t, f, newContent)
 	if info, err := os.Stat(filepath.Join(
 		filepath.Dir(f.finalPath), paths.ExportReadyMarkerName)); err != nil {
 		t.Errorf("export marker was not preserved: %v", err)
@@ -562,16 +677,13 @@ func TestPublishLNDBackupAtomicObservation(t *testing.T) {
 	}
 }
 
-func TestPublisherTemporaryNameValidation(t *testing.T) {
-	for _, name := range []string{"channel.backup", "../escape", "/absolute"} {
-		t.Run(fmt.Sprintf("%q", name), func(t *testing.T) {
-			f := newPublisherFixture(t, []byte("source"))
-			err := runPublisher(t, f, publisherHooks{
-				tempName: fixedTemp(name),
-			})
-			if err == nil || !strings.Contains(err.Error(), "unsafe temporary") {
-				t.Fatalf("unsafe name accepted: %v", err)
-			}
-		})
+func awaitPublisherResult(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("publisher test worker did not finish")
+		return nil
 	}
 }

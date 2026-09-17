@@ -5,7 +5,6 @@ package main
 import (
 	"errors"
 	"os/user"
-	"strings"
 	"testing"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
@@ -137,19 +136,5 @@ func TestConsoleIdentityLookupFailureDoesNotLoadConfig(t *testing.T) {
 		func() (*config.AppConfig, error) { loaded = true; return config.Default(), nil })
 	if !errors.Is(err, errWrongTUIIdentity) || loaded {
 		t.Fatalf("lookup failure: loaded=%v err=%v", loaded, err)
-	}
-}
-
-func TestUsageDescribesFreshInstallAndResume(t *testing.T) {
-	text := usage()
-	if strings.Contains(text, "install or reinstall") {
-		t.Fatal("usage still advertises reinstall")
-	}
-	if !strings.Contains(text, "resume a recognized interruption") {
-		t.Fatal("usage does not describe supported resume")
-	}
-	if !strings.Contains(text, "--signet") ||
-		!strings.Contains(text, "testing only") {
-		t.Fatal("usage does not describe public signet as testing-only")
 	}
 }

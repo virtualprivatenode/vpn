@@ -1,6 +1,6 @@
 //go:build linux
 
-package installer
+package host
 
 import (
 	"crypto/rand"
@@ -23,6 +23,8 @@ import (
 )
 
 const (
+	lndUser          = "lnd"
+	backupGroup      = "vpn-lnd-backup"
 	backupFileName   = "channel.backup"
 	maxTempNameTries = 16
 )
@@ -228,9 +230,10 @@ func publishLNDBackup(
 			spec.sourceDisplay, err)
 	}
 	defer unix.Close(sourceDirFD)
+	// A FIFO must reach the regular-file check without waiting for a writer.
 	sourceFD, err := openAtNoSymlinks(
 		sourceDirFD, backupFileName,
-		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return fmt.Errorf("open source %s: %w", spec.sourceDisplay, err)
 	}
@@ -485,9 +488,10 @@ func publishLNDBackup(
 	if err := hooks.check("open-final"); err != nil {
 		return fmt.Errorf("open published backup: %w", err)
 	}
+	// Refuse a FIFO substituted after rename without waiting for a writer.
 	publishedFD, err := openAtNoSymlinks(
 		finalFD, backupFileName,
-		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return fmt.Errorf("open published backup: %w", err)
 	}
