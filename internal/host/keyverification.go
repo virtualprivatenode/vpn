@@ -1,4 +1,4 @@
-package installer
+package host
 
 import (
 	"errors"
@@ -104,28 +104,45 @@ func clearKeyVerificationPendingAt(path string, expectedUID int) error {
 	return syncMarkerDir(path)
 }
 
-func ensureKeyVerificationPending() error {
-	return ensureKeyVerificationPendingAt(paths.KeyVerificationMarker, 0)
+// SetKeyVerificationPending publishes the installer's first-login requirement.
+// Only the installer arms it; runtime verification can only clear it.
+func SetKeyVerificationPending(pending bool) error {
+	if os.Geteuid() != 0 {
+		return errors.New("SSH login verification requires root")
+	}
+	if pending {
+		return ensureKeyVerificationPendingAt(paths.KeyVerificationMarker, 0)
+	}
+	return clearKeyVerificationPendingAt(paths.KeyVerificationMarker, 0)
 }
 
-// KeyVerificationPending reads the root-private workflow marker. It is called
-// by the root helper; the unprivileged TUI never reads the private directory.
+// KeyVerificationPending reads the root-private workflow marker.
 func KeyVerificationPending() (bool, error) {
+	if os.Geteuid() != 0 {
+		return false, errors.New("SSH login verification requires root")
+	}
 	return keyVerificationPendingAt(paths.KeyVerificationMarker, 0)
 }
 
 // VerifyAdminLogin clears the marker only after real sshd journal evidence.
-// pending reports the state after this check; verified reports whether this
-// call observed evidence and cleared the marker.
+// Unavailable evidence leaves the marker intact and returns an error.
 func VerifyAdminLogin() (pending, verified bool, err error) {
-	pending, err = KeyVerificationPending()
+	if os.Geteuid() != 0 {
+		return false, false, errors.New("SSH login verification requires root")
+	}
+	return verifyAdminLoginAt(paths.KeyVerificationMarker, 0, AdminLoginObserved)
+}
+
+func verifyAdminLoginAt(path string, uid int, observe func() (bool, error)) (pending, verified bool, err error) {
+	pending, err = keyVerificationPendingAt(path, uid)
 	if err != nil || !pending {
 		return pending, false, err
 	}
-	if !AdminLoginObserved() {
-		return true, false, nil
+	observed, err := observe()
+	if err != nil || !observed {
+		return true, false, err
 	}
-	if err := clearKeyVerificationPendingAt(paths.KeyVerificationMarker, 0); err != nil {
+	if err := clearKeyVerificationPendingAt(path, uid); err != nil {
 		return true, false, err
 	}
 	return false, true, nil

@@ -89,8 +89,8 @@ var (
 	syncthingResiduePresent      = installer.SyncthingResiduePresent
 	verifySyncthingPrerequisites = installer.VerifySyncthingInstallPrerequisites
 	walletExists                 = installer.WalletExists
-	keyVerificationPending       = installer.KeyVerificationPending
-	verifyAdminLogin             = installer.VerifyAdminLogin
+	keyVerificationPending       = host.KeyVerificationPending
+	verifyAdminLogin             = host.VerifyAdminLogin
 	stageSyncthingWebPassword    = func(password string) error {
 		return helper.WriteBoard(paths.StateSyncthingWebPassword,
 			[]byte(password+"\n"))
@@ -310,8 +310,11 @@ func verbReadWalletState(_ *verbCtx, _ json.RawMessage) (any, error) {
 }
 
 func verbReadKeyVerificationState(
-	_ *verbCtx, _ json.RawMessage,
+	_ *verbCtx, params json.RawMessage,
 ) (any, error) {
+	if err := rejectParams(params); err != nil {
+		return nil, err
+	}
 	pending, err := keyVerificationPending()
 	if err != nil {
 		return nil, err
@@ -322,7 +325,10 @@ func verbReadKeyVerificationState(
 // This is a closed security-workflow mutation, not a caller-directed config
 // write: current sshd journal evidence is the only authority allowed to clear
 // the root-private marker.
-func verbVerifyAdminLogin(_ *verbCtx, _ json.RawMessage) (any, error) {
+func verbVerifyAdminLogin(_ *verbCtx, params json.RawMessage) (any, error) {
+	if err := rejectParams(params); err != nil {
+		return nil, err
+	}
 	pending, verified, err := verifyAdminLogin()
 	if err != nil {
 		return nil, err

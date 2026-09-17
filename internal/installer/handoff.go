@@ -27,12 +27,6 @@ package installer
 //     DESIGN fallback if the mechanism fails red-team scrutiny is
 //     the watched-handoff screen specified in ruling xvi (swap
 //     costs nothing; not built unless the live run demands it).
-//
-// This file also owns the first-run verification evidence: the
-// TUI's "key verification pending" banner clears only when sshd's
-// journal shows a real accepted login for the admin user — the
-// in-session console is deliberately NOT evidence that SSH access
-// works.
 
 import (
 	"fmt"
@@ -136,39 +130,4 @@ func printConsoleOnlyInstructions() {
 		"\n  login password, then add an SSH key or enable"+
 		"\n  password login from the node TUI (System)."+
 		"\n\n", paths.AdminUser)
-}
-
-// AdminLoginObserved reports whether sshd's journal shows an
-// accepted login for the admin user. Evidence for clearing the
-// first-run verification banner: the admin user exists only
-// since this install, so ANY accepted login is a verified,
-// independent way in — no time window needed. Errors (journal
-// unreadable, -g unsupported) report false: the banner stays,
-// which only nags, never locks out.
-func AdminLoginObserved() bool {
-	// No privilege on either calling side: root reads the
-	// journal freely, and the admin user reads it through
-	// systemd-journal group membership (granted at install).
-	out, err := system.RunOutput("journalctl",
-		"-u", "ssh", "--no-pager", "-o", "cat",
-		"-g", "Accepted")
-	if err != nil {
-		return false
-	}
-	return journalShowsAdminLogin(out)
-}
-
-// journalShowsAdminLogin scans journal lines for sshd's accepted-
-// login record for the admin user ("Accepted publickey for vpn
-// from …" / "Accepted password for vpn from …"). Pure —
-// unit-tested.
-func journalShowsAdminLogin(journal string) bool {
-	needle := " for " + paths.AdminUser + " from "
-	for _, line := range strings.Split(journal, "\n") {
-		if strings.Contains(line, "Accepted ") &&
-			strings.Contains(line, needle) {
-			return true
-		}
-	}
-	return false
 }

@@ -109,11 +109,6 @@ type walletStateMsg struct {
 	err      error
 }
 
-type keyVerificationStateMsg struct {
-	state helper.KeyVerificationStateResult
-	err   error
-}
-
 type syncthingPairedMsg struct {
 	owner   *SyncthingPairScreen
 	attempt uint64
@@ -223,12 +218,14 @@ type Model struct {
 	// L16: section home screens (nil = legacy path)
 	sectionScreens [numSections]Screen
 
-	latestVersion   string
-	statusCollector statusReader
-	statusActive    *statusRequest
-	statusPending   bool
-	statusScope     statusScope
-	statusRevision  uint64
+	latestVersion       string
+	statusCollector     statusReader
+	statusActive        *statusRequest
+	statusPending       bool
+	statusScope         statusScope
+	statusRevision      uint64
+	verificationActive  *sshVerificationRequest
+	verificationPending bool
 
 	// QR fullscreen (Model-owned overlay)
 	urlTarget         string
@@ -341,6 +338,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.SSHVerification != nil {
+			m.screenCtx.SSHVerification.Close()
+		}
 		if m.screenCtx.ConnectionInfo != nil {
 			m.screenCtx.ConnectionInfo.Close()
 		}
@@ -388,15 +388,6 @@ func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 		state.WalletExists = wallet.WalletExists
 		state.WalletKnown = true
 	}
-	var verification helper.KeyVerificationStateResult
-	if err := helper.Call(
-		helper.VerbReadKeyVerificationState,
-		nil, &verification); err != nil {
-		logger.TUI("read key-verification state: %v", err)
-	} else {
-		state.KeyVerificationPending = verification.Pending
-		state.KeyVerificationKnown = true
-	}
 	if enabled, err := app.NewSSHAccess().PasswordAuth(); err != nil {
 		logger.TUI("read live SSH password authentication: %v", err)
 	} else {
@@ -416,7 +407,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		requestStatusCmd,
 		fetchWalletStateCmd(m.screenCtx),
-		fetchKeyVerificationStateCmd(),
+		requestSSHVerificationCmd,
 		fetchLatestVersionCmd(),
 		tickEveryCmd(m.pollInterval()))
 }

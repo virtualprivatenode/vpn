@@ -57,6 +57,7 @@ type ScreenContext struct {
 	ServiceControls     serviceControls
 	PackageUpdates      packageUpdates
 	Reboots             reboots
+	SSHVerification     sshVerificationReader
 	ConnectionInfo      connectionInfoReader
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
@@ -124,6 +125,7 @@ type RuntimeState struct {
 	WalletKnown             bool
 	KeyVerificationPending  bool
 	KeyVerificationKnown    bool
+	KeyVerificationAddress  string
 	SSHPasswordAuthDisabled bool
 	SSHPasswordAuthKnown    bool
 	SyncthingDevices        []syncthing.Device

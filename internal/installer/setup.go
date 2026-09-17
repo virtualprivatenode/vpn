@@ -396,13 +396,12 @@ func prepareInstallCompletion(
 	cfg.DbCache = *ledger.Context.DbCacheMB
 	dec.DbCacheMB = cfg.DbCache
 	if ledger.done("identity.access") {
-		if !AdminLoginObserved() {
-			if err := ensureKeyVerificationPending(); err != nil {
-				return fmt.Errorf("arm SSH login verification: %w", err)
-			}
-		} else if err := clearKeyVerificationPendingAt(
-			paths.KeyVerificationMarker, 0); err != nil {
-			return fmt.Errorf("clear SSH login verification: %w", err)
+		observed, err := host.AdminLoginObserved()
+		if err != nil {
+			logger.Install("SSH login evidence unavailable; leaving verification pending: %v", err)
+		}
+		if err := host.SetKeyVerificationPending(!observed || err != nil); err != nil {
+			return fmt.Errorf("prepare SSH login verification: %w", err)
 		}
 	}
 	if err := config.Save(cfg); err != nil {
