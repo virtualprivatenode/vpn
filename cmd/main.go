@@ -11,6 +11,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helperd"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/tui"
@@ -84,7 +85,7 @@ func main() {
 		// Intended for lnd-backup-export.service. The publisher
 		// validates the exact lnd identity and unit-local backup
 		// group itself; this dispatch grants no privileges.
-		if err := installer.PublishLNDBackup(opts.Network); err != nil {
+		if err := host.PublishLNDBackup(opts.Network); err != nil {
 			fmt.Fprintf(os.Stderr,
 				"vpn publish-lnd-backup: %v\n", err)
 			os.Exit(1)
