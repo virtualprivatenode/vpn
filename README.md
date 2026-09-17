@@ -231,6 +231,11 @@ Open the **Wallet** section in the TUI for Zeus pairing — scan a QR
 code or copy the connection string. Both Tor and clearnet pairings
 are supported if your node is in hybrid P2P mode.
 
+Connection information is read when you open or return to the pairing tab.
+QR codes and **Copyable Macaroon** use that same observation. A failed read
+shows **Retry** and does not reuse an earlier credential. Reading the connection
+information does not verify that Zeus can reach or authenticate to LND.
+
 #### Tor only (default)
 1. Open the Wallet section → Pair Wallet
 2. In Zeus: Advanced Set-Up → LND (REST)
@@ -314,7 +319,11 @@ Discovery servers, relays, and NAT traversal are disabled.
 
 Your `channel.backup` syncs automatically whenever both devices are
 online. The Syncthing web UI on the Node is accessible over Tor for
-advanced configuration.
+advanced configuration. Its **Web UI** tab refreshes the Tor address and staged
+installation password when opened or revisited. The URL is visible independently
+of **Show Password**; returning to the tab hides the password again. **Retry**
+repeats an unsuccessful read. The displayed password does not track password
+changes made in Syncthing's external web UI.
 
 For the full setup guide, see
 [Syncthing Setup Guide](docs/syncthing.md).

@@ -57,6 +57,7 @@ type ScreenContext struct {
 	ServiceControls     serviceControls
 	PackageUpdates      packageUpdates
 	Reboots             reboots
+	ConnectionInfo      connectionInfoReader
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
@@ -233,11 +234,6 @@ type focusParentMsg struct{}
 type showQRMsg struct {
 	URL   string
 	Label string
-}
-
-// showFullURLMsg tells Model to show the fullscreen URL view.
-type showFullURLMsg struct {
-	URL string
 }
 
 // refreshStatusMsg tells Model to re-fetch node status.

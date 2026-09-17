@@ -102,19 +102,6 @@ type latestVersionMsg string
 // or its in-progress state.
 type tabActivatedMsg struct{}
 
-// nodeAddressesMsg carries the live-read display facts (onion
-// hostnames, the Syncthing device ID) fetched at screen entry
-// through the helper's read-node-addresses operation. tab
-// names the screen that asked, so Update can route the answer
-// back to it. No screen caches these beyond its own lifetime —
-// the facts have no board copy, and re-entering a screen asks
-// again.
-type nodeAddressesMsg struct {
-	tab   tabKind
-	addrs helper.NodeAddressesResult
-	err   error
-}
-
 type walletStateMsg struct {
 	owner    *ScreenContext
 	revision uint64
@@ -244,8 +231,9 @@ type Model struct {
 	statusRevision  uint64
 
 	// QR fullscreen (Model-owned overlay)
-	urlTarget string
-	qrLabel   string
+	urlTarget         string
+	qrLabel           string
+	connectionDisplay *connectionActionMsg
 
 	// Navigation
 	nav            NavSidebar
@@ -353,6 +341,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.ConnectionInfo != nil {
+			m.screenCtx.ConnectionInfo.Close()
+		}
 		if m.screenCtx.Reboots != nil {
 			m.screenCtx.Reboots.Close()
 		}

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -10,29 +9,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/virtualprivatenode/vpn/internal/bitcoin"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
-
-// Onion addresses have NO unprivileged copy: screens that
-// display one fetch it live at entry with
-// fetchNodeAddressesCmd (cmds.go) and render from their own
-// state. The originals are readable only by root and the tor
-// user, and a staged copy could outlive a hidden service that
-// root destroyed and recreated — a dead address rendered
-// confidently, with no failure moment to catch it.
-
-func readMacaroonHex() string {
-	data, err := helper.ReadBoard(paths.StateLNDMacaroon)
-	if err != nil {
-		logger.Status("Warning: failed to read macaroon: %v", err)
-		return ""
-	}
-	return hex.EncodeToString(data)
-}
 
 // ── Fee estimation via bitcoin-cli ───────────────────────
 

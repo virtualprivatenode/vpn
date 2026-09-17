@@ -14,7 +14,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
-	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
 // ── Polling & version ────────────────────────────────────
@@ -50,25 +49,6 @@ func fetchKeyVerificationStateCmd() tea.Cmd {
 		err := helper.Call(
 			helper.VerbReadKeyVerificationState, nil, &state)
 		return keyVerificationStateMsg{state: state, err: err}
-	}
-}
-
-// fetchNodeAddressesCmd asks the helper's read-node-addresses
-// operation for the node's onion hostnames and Syncthing
-// device ID, live. Screens that display these run this at
-// entry (Init, and again on tabActivatedMsg) and render the
-// answer from their own state — never from a stored copy that
-// could outlive the truth. tab routes the answer back to the
-// requesting screen.
-func fetchNodeAddressesCmd(tab tabKind) tea.Cmd {
-	return func() tea.Msg {
-		var res helper.NodeAddressesResult
-		err := helper.Call(
-			helper.VerbReadNodeAddresses, nil, &res)
-		if err != nil {
-			logger.Status("read node addresses: %v", err)
-		}
-		return nodeAddressesMsg{tab: tab, addrs: res, err: err}
 	}
 }
 
@@ -217,33 +197,6 @@ func labelTxCmd(owner *OnChainHomeScreen, client app.TransactionLabelClient, pre
 // user presses Enter; the TUI resumes. Used where the user
 // wants to select/copy text with their terminal's native
 // mechanism rather than via the TUI's monoWrap/QR overlays.
-
-func showMacaroonCmd() tea.Cmd {
-	mac := readMacaroonHex()
-	if mac == "" {
-		return nil
-	}
-	tmpFile, err := os.CreateTemp("", "vpn-macaroon-")
-	if err != nil {
-		return nil
-	}
-	tmpPath := tmpFile.Name()
-	_, _ = tmpFile.WriteString(mac)
-	_ = tmpFile.Close()
-	// Macaroon hex is a credential — wipe scrollback
-	// on exit so it doesn't sit in the user's terminal
-	// history after they return to the TUI.
-	c := exec.Command("bash", "-c",
-		"clear && echo && cat "+tmpPath+
-			" && echo && echo && echo "+
-			"'  Press Enter...' && read && rm -f "+
-			tmpPath+
-			` && printf '\033[2J\033[3J\033[H'`)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		_ = os.Remove(tmpPath)
-		return systemRefreshMsg{}
-	})
-}
 
 func showInvoiceCmd(invoice string) tea.Cmd {
 	if invoice == "" {
