@@ -196,12 +196,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeTab = 0
 		m.focusContent()
 		return m, nil
-	case showQRMsg:
-		m.connectionDisplay = nil
-		m.urlTarget = msg.URL
-		m.qrLabel = msg.Label
-		m.subview = svQR
-		return m, nil
+	case qrCopyDisplayMsg:
+		return m, m.showQRCopyDisplay(msg.request)
+	case qrCopyDisplayDoneMsg:
+		return m, m.completeQRCopyDisplay(msg)
 	case refreshStatusMsg:
 		cmd := m.admitStatus()
 		return m, cmd
@@ -540,6 +538,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.subview = svQR
 		m.connectionDisplay = nil
+		m.qrCopyOverlay = nil
 		m.urlTarget = msg.owner.address
 		m.qrLabel = "On-Chain Address"
 		return m, nil
@@ -1090,6 +1089,7 @@ func (m Model) handleGenericSubviewKey(
 		return m, tea.Quit
 	case "enter":
 		m.connectionDisplay = nil
+		m.qrCopyOverlay = nil
 		m.urlTarget = ""
 		m.subview = svNone
 		return m, nil

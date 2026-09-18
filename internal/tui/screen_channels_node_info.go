@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -10,53 +11,12 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── NodeInfoScreen ──────────────────────────────────────
-// Displays the node's public identity — alias, pubkey,
-// P2P mode, inbound liquidity — with Show QR buttons
-// (reusing showQRMsg like the off-chain receive flow)
-// and a Copy URIs button that hands the terminal to a
-// shell displaying all advertised URIs for native
-// terminal copy-paste (reusing the showInvoiceCmd
-// pattern from update.go).
-//
-// Reads live data through ctx.Status so the displayed
-// values stay in sync with LND's current state.
-//
-// Node URIs are NOT rendered in the TUI body. They're
-// too long to fit cleanly at the 67-char pane width
-// (a Tor URI wraps awkwardly mid-hostname) and the
-// shell Copy URIs view is strictly better for the
-// actual use case of "hand this to a peer". The TUI
-// body shows identity, the shell view shows URIs.
-//
-// Button row is dynamic based on which URI types LND
-// advertises:
-//   - 0 URIs:     (no buttons) + status text (sync-aware:
-//     expected during chain sync, a warning once synced)
-//   - clearnet:   [ Show QR (Clearnet) ] [ Copy URIs ]
-//   - tor:        [ Show QR (Tor) ] [ Copy URIs ]
-//   - both:       [ Show QR (Clearnet) ] [ Show QR (Tor) ] [ Copy URIs ]
-//
-// There is deliberately no Done button. Node Info is a
-// view-only informational screen like channel-history
-// or channel-detail, not a flow — the user exits via
-// the tab bar (up arrow → close), the sidebar (left
-// arrow), backspace (focus parent tab), or by
-// switching tabs.
-//
-// QR buttons are always type-labeled even when there's
-// only one URI, because sovereignty-focused users want
-// explicit confirmation of which network advertisement
-// they're handing to a peer.
-//
-// The clearnet/Tor classification is by substring check
-// on ".onion:" — any URI containing that marker is Tor,
-// anything else is treated as clearnet. Matches the
-// inline pattern used in screen_channels_open.go.
-
+// NodeInfoScreen presents shared node observations. QR and Copy require a
+// current advertisement; terminal Copy retains its accepted snapshot.
 type NodeInfoScreen struct {
 	ctx       *ScreenContext
 	buttonIdx int
+	display   qrCopyDisplayState
 }
 
 func NewNodeInfoScreen(
@@ -95,17 +55,10 @@ func classifyURIs(
 	return
 }
 
-// buttons returns the current dynamic button labels
-// in the order they render. Re-computed each time
-// instead of cached, because URIs can change across
-// status ticks (e.g. if P2P mode changes under us).
-//
-// When there are no URIs, returns an empty slice —
-// the button row will not render, and the warn text
-// in the view body explains the degraded state. The
-// user still navigates away via left/up arrows.
+// Sharing actions require a current advertisement; retained values remain
+// visible in the body during an observation failure.
 func (s *NodeInfoScreen) buttons() []string {
-	if s.ctx.Status == nil {
+	if s.ctx.Status == nil || !s.ctx.Status.Node.Fresh() {
 		return nil
 	}
 	clearnet, tor := classifyURIs(s.ctx.Status.Node.Value.URIs)
@@ -129,7 +82,7 @@ func (s *NodeInfoScreen) buttons() []string {
 func (s *NodeInfoScreen) buttonAction(
 	idx int,
 ) tea.Cmd {
-	if s.ctx.Status == nil {
+	if s.ctx.Status == nil || !s.ctx.Status.Node.Fresh() {
 		return nil
 	}
 	clearnet, tor := classifyURIs(s.ctx.Status.Node.Value.URIs)
@@ -137,34 +90,20 @@ func (s *NodeInfoScreen) buttonAction(
 	if idx < 0 || idx >= len(buttons) {
 		return nil
 	}
-	label := buttons[idx]
-	switch label {
-	case "Show QR (Clearnet)":
-		if len(clearnet) == 0 {
-			return nil
-		}
-		uri := clearnet[0]
-		return func() tea.Msg {
-			return showQRMsg{
-				URL:   uri,
-				Label: "Node URI (Clearnet)",
-			}
-		}
-	case "Show QR (Tor)":
-		if len(tor) == 0 {
-			return nil
-		}
-		uri := tor[0]
-		return func() tea.Msg {
-			return showQRMsg{
-				URL:   uri,
-				Label: "Node URI (Tor)",
-			}
-		}
-	case "Copy URIs":
-		return showNodeURIsCmd(s.ctx.Status.Node.Value.URIs)
+	request := &qrCopyDisplayRequest{
+		owner: s, wallet: s.ctx.walletObservationScope(), pubkey: s.ctx.Status.Node.Value.Pubkey,
 	}
-	return nil
+	switch buttons[idx] {
+	case "Show QR (Clearnet)":
+		request.text, request.label = clearnet[0], "Node URI (Clearnet)"
+	case "Show QR (Tor)":
+		request.text, request.label = tor[0], "Node URI (Tor)"
+	case "Copy URIs":
+		request.copy = true
+		request.uris = slices.Clone(s.ctx.Status.Node.Value.URIs)
+		request.text = nodeURIText(request.uris)
+	}
+	return s.display.command(request)
 }
 
 func (s *NodeInfoScreen) maxBtn() int {
@@ -333,17 +272,7 @@ func (s *NodeInfoScreen) View(w, h int) string {
 	p.blank()
 
 	// ── URI status ────────────────────────────────
-	// Node URIs themselves aren't rendered in the
-	// TUI body — they live in the Copy URIs shell
-	// view where the terminal can display them
-	// cleanly and the user can select with native
-	// mouse selection. Here we either explain how to
-	// access them or explain why none are advertised.
-	// Sync-aware: LND advertises URIs only once its
-	// chain backend is synced, so during initial
-	// block download an empty list is the expected
-	// state, not a misconfiguration — the warning is
-	// reserved for a synced node.
+	// URI text stays in the copy view, where terminal selection avoids wrapping.
 	if !status.Node.Fresh() {
 		p.dim("Advertised addresses unavailable or stale.")
 	} else if len(status.Node.Value.URIs) == 0 {
@@ -364,9 +293,13 @@ func (s *NodeInfoScreen) View(w, h int) string {
 		p.dim(
 			"Press Copy URIs to view your node URIs")
 		p.dim(
-			"in a shell for easy copy-paste, or Show")
+			"for easy copy-paste, or Show")
 		p.dim(
 			"QR to scan one into another device.")
+	}
+
+	if s.display.failed {
+		p.warn("Copy display did not complete. Try again.")
 	}
 
 	// ── Buttons pinned to bottom ──────────────────

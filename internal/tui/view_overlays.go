@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	qrterminal "github.com/mdp/qrterminal/v3"
+	"rsc.io/qr"
 
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -19,6 +20,10 @@ func (m Model) viewQR() string {
 	if m.connectionDisplayUnavailable() {
 		return m.viewConnectionUnavailable()
 	}
+	if m.qrCopyOverlay != nil && !m.qrCopyDisplayCurrent(m.qrCopyOverlay) {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			theme.Warn.Render("QR information changed or is unavailable.\nPress enter to return."))
+	}
 	uri := m.urlTarget
 	label := m.qrLabel
 
@@ -30,13 +35,15 @@ func (m Model) viewQR() string {
 				"QR not available."))
 	}
 
-	qr := renderQRCode(uri)
+	code := renderQRCode(uri)
 	var lines []string
 	lines = append(lines,
 		theme.Header.Render(label))
 	lines = append(lines, "")
-	if qr != "" {
-		lines = append(lines, qr)
+	if code != "" {
+		lines = append(lines, code)
+	} else {
+		lines = append(lines, theme.Warn.Render("QR not available for this text."))
 	}
 	lines = append(lines, "")
 	lines = append(lines, theme.Footer.Render(
@@ -68,17 +75,12 @@ func (m Model) viewConnectionUnavailable() string {
 
 // ── QR and encoding utilities ──────────────────────────
 
-// renderQRCode generates a terminal-friendly QR code from
-// the given data using qrterminal's halfblocks mode.
-//
-// All four halfblock character fields are set explicitly,
-// even though qrterminal v3.2.1's GenerateWithConfig fills
-// in defaults for any unset ones. Being explicit means the
-// code no longer depends on that library default-filling
-// behavior — if the library is ever downgraded to a version
-// that doesn't fill defaults, or replaced by a fork that
-// doesn't, the config still produces correct output.
+// qrterminal discards encoding errors before dereferencing the code. Check with
+// its pinned encoder first so oversized payloads cannot panic the TUI.
 func renderQRCode(data string) string {
+	if _, err := qr.Encode(data, qr.L); err != nil {
+		return ""
+	}
 	var buf bytes.Buffer
 	config := qrterminal.Config{
 		Level:          qrterminal.L,

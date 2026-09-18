@@ -167,6 +167,7 @@ func (m *Model) showConnectionInfo(msg connectionActionMsg) tea.Cmd {
 		state.displayFailed = false
 		return showConnectionMacaroonCmd(msg.request, state.info.CredentialText())
 	}
+	m.qrCopyOverlay = nil
 	m.connectionDisplay = &msg
 	m.urlTarget = state.info.URL(msg.host)
 	if msg.action == connectionWebURL {

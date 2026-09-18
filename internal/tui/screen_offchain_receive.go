@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -32,6 +31,7 @@ const (
 // Each creation attempt owns its results, even after a tab is closed and reopened.
 type invoiceAttempt struct {
 	request app.InvoiceRequest
+	wallet  walletObservationScope
 }
 
 type ReceiveScreen struct {
@@ -42,6 +42,7 @@ type ReceiveScreen struct {
 	invoice     app.LightningInvoice
 	checking    bool
 	lookupError string
+	display     qrCopyDisplayState
 
 	// Input state
 	amountInput AmountInput
@@ -381,7 +382,7 @@ func (s *ReceiveScreen) submitInvoice() (Screen, tea.Cmd) {
 		s.inputError = "Enter an amount"
 		return s, nil
 	}
-	s.attempt = &invoiceAttempt{request: app.InvoiceRequest{
+	s.attempt = &invoiceAttempt{wallet: s.ctx.walletObservationScope(), request: app.InvoiceRequest{
 		AmountSats: s.amountInput.Sats(),
 		Memo:       s.memoInput.Value(),
 		Blinded:    s.blindPaths,
@@ -419,19 +420,14 @@ func (s *ReceiveScreen) handleWaitingKey(
 		}
 		return s, nil
 	case "enter":
-		if s.buttonIdx == 0 && s.invoice.PaymentRequest() != "" {
-			return s, func() tea.Msg {
-				return showQRMsg{
-					URL: s.invoice.PaymentRequest(),
-					Label: fmt.Sprintf(
-						"Invoice — %s sats",
-						formatSats(s.invoice.AmountSats())),
-				}
-			}
+		if s.attempt == nil {
+			return s, nil
 		}
-		if s.buttonIdx == 1 && s.invoice.PaymentRequest() != "" {
-			return s, showInvoiceCmd(s.invoice.PaymentRequest())
-		}
+		return s, s.display.command(&qrCopyDisplayRequest{
+			owner: s, text: s.invoice.PaymentRequest(),
+			label: "Invoice - " + formatSats(s.invoice.AmountSats()) + " sats",
+			copy:  s.buttonIdx == 1, wallet: s.attempt.wallet, invoice: s.attempt,
+		})
 	}
 	return s, nil
 }
@@ -585,6 +581,9 @@ func (s *ReceiveScreen) viewWaiting(
 		}
 	}
 
+	if s.display.failed {
+		p.warn("Copy display did not complete. Try again.")
+	}
 	btnFocused := s.ctx.ContentFocused
 	return p.renderWithBottomButtons(
 		[]string{"Show QR", "Copyable Invoice"},

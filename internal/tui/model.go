@@ -216,10 +216,12 @@ type Model struct {
 	verificationActive  *sshVerificationRequest
 	verificationPending bool
 
-	// QR fullscreen (Model-owned overlay)
+	// QR/Copy displays (Model-owned overlays and terminal handoff)
 	urlTarget         string
 	qrLabel           string
 	connectionDisplay *connectionActionMsg
+	qrCopyOverlay     *qrCopyDisplayRequest
+	copyTerminal      *qrCopyDisplayRequest
 
 	// Navigation
 	nav            NavSidebar
