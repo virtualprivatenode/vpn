@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"io"
 	"strings"
@@ -262,7 +263,14 @@ func TestCopyTerminalFailureOwnershipAndRetry(t *testing.T) {
 	}
 }
 
-func TestCopyTerminalOutputAndFailures(t *testing.T) {
+type failingCopyWriter struct{ attempts bytes.Buffer }
+
+func (w *failingCopyWriter) Write(p []byte) (int, error) {
+	w.attempts.Write(p)
+	return 0, io.ErrClosedPipe
+}
+
+func TestCopyTerminalClearsDisplayOnSuccessAndFailure(t *testing.T) {
 	for _, input := range []string{"\n", ""} {
 		var output bytes.Buffer
 		d := &copyTextDisplay{text: "lntbs1invoice1"}
@@ -273,14 +281,15 @@ func TestCopyTerminalOutputAndFailures(t *testing.T) {
 			t.Fatalf("acknowledgement: %v", err)
 		}
 		text := output.String()
-		if !strings.Contains(text, "lntbs1invoice1") || !strings.Contains(text, "Press Enter") || strings.Contains(text, "\x1b[") {
-			t.Fatal("copy payload or scrollback policy changed")
+		if !strings.Contains(text, "lntbs1invoice1") ||
+			!strings.HasPrefix(text, "\x1b[2J\x1b[3J\x1b[H") || !strings.HasSuffix(text, "\x1b[2J\x1b[3J\x1b[H") {
+			t.Fatal("copy payload lost or display cleanup skipped")
 		}
 	}
-	writer := &failingCredentialWriter{}
+	writer := &failingCopyWriter{}
 	d := &copyTextDisplay{text: "invoice", in: strings.NewReader("\n"), out: writer}
-	if !errors.Is(d.Run(), io.ErrClosedPipe) {
-		t.Fatal("write failure was hidden")
+	if !errors.Is(d.Run(), io.ErrClosedPipe) || !strings.HasSuffix(writer.attempts.String(), "\x1b[2J\x1b[3J\x1b[H") {
+		t.Fatal("write failure was hidden or cleanup skipped")
 	}
 }
 
@@ -319,28 +328,46 @@ func TestOversizedQRRemainsDismissible(t *testing.T) {
 }
 
 // Exercise Bubble Tea's actual command and callback wiring. This checks I/O and
-// result ownership; SSH terminal selection/scrollback still needs the live slate.
+// result ownership; SSH terminal selection/clearing still needs the live slate.
 type copyExecutionModel struct {
 	model   Model
 	command tea.Cmd
-	done    *qrCopyDisplayDoneMsg
+	done    bool
+	err     error
 }
 
 func (m copyExecutionModel) Init() tea.Cmd  { return m.command }
 func (m copyExecutionModel) View() tea.View { return tea.NewView("") }
 func (m copyExecutionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if done, ok := msg.(qrCopyDisplayDoneMsg); ok {
-		updated, _ := m.model.Update(done)
-		m.model, m.done = updated.(Model), &done
-		return m, tea.Quit
+	switch msg := msg.(type) {
+	case qrCopyDisplayDoneMsg:
+		m.err = msg.err
+	case connectionDisplayDoneMsg:
+		m.err = msg.err
+	default:
+		return m, nil
 	}
-	return m, nil
+	updated, _ := m.model.Update(msg)
+	m.model, m.done = updated.(Model), true
+	return m, tea.Quit
 }
 
 func TestCopyHandoffRendersAcceptedSnapshotAndDeliversFailure(t *testing.T) {
-	for _, action := range []string{"node copy", "invoice copy"} {
+	for _, action := range []string{"node copy", "invoice copy", "macaroon copy"} {
 		t.Run(action, func(t *testing.T) {
-			m, screen, want := qrCopyDisplayModel(t, action)
+			var m Model
+			var screen Screen
+			var want string
+			if action == "macaroon copy" {
+				var init tea.Cmd
+				m, screen, _, init = connectionModel(t, false)
+				statusUpdate(&m, init())
+				screen.HandleKey("right", tea.KeyPressMsg{})
+				screen.HandleKey("right", tea.KeyPressMsg{})
+				want = hex.EncodeToString([]byte("synthetic-secret"))
+			} else {
+				m, screen, want = qrCopyDisplayModel(t, action)
+			}
 			request := displayAction(t, screen)
 			command := statusUpdate(&m, request)
 			if command == nil {
@@ -348,7 +375,13 @@ func TestCopyHandoffRendersAcceptedSnapshotAndDeliversFailure(t *testing.T) {
 			}
 			// A result arriving between admission and terminal execution must not
 			// substitute new text or discard the accepted display's failure.
-			m.screenCtx.Status.Node.Value.URIs[0] = "key@replacement.onion:9735"
+			if action == "macaroon copy" {
+				connectionState(screen).info.Credential = "replacement-secret"
+			} else if action == "invoice copy" {
+				screen.(*ReceiveScreen).invoice = app.LightningInvoice{}
+			} else {
+				m.screenCtx.Status.Node.Value.URIs[0] = "key@replacement.onion:9735"
+			}
 			m.screenCtx.Status.Node.Err = errors.New("unavailable after admission")
 			m.nav.SetActive(secSystem)
 			var output bytes.Buffer
@@ -362,12 +395,16 @@ func TestCopyHandoffRendersAcceptedSnapshotAndDeliversFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			result := final.(copyExecutionModel)
-			if result.done == nil || !errors.Is(result.done.err, io.EOF) ||
+			// Pairing prioritizes its offline view. Once availability recovers,
+			// the owning screen must still report the terminal failure.
+			m.screenCtx.Status.Node.Err = nil
+			if !result.done || !errors.Is(result.err, io.EOF) ||
 				!strings.Contains(screen.View(82, 40), "did not complete") {
 				t.Fatal("terminal failure did not reach the owning screen")
 			}
-			if text := output.String(); !strings.Contains(text, want) || strings.Contains(text, "replacement.onion") || strings.Contains(text, "\x1b[3J") {
-				t.Fatal("terminal handoff changed its accepted payload or erased history")
+			if text := output.String(); !strings.Contains(text, want) ||
+				strings.Contains(text, "replacement.onion") || strings.Contains(text, "replacement-secret") {
+				t.Fatal("terminal handoff changed its accepted payload")
 			}
 			if action == "node copy" && !strings.Contains(output.String(), "key@203.0.113.1:9735") {
 				t.Fatal("copy dropped the accepted clearnet URI")

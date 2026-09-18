@@ -96,7 +96,9 @@ func (m *Model) showQRCopyDisplay(request *qrCopyDisplayRequest) tea.Cmd {
 	if request.copy {
 		request.running = true
 		m.copyTerminal = request
-		return showCopyTextCmd(request)
+		return showCopyTextCmd(request.text, func(err error) tea.Msg {
+			return qrCopyDisplayDoneMsg{request: request, err: err}
+		})
 	}
 	m.qrCopyOverlay = request
 	m.connectionDisplay = nil
@@ -119,7 +121,7 @@ func (m *Model) completeQRCopyDisplay(msg qrCopyDisplayDoneMsg) tea.Cmd {
 			break
 		}
 	}
-	// Terminal output is an admitted snapshot. Observations resume after return;
-	// they cannot retract bytes the user has already copied or kept in scrollback.
+	// Copy shows an admitted snapshot. Observations resume after terminal return;
+	// clearing the display does not change the source invoice or node information.
 	return requestStatusCmd
 }

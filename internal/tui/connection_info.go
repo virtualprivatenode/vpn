@@ -121,6 +121,11 @@ type connectionActionMsg struct {
 	host    string
 }
 
+type connectionDisplayDoneMsg struct {
+	request *connectionInfoRequest
+	err     error
+}
+
 func connectionActionCmd(request *connectionInfoRequest, action connectionAction, host string) tea.Cmd {
 	return func() tea.Msg { return connectionActionMsg{request: request, action: action, host: host} }
 }
@@ -165,7 +170,9 @@ func (m *Model) showConnectionInfo(msg connectionActionMsg) tea.Cmd {
 	state := connectionState(msg.request.owner)
 	if msg.action == connectionMacaroon {
 		state.displayFailed = false
-		return showConnectionMacaroonCmd(msg.request, state.info.CredentialText())
+		return showCopyTextCmd(state.info.CredentialText(), func(err error) tea.Msg {
+			return connectionDisplayDoneMsg{request: msg.request, err: err}
+		})
 	}
 	m.qrCopyOverlay = nil
 	m.connectionDisplay = &msg

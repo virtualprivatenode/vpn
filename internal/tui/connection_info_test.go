@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -294,33 +293,7 @@ func TestConnectionInfoWebPartialFailureAndDisplaySizes(t *testing.T) {
 	}
 }
 
-type failingCredentialWriter struct{ attempts bytes.Buffer }
-
-func (w *failingCredentialWriter) Write(p []byte) (int, error) {
-	w.attempts.Write(p)
-	return 0, io.ErrClosedPipe
-}
-
-func TestConnectionMacaroonTerminalCleanupAndFailureOwnership(t *testing.T) {
-	for _, input := range []string{"\n", ""} {
-		var output bytes.Buffer
-		display := &macaroonDisplay{text: "synthetic-hex"}
-		display.SetStdin(strings.NewReader(input))
-		display.SetStdout(&output)
-		err := display.Run()
-		var wantErr error
-		if input == "" {
-			wantErr = io.EOF
-		}
-		if !errors.Is(err, wantErr) || !strings.Contains(output.String(), "synthetic-hex") || !strings.HasSuffix(output.String(), "\x1b[2J\x1b[3J\x1b[H") {
-			t.Fatal("terminal acknowledgement, failure or cleanup changed")
-		}
-	}
-	writer := &failingCredentialWriter{}
-	display := &macaroonDisplay{text: "synthetic-hex", in: strings.NewReader("\n"), out: writer}
-	if !errors.Is(display.Run(), io.ErrClosedPipe) || !strings.HasSuffix(writer.attempts.String(), "\x1b[2J\x1b[3J\x1b[H") {
-		t.Fatal("output failure was hidden or cleanup skipped")
-	}
+func TestConnectionMacaroonTerminalFailureOwnership(t *testing.T) {
 	m, s, _, init := connectionModel(t, false)
 	statusUpdate(&m, init())
 	request := connectionState(s).request
