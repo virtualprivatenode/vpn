@@ -50,6 +50,7 @@ type OnChainSendScreen struct {
 	// Buttons (step 4)
 	sendBtnIdx int // 0=Clear, 1=Create Transaction
 
+	fees          feeSuggestions
 	client        app.OnChainSendClient
 	attempt       *onChainSendAttempt
 	confirmBtnIdx int
@@ -80,7 +81,7 @@ func NewOnChainSendScreen(
 // ── Screen interface ────────────────────────────────────
 
 func (s *OnChainSendScreen) Init() tea.Cmd {
-	return fetchFeeTiersCmd(s.ctx.Cfg)
+	return s.fees.refresh(s.ctx)
 }
 
 func (s *OnChainSendScreen) HandleKey(
@@ -108,8 +109,12 @@ func (s *OnChainSendScreen) HandleMsg(
 		return s.handlePaste(msg)
 	case sendCoinsResultMsg:
 		return s.handleSendCoinsResult(msg)
-	case feeTiersMsg:
-		return s.handleFeeTiers(msg)
+	case tabActivatedMsg:
+		if s.step <= ocStepButtons {
+			return s, s.fees.refresh(s.ctx)
+		}
+	case feeSuggestionsMsg:
+		return s.handleFeeSuggestions(msg)
 	}
 	return s, nil
 }
@@ -230,7 +235,7 @@ func (s *OnChainSendScreen) handleInputLeft(
 	// Fee input: pass through for cursor
 	if s.step == ocStepFee {
 		if !s.feeInput.Empty() {
-			cmd := s.feeInput.Update(tea.Msg(msg))
+			cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 			return s, cmd
 		}
 	}
@@ -275,7 +280,7 @@ func (s *OnChainSendScreen) handleInputRight(
 	}
 	// Fee input: pass through for cursor
 	if s.step == ocStepFee {
-		cmd := s.feeInput.Update(tea.Msg(msg))
+		cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 		return s, cmd
 	}
 	return s, nil
@@ -304,7 +309,7 @@ func (s *OnChainSendScreen) handleInputBackspace(
 			s.labelInput.Update(tea.Msg(msg))
 		return s, cmd
 	case ocStepFee:
-		cmd := s.feeInput.Update(tea.Msg(msg))
+		cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 		return s, cmd
 	case ocStepButtons:
 		return s, emitFocusParent
@@ -408,7 +413,7 @@ func (s *OnChainSendScreen) handleInputDefault(
 			s.labelInput.Update(tea.Msg(msg))
 		return s, cmd
 	case ocStepFee:
-		cmd := s.feeInput.Update(tea.Msg(msg))
+		cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 		return s, cmd
 	}
 	return s, nil
@@ -531,7 +536,7 @@ func (s *OnChainSendScreen) handlePaste(
 			s.labelInput.Update(msg)
 		return s, cmd
 	case ocStepFee:
-		cmd := s.feeInput.Update(msg)
+		cmd := s.fees.edit(&s.feeInput, msg)
 		return s, cmd
 	}
 	return s, nil
@@ -554,9 +559,11 @@ func (s *OnChainSendScreen) handleSendCoinsResult(msg sendCoinsResultMsg) (Scree
 		requestStatusCmd)
 }
 
-func (s *OnChainSendScreen) handleFeeTiers(msg feeTiersMsg) (Screen, tea.Cmd) {
-	if msg.err == nil && s.step <= ocStepButtons && s.feeInput.Empty() && msg.tiers[0].SatPerVB > 0 {
-		s.feeInput.SetSats(int64(msg.tiers[0].SatPerVB))
+func (s *OnChainSendScreen) handleFeeSuggestions(msg feeSuggestionsMsg) (Screen, tea.Cmd) {
+	if s.fees.complete(msg, s.ctx.Cfg.Network) && s.step <= ocStepButtons && !s.fees.edited && s.feeInput.Empty() {
+		if rate := s.fees.defaultRate(s.ctx.Cfg.Network); rate > 0 {
+			s.feeInput.SetSats(rate)
+		}
 	}
 	return s, nil
 }
@@ -626,6 +633,7 @@ func (s *OnChainSendScreen) resetInputs() {
 	s.amtInput = NewAmountInput()
 	s.labelInput = newOCSendLabelInput()
 	s.feeInput = NewFeeInput()
+	s.fees.edited = false
 	s.sendAll = false
 	s.maxFocused = false
 	s.step = ocStepAddr
@@ -634,10 +642,8 @@ func (s *OnChainSendScreen) resetInputs() {
 	s.attempt = nil
 	s.ocCtx.Selection.Clear()
 	s.error = ""
-	// Re-fill fee from cached tiers
-	if s.ocCtx.SendFeeTiers[0].SatPerVB > 0 {
-		s.feeInput.SetSats(
-			int64(s.ocCtx.SendFeeTiers[0].SatPerVB))
+	if rate := s.fees.defaultRate(s.ctx.Cfg.Network); rate > 0 {
+		s.feeInput.SetSats(rate)
 	}
 }
 
@@ -740,7 +746,7 @@ func (s *OnChainSendScreen) viewInput(
 		feeMarker+" "+s.feeInput.View())
 
 	// Friendly fee reference hints
-	hints := formatFeeHints(s.ocCtx.SendFeeTiers)
+	hints := s.fees.hints(s.ctx.Cfg.Network)
 	if hints != "" {
 		lines = append(lines,
 			"  "+theme.Dim.Render(hints))

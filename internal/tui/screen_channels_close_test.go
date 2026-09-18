@@ -32,6 +32,8 @@ func closeScreenFixture(point string) (*ChannelDetailScreen, *screenCloseClient)
 	ctx.Status = &statusSnapshot{Channels: freshStatus(app.ChannelStatus{Channels: []channelInfo{ch}})}
 	detail := NewChannelDetailScreen(ctx, ch)
 	detail.launchClose()
+	// This fixture does not execute the initial fee command.
+	detail.closeScreen.fees.cancel()
 	c := &screenCloseClient{result: lndrpc.ChannelCloseResult{Submitted: true, ClosingTxid: strings.Repeat("c", 64)}}
 	detail.closeScreen.client = c
 	return detail, c
@@ -97,7 +99,7 @@ func TestChannelCloseFrozenReviewAndCopy(t *testing.T) {
 			s.chanPoint = strings.Repeat("b", 64) + ":2"
 			s.peerAlias = "changed"
 			s.localBal = 1
-			s.HandleMsg(channelCloseFeesMsg{screen: s, tiers: [4]feeTier{{SatPerVB: 99}}})
+			s.HandleMsg(feeReply(t, &s.fees, s.ctx, 99))
 			s.HandleMsg(tea.PasteMsg{Content: "999"})
 			if s.View(67, 30) != before {
 				t.Fatal("late input changed approved review")
@@ -189,8 +191,8 @@ func TestChannelCloseOwnershipAcrossTabsAndSections(t *testing.T) {
 		{Kind: tabChannel, Key: b.point, Section: secChannels, Screen: b},
 	}}
 	m.nav.ActiveItem = secChannels
-	m.Update(channelCloseFeesMsg{screen: b.closeScreen, tiers: [4]feeTier{{SatPerVB: 13}}})
-	if a.closeScreen.feeTiers[0].SatPerVB != 0 || b.closeScreen.feeTiers[0].SatPerVB != 13 {
+	m.Update(feeReply(t, &b.closeScreen.fees, b.ctx, 13))
+	if a.closeScreen.fees.defaultRate(a.ctx.Cfg.Network) != 0 || b.closeScreen.fees.defaultRate(b.ctx.Cfg.Network) != 13 {
 		t.Fatal("fee suggestion reached wrong tab")
 	}
 	reviewClose(t, a.closeScreen, false, 2)

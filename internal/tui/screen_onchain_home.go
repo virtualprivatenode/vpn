@@ -326,11 +326,7 @@ func (s *OnChainHomeScreen) openSend() (
 	}
 	screen := NewOnChainSendScreen(
 		s.ctx, s.ocCtx)
-	// Pre-fill the manual rate from the cached suggestion.
-	if s.ocCtx.SendFeeTiers[0].SatPerVB > 0 {
-		screen.feeInput.SetSats(
-			int64(s.ocCtx.SendFeeTiers[0].SatPerVB))
-	}
+
 	// Selected coins default to Max; LND determines the net amount.
 	if s.ocCtx.Selection.Len() > 0 {
 		screen.applyMax()

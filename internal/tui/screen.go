@@ -59,6 +59,7 @@ type ScreenContext struct {
 	Reboots             reboots
 	SSHVerification     sshVerificationReader
 	ConnectionInfo      connectionInfoReader
+	Fees                feeReader
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
@@ -184,13 +185,12 @@ func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
 // Prepared sends own copies of their reviewed inputs.
 type OnChainContext struct {
 	app.OnChainSnapshot
-	revision     uint64
-	Selection    app.CoinSelection
-	SendFeeTiers [4]feeTier
-	reader       onChainReader
-	scope        walletObservationScope
-	active       *onChainRequest
-	pending      bool
+	revision  uint64
+	Selection app.CoinSelection
+	reader    onChainReader
+	scope     walletObservationScope
+	active    *onChainRequest
+	pending   bool
 }
 
 // ── Screen-to-Model messages ────────────────────────────

@@ -75,7 +75,7 @@ type ChannelOpenScreen struct {
 
 	// Fee rate
 	feeInput AmountInput
-	feeTiers [4]feeTier
+	fees     feeSuggestions
 
 	// Toggles
 	private   bool
@@ -138,7 +138,7 @@ func NewChannelOpenScreen(
 // ── Screen interface ────────────────────────────────────
 
 func (s *ChannelOpenScreen) Init() tea.Cmd {
-	return tea.Batch(s.refreshCoins(), fetchFeeTiersCmd(s.ctx.Cfg))
+	return tea.Batch(s.refreshCoins(), s.fees.refresh(s.ctx))
 }
 
 func (s *ChannelOpenScreen) HandleKey(
@@ -169,7 +169,7 @@ func (s *ChannelOpenScreen) HandleMsg(
 		if s.step >= coStepOpening {
 			return s, nil
 		}
-		return s, tea.Batch(s.refreshCoins(), fetchFeeTiersCmd(s.ctx.Cfg))
+		return s, tea.Batch(s.refreshCoins(), s.fees.refresh(s.ctx))
 	case tea.PasteMsg:
 		return s.handlePaste(msg)
 	case channelOpenResultMsg:
@@ -178,8 +178,8 @@ func (s *ChannelOpenScreen) HandleMsg(
 		return s.handleUtxoList(msg)
 	case coTxListMsg:
 		return s.handleTxList(msg)
-	case feeTiersMsg:
-		return s.handleFeeTiers(msg)
+	case feeSuggestionsMsg:
+		return s.handleFeeSuggestions(msg)
 	}
 	return s, nil
 }
@@ -518,13 +518,13 @@ func (s *ChannelOpenScreen) handleFeeZoneKey(
 		return s, tea.Quit
 	case "left":
 		if !s.feeInput.Empty() {
-			cmd := s.feeInput.Update(tea.Msg(msg))
+			cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 			return s, cmd
 		}
 		return s, emitFocusSidebar
 	case "right":
 		if !s.feeInput.Empty() {
-			cmd := s.feeInput.Update(tea.Msg(msg))
+			cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 			return s, cmd
 		}
 		return s, nil
@@ -547,7 +547,7 @@ func (s *ChannelOpenScreen) handleFeeZoneKey(
 		s.enterAmountsBackward()
 		return s, nil
 	case "backspace":
-		cmd := s.feeInput.Update(tea.Msg(msg))
+		cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 		return s, cmd
 	case "enter":
 		s.feeInput.Blur()
@@ -555,7 +555,7 @@ func (s *ChannelOpenScreen) handleFeeZoneKey(
 		s.toggleIdx = 0
 		return s, nil
 	default:
-		cmd := s.feeInput.Update(tea.Msg(msg))
+		cmd := s.fees.edit(&s.feeInput, tea.Msg(msg))
 		return s, cmd
 	}
 }
@@ -585,7 +585,7 @@ func (s *ChannelOpenScreen) handlePaste(
 	}
 	if s.step == coStepInput &&
 		s.focusZone == coZoneFee {
-		cmd := s.feeInput.Update(msg)
+		cmd := s.fees.edit(&s.feeInput, msg)
 		return s, cmd
 	}
 	return s, nil
@@ -604,18 +604,14 @@ func (s *ChannelOpenScreen) handleOpenResult(
 	return s, channelHistoryChangedCmd
 }
 
-func (s *ChannelOpenScreen) handleFeeTiers(
-	msg feeTiersMsg,
+func (s *ChannelOpenScreen) handleFeeSuggestions(
+	msg feeSuggestionsMsg,
 ) (Screen, tea.Cmd) {
-	if msg.err != nil || s.step >= coStepConfirm {
+	if !s.fees.complete(msg, s.ctx.Cfg.Network) || s.step >= coStepConfirm {
 		return s, nil
 	}
-	s.feeTiers = msg.tiers
-	// Pre-fill fee input if still empty
-	if s.feeInput.Empty() &&
-		msg.tiers[0].SatPerVB > 0 {
-		s.feeInput.SetSats(
-			int64(msg.tiers[0].SatPerVB))
+	if rate := s.fees.defaultRate(s.ctx.Cfg.Network); !s.fees.edited && s.feeInput.Empty() && rate > 0 {
+		s.feeInput.SetSats(rate)
 	}
 	return s, nil
 }
@@ -687,9 +683,9 @@ func (s *ChannelOpenScreen) clearForm() {
 	s.amountInput.Clear()
 	s.fundMax = false
 	s.feeInput = NewFeeInput()
-	if s.feeTiers[0].SatPerVB > 0 {
-		s.feeInput.SetSats(
-			int64(s.feeTiers[0].SatPerVB))
+	s.fees.edited = false
+	if rate := s.fees.defaultRate(s.ctx.Cfg.Network); rate > 0 {
+		s.feeInput.SetSats(rate)
 	}
 	s.private = true
 	s.taproot = true
@@ -912,7 +908,7 @@ func (s *ChannelOpenScreen) viewInput(
 	p.line(" " + theme.Header.Render(
 		"Fee Rate (sat/vB):"))
 	p.line(feeMarker + " " + s.feeInput.View())
-	hints := formatFeeHints(s.feeTiers)
+	hints := s.fees.hints(s.ctx.Cfg.Network)
 	if hints != "" {
 		p.line("  " + theme.Dim.Render(hints))
 	}

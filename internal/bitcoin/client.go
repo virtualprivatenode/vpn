@@ -169,28 +169,42 @@ func readBlockchainInfo(read func(any) error) (BlockchainInfo, error) {
 	}, nil
 }
 
-// EstimateSmartFee returns the fee estimate for the target in
-// sat/vB (minimum 1), or an error when bitcoind has no
-// estimate yet.
-func EstimateSmartFee(rpcPort, target int) (float64, error) {
+// FeeEstimate retains Core's returned target, which may differ from the request.
+type FeeEstimate struct {
+	Blocks   int
+	SatPerVB float64
+}
+
+// EstimateSmartFee keeps Core's default estimate mode and the existing 1 sat/vB
+// minimum. The result is a rate suggestion, not a transaction fee quote.
+func EstimateSmartFee(ctx context.Context, rpcPort, target int) (FeeEstimate, error) {
+	return readFeeEstimate(target, func(result any) error {
+		return rpcCallContext(ctx, rpcPort, "estimatesmartfee", []any{target}, result)
+	})
+}
+
+func readFeeEstimate(target int, read func(any) error) (FeeEstimate, error) {
 	var resp struct {
 		FeeRate float64  `json:"feerate"`
+		Blocks  int      `json:"blocks"`
 		Errors  []string `json:"errors"`
 	}
-	if err := rpcCall(rpcPort, "estimatesmartfee",
-		[]any{target}, &resp); err != nil {
-		return 0, err
+	if err := read(&resp); err != nil {
+		return FeeEstimate{}, err
 	}
 	if resp.FeeRate <= 0 || len(resp.Errors) > 0 {
-		return 0, fmt.Errorf("no estimate for target %d (%s)",
+		return FeeEstimate{}, fmt.Errorf("no estimate for target %d (%s)",
 			target, strings.Join(resp.Errors, "; "))
+	}
+	if resp.Blocks < 2 || resp.Blocks > 1008 {
+		return FeeEstimate{}, fmt.Errorf("invalid fee estimate target %d", resp.Blocks)
 	}
 	// bitcoind returns BTC/kvB; sat/vB = BTC/kvB × 1e8 / 1000.
 	satPerVB := resp.FeeRate * 100000
 	if satPerVB < 1 {
 		satPerVB = 1
 	}
-	return satPerVB, nil
+	return FeeEstimate{Blocks: resp.Blocks, SatPerVB: satPerVB}, nil
 }
 
 func FormatProgress(progress float64) string {

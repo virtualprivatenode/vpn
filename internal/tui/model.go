@@ -84,12 +84,6 @@ type openTab struct {
 	Screen Screen // L16: owns all state for this tab's content (nil = legacy path)
 }
 
-type feeTier struct {
-	Target   int     // block target: 1, 3, 6, 25
-	SatPerVB float64 // fee rate in sat/vB
-	Label    string  // "~1 blk", "~3 blk", etc.
-}
-
 type systemRefreshMsg struct{}
 type tickMsg time.Time
 type latestVersionMsg string
@@ -171,11 +165,6 @@ type onChainSendAttempt struct{ prepared app.PreparedOnChainSend }
 type sendCoinsResultMsg struct {
 	attempt *onChainSendAttempt
 	result  app.OnChainSendResult
-}
-
-type feeTiersMsg struct {
-	tiers [4]feeTier
-	err   error
 }
 
 type channelCloseResultMsg struct {
@@ -338,6 +327,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.Fees != nil {
+			m.screenCtx.Fees.Close()
+		}
 		if m.screenCtx.SSHVerification != nil {
 			m.screenCtx.SSHVerification.Close()
 		}

@@ -565,7 +565,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.completeOnChain(msg)
 	case sendCoinsResultMsg:
 		return m.dispatchToTab(tabOnChain, msg)
-	case channelCloseResultMsg, channelCloseFeesMsg:
+	case channelCloseResultMsg:
 		var cmds []tea.Cmd
 		for i, tab := range m.tabs {
 			if tab.Kind != tabChannel || tab.Screen == nil {
@@ -601,26 +601,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
-	case feeTiersMsg:
-		if msg.err != nil {
+	case feeSuggestionsMsg:
+		if msg.request == nil {
 			return m, nil
 		}
-		m.screenCtx.OnChain.SendFeeTiers = msg.tiers
-		// Keep each screen update and batch the resulting commands.
-		var cmds []tea.Cmd
-		for _, kind := range []tabKind{
-			tabOnChain, tabOpenChannel,
-		} {
-			rm, cmd, ok := m.routeToScreen(kind, msg)
-			if !ok {
-				continue
-			}
-			m = rm
-			if cmd != nil {
-				cmds = append(cmds, cmd)
+		for _, tab := range m.tabs {
+			if fees := screenFees(tab.Screen); fees != nil && fees.active == msg.request {
+				_, cmd := tab.Screen.HandleMsg(msg)
+				return m, cmd
 			}
 		}
-		return m, tea.Batch(cmds...)
+		return m, nil
 	case helperProgressMsg:
 		for _, tab := range m.tabs {
 			if progress := helperProgress(tab.Screen); progress != nil && progress.operation == msg.operation {
@@ -955,6 +946,7 @@ func (m Model) closeScreenTab(screen Screen) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.releaseWalletCreation(tab.Screen)
+			cancelScreenFees(tab.Screen)
 			m.tabs = append(m.tabs[:i], m.tabs[i+1:]...)
 			m.sectionFocus[tab.Section] = 0
 			return m, nil
@@ -1003,6 +995,7 @@ func (m Model) closeTab(
 	for _, t := range m.tabs {
 		if shouldRemove(t) {
 			m.releaseWalletCreation(t.Screen)
+			cancelScreenFees(t.Screen)
 			continue
 		}
 		newTabs = append(newTabs, t)
@@ -1122,6 +1115,9 @@ func (m *Model) setTabScreen(
 			m.tabs[i].Index == target.Index &&
 			m.tabs[i].Key == target.Key &&
 			m.tabs[i].Section == target.Section {
+			if m.tabs[i].Screen != s {
+				cancelScreenFees(m.tabs[i].Screen)
+			}
 			m.tabs[i].Screen = s
 			return
 		}

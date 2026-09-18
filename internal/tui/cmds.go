@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 )
@@ -87,23 +86,9 @@ type channelCloseAttempt struct {
 	capacity, localBalance int64
 }
 
-type channelCloseFeesMsg struct {
-	screen *ChannelCloseScreen
-	tiers  [4]feeTier
-	err    error
-}
-
 func closeChannelCmd(client app.ChannelCloseClient, attempt *channelCloseAttempt) tea.Cmd {
 	return func() tea.Msg {
 		return channelCloseResultMsg{attempt: attempt, result: app.CloseChannel(client, attempt.prepared)}
-	}
-}
-
-func closeFeeTiersCmd(screen *ChannelCloseScreen) tea.Cmd {
-	fetch := fetchFeeTiersCmd(screen.ctx.Cfg)
-	return func() tea.Msg {
-		msg := fetch().(feeTiersMsg)
-		return channelCloseFeesMsg{screen: screen, tiers: msg.tiers, err: msg.err}
 	}
 }
 
@@ -159,17 +144,6 @@ func sendCoinsCmd(client app.OnChainSendClient, attempt *onChainSendAttempt) tea
 	prepared := attempt.prepared
 	return func() tea.Msg {
 		return sendCoinsResultMsg{attempt: attempt, result: app.SendOnChain(client, prepared)}
-	}
-}
-
-// ── Fee estimation ───────────────────────────────────────
-
-func fetchFeeTiersCmd(
-	cfg *config.AppConfig,
-) tea.Cmd {
-	snapshot := *cfg
-	return func() tea.Msg {
-		return fetchFeeTiers(&snapshot)
 	}
 }
 
