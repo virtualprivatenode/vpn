@@ -154,13 +154,3 @@ func TestHelperFailureDoesNotClaimRollback(t *testing.T) {
 		}
 	}
 }
-
-func TestBackgroundConfigurationUsesSchedulingSnapshot(t *testing.T) {
-	cfg := config.Default()
-	cfg.Network = "scheduled-network"
-	fees := fetchFeeTiersCmd(cfg)
-	cfg.Network = "later-network"
-	if result := fees().(feeTiersMsg); result.err == nil || !strings.Contains(result.err.Error(), "scheduled-network") {
-		t.Fatalf("fee command read configuration after scheduling: %v", result.err)
-	}
-}

@@ -73,7 +73,7 @@ func TestOnChainReviewAndSubmitStayTogether(t *testing.T) {
 	s.feeInput.Clear()
 	s.labelInput.SetValue("changed")
 	s.sendAll = true
-	s.HandleMsg(feeTiersMsg{tiers: [4]feeTier{{SatPerVB: 100}}})
+	s.HandleMsg(feeReply(t, &s.fees, s.ctx, 100))
 	if s.View(82, 34) != reviewed {
 		t.Fatal("form or late fee suggestion changed confirmation")
 	}

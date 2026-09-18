@@ -53,6 +53,7 @@ func (s *ChannelDetailScreen) HandleKey(
 			s.closeScreen.HandleKey(keyStr, msg)
 		s.closeScreen = newClose.(*ChannelCloseScreen)
 		if s.closeScreen.Cancelled {
+			s.closeScreen.fees.cancel()
 			s.closeScreen = nil
 			return s, nil
 		}
@@ -236,7 +237,7 @@ func (s *ChannelDetailScreen) launchClose() (
 		ch.PeerAlias,
 		ch.Capacity,
 		ch.LocalBalance)
-	return s, closeFeeTiersCmd(s.closeScreen)
+	return s, s.closeScreen.Init()
 }
 
 func (s *ChannelDetailScreen) current() bool { return s.scope == s.ctx.walletObservationScope() }

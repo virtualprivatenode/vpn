@@ -48,7 +48,7 @@ type ChannelCloseScreen struct {
 	// Fee form and final approval
 	force         bool
 	feeInput      AmountInput
-	feeTiers      [4]feeTier
+	fees          feeSuggestions
 	focusZone     int // type step: 0=options, 1=buttons; fee step: 0=fee, 1=buttons
 	confirmBtnIdx int // 0=Go Back, 1=Review or close action
 	attempt       *channelCloseAttempt
@@ -82,7 +82,7 @@ func NewChannelCloseScreen(
 }
 
 func (s *ChannelCloseScreen) Init() tea.Cmd {
-	return nil
+	return s.fees.refresh(s.ctx)
 }
 
 func (s *ChannelCloseScreen) HandleKey(
@@ -109,10 +109,12 @@ func (s *ChannelCloseScreen) HandleMsg(
 	switch msg := msg.(type) {
 	case channelCloseResultMsg:
 		return s.handleCloseResult(msg)
-	case channelCloseFeesMsg:
-		if msg.screen == s && msg.err == nil && s.step < closeStepReview {
-			s.feeTiers = msg.tiers
+	case tabActivatedMsg:
+		if s.step < closeStepReview {
+			return s, s.fees.refresh(s.ctx)
 		}
+	case feeSuggestionsMsg:
+		s.fees.complete(msg, s.ctx.Cfg.Network)
 		return s, nil
 	case tea.PasteMsg:
 		if s.step == closeStepFee &&
@@ -256,9 +258,8 @@ func (s *ChannelCloseScreen) handleTypeBtnKey(
 
 		if !s.force {
 			s.feeInput = NewFeeInput()
-			if s.feeTiers[0].SatPerVB > 0 {
-				s.feeInput.SetSats(
-					int64(s.feeTiers[0].SatPerVB))
+			if rate := s.fees.defaultRate(s.ctx.Cfg.Network); rate > 0 {
+				s.feeInput.SetSats(rate)
 			}
 			s.feeInput.Focus()
 			s.focusZone = closeZoneFee
@@ -582,7 +583,7 @@ func (s *ChannelCloseScreen) viewFee(w, h int) string {
 	p.dim("Blank or zero uses LND's automatic fee policy.")
 	p.dim("This is a requested rate, not a maximum total fee.")
 	p.dim("Total fee and returned amount are not yet known.")
-	if hints := formatFeeHints(s.feeTiers); hints != "" {
+	if hints := s.fees.hints(s.ctx.Cfg.Network); hints != "" {
 		p.blank()
 		p.dim(hints)
 	}

@@ -149,7 +149,7 @@ func TestChannelConfirmationOwnsIntentAndUnknownTotals(t *testing.T) {
 		s.customPubkey = "edited"
 		s.customAlias = "edited"
 		s.fundMax = !max
-		s.HandleMsg(feeTiersMsg{tiers: [4]feeTier{{SatPerVB: 99}}})
+		s.HandleMsg(feeReply(t, &s.fees, s.ctx, 99))
 		if s.View(67, 30) != before {
 			t.Fatal("late suggestion or mutable form changed reviewed intent")
 		}

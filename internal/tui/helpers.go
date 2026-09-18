@@ -7,84 +7,9 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
-	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
-
-// ── Fee estimation via bitcoin-cli ───────────────────────
-
-func fetchFeeTiers(cfg *config.AppConfig) feeTiersMsg {
-	targets := [4]int{1, 3, 6, 25}
-	labels := [4]string{"~1 blk", "~3 blk", "~6 blk", "~25 blk"}
-	var tiers [4]feeTier
-
-	profile, err := cfg.NetworkConfig()
-	if err != nil {
-		return feeTiersMsg{err: err}
-	}
-	rpcPort := profile.RPCPort
-
-	for i, target := range targets {
-		tiers[i] = feeTier{
-			Target: target,
-			Label:  labels[i],
-		}
-
-		// Direct RPC with the node's own staged credential —
-		// no privileged call anywhere on the fee path.
-		satPerVB, err := bitcoin.EstimateSmartFee(rpcPort, target)
-		if err != nil {
-			continue
-		}
-		tiers[i].SatPerVB = satPerVB
-	}
-
-	// Check if we got at least one valid tier
-	anyValid := false
-	for _, t := range tiers {
-		if t.SatPerVB > 0 {
-			anyValid = true
-			break
-		}
-	}
-	if !anyValid {
-		return feeTiersMsg{
-			err: fmt.Errorf("no fee estimates available"),
-		}
-	}
-
-	return feeTiersMsg{tiers: tiers}
-}
-
-// formatFeeHints returns a user-friendly fee reference
-// line like "Next block ~5  ·  ~1 hour ~3  ·  ~1 day ~1"
-// Uses targets: [0]=1 blk, [1]=3 blk, [2]=6 blk, [3]=25 blk
-// We show: target 0 as "Next block", 2 as "~1 hour",
-// 3 as "~1 day".
-func formatFeeHints(tiers [4]feeTier) string {
-	var parts []string
-	if tiers[0].SatPerVB > 0 {
-		parts = append(parts, fmt.Sprintf(
-			"Next block %.0f sat/vB",
-			tiers[0].SatPerVB))
-	}
-	if tiers[2].SatPerVB > 0 {
-		parts = append(parts, fmt.Sprintf(
-			"1 hour %.0f sat/vB",
-			tiers[2].SatPerVB))
-	}
-	if tiers[3].SatPerVB > 0 {
-		parts = append(parts, fmt.Sprintf(
-			"1 day %.0f sat/vB",
-			tiers[3].SatPerVB))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, "  ·  ")
-}
 
 // renderViewport creates a local viewport, sets content,
 // auto-scrolls to keep cursorLine visible, and returns the
