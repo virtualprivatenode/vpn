@@ -26,8 +26,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/host"
 )
 
 const (
@@ -83,8 +82,7 @@ func writeRPCAuthCredentials() (nodeRPCAuthCredentials, error) {
 	if err != nil {
 		return nodeRPCAuthCredentials{}, err
 	}
-	if err := helper.WriteBoard(paths.StateBitcoindRPCPass,
-		[]byte(uiPassword+"\n")); err != nil {
+	if err := host.StageBitcoindRPCPassword(uiPassword); err != nil {
 		return nodeRPCAuthCredentials{}, err
 	}
 	return nodeRPCAuthCredentials{

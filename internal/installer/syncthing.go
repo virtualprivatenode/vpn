@@ -509,7 +509,7 @@ func startSyncthing() error {
 // confirmSyncthingPrivacy verifies effective network, reporting and GUI settings
 // after startup. Missing or mismatched values trigger stop and disable.
 func confirmSyncthingPrivacy() error {
-	apiKey, err := getSyncthingAPIKey()
+	apiKey, err := host.SyncthingAPIKey()
 	if err == nil {
 		err = syncthing.NewClient(apiKey).ConfirmPrivacy(context.Background())
 	}
@@ -526,7 +526,7 @@ func confirmSyncthingPrivacy() error {
 // Send Only folder in Syncthing so it can be shared with
 // paired devices.
 func registerBackupFolder() error {
-	apiKey, err := getSyncthingAPIKey()
+	apiKey, err := host.SyncthingAPIKey()
 	if err != nil {
 		return fmt.Errorf("get API key: %w", err)
 	}
@@ -590,29 +590,4 @@ func backupFolderRegistered(foldersJSON string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// getSyncthingAPIKey reads the private configuration for root-side provisioning.
-// Runtime workflows read their staged credentials in the application layer.
-func getSyncthingAPIKey() (string, error) {
-	output, err := os.ReadFile(paths.SyncthingConfigXML)
-	if err != nil {
-		return "", err
-	}
-
-	type guiKey struct {
-		APIKey string `xml:"apikey"`
-	}
-	type cfgFile struct {
-		XMLName xml.Name `xml:"configuration"`
-		GUI     guiKey   `xml:"gui"`
-	}
-	var cfg cfgFile
-	if err := xml.Unmarshal(output, &cfg); err != nil {
-		return "", err
-	}
-	if cfg.GUI.APIKey == "" {
-		return "", fmt.Errorf("no API key found")
-	}
-	return cfg.GUI.APIKey, nil
 }

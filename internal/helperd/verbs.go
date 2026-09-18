@@ -91,14 +91,11 @@ var (
 	walletExists                 = installer.WalletExists
 	keyVerificationPending       = host.KeyVerificationPending
 	verifyAdminLogin             = host.VerifyAdminLogin
-	stageSyncthingWebPassword    = func(password string) error {
-		return helper.WriteBoard(paths.StateSyncthingWebPassword,
-			[]byte(password+"\n"))
-	}
-	restageFacts       = restage
-	controlNodeService = host.ControlService
-	updatePackages     = host.UpdatePackages
-	requestReboot      = host.RequestReboot
+	stageSyncthingWebPassword    = host.StageSyncthingWebPassword
+	restageFacts                 = restage
+	controlNodeService           = host.ControlService
+	updatePackages               = host.UpdatePackages
+	requestReboot                = host.RequestReboot
 )
 
 // decode unmarshals params strictly: unknown fields are an
