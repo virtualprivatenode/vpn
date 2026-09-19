@@ -5,8 +5,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
@@ -432,44 +430,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case refreshWalletStateMsg:
+		if msg.owner != m.screenCtx {
+			return m, nil
+		}
+		return m, m.admitWalletState()
 	case walletStateMsg:
-		if msg.owner != m.screenCtx || msg.revision != m.screenCtx.walletRevision || walletCreationBusy(m.screenCtx.walletCreationOwner) {
-			return m, nil
-		}
-		if msg.err != nil {
-			m.state.WalletKnown = false
-			if m.screenCtx.ChannelHistory != nil {
-				m.screenCtx.ChannelHistory.Closed.Err = msg.err
-			}
-			if m.screenCtx.PaymentHistory != nil {
-				m.screenCtx.PaymentHistory.PaymentHistorySnapshot = m.screenCtx.PaymentHistory.Unavailable(msg.err)
-			}
-			if m.screenCtx.OnChain != nil {
-				m.screenCtx.OnChain.OnChainSnapshot = m.screenCtx.OnChain.Unavailable(msg.err)
-			}
-			if m.screenCtx.Status != nil {
-				snapshot := m.screenCtx.Status.WalletUnavailable(msg.err)
-				m.screenCtx.Status = &snapshot
-			}
-			logger.TUI("read live wallet state: %v", msg.err)
-			return m, nil
-		}
-		recovered := !m.state.WalletKnown || m.state.WalletExists != msg.state.WalletExists
-		if m.state.WalletExists != msg.state.WalletExists {
-			m.screenCtx.invalidateWalletObservations()
-		}
-		m.state.WalletExists = msg.state.WalletExists
-		m.state.WalletKnown = true
-		if m.state.WalletExists && m.lndClient == nil &&
-			m.cfg.HasLND() && m.screenCtx.walletCreationOwner == nil {
-			m.lndClient = lndrpc.New()
-			m.screenCtx.LndClient = m.lndClient
-			return m, tea.Batch(requestStatusCmd, m.visibleWalletListsCmd())
-		}
-		if recovered {
-			return m, m.visibleWalletListsCmd()
-		}
-		return m, nil
+		return m, m.completeWalletState(msg)
+	case walletClientMsg:
+		return m.completeWalletClient(msg)
 	case refreshSSHVerificationMsg:
 		cmd := m.admitSSHVerification()
 		return m, cmd

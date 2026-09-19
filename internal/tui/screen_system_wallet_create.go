@@ -16,6 +16,7 @@ const (
 	walletWaiting
 	walletExec
 	walletFinalizing
+	walletInitializing
 	walletResult
 )
 
@@ -73,7 +74,7 @@ func (s *WalletCreateScreen) Init() tea.Cmd { return nil }
 
 func walletCreationBusy(screen Screen) bool {
 	s, ok := screen.(*WalletCreateScreen)
-	return ok && s != nil && (s.step == walletWaiting || s.step == walletExec || s.step == walletFinalizing)
+	return ok && s != nil && (s.step == walletWaiting || s.step == walletExec || s.step == walletFinalizing || s.step == walletInitializing)
 }
 
 func (s *WalletCreateScreen) closeCmd() tea.Cmd {
@@ -236,7 +237,7 @@ func (s *WalletCreateScreen) View(w, h int) string {
 	switch s.step {
 	case walletWaiting, walletExec:
 		return renderWaitingForLND(w, h)
-	case walletFinalizing:
+	case walletFinalizing, walletInitializing:
 		p := newPane(w)
 		p.title(theme.Header, "Checking Wallet and Credentials")
 		p.dim("Wallet creation will not be repeated.")

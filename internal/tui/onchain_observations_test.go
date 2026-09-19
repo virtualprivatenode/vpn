@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -112,8 +111,7 @@ func TestOnChainCoalescingLifecycleAndClientScope(t *testing.T) {
 			old := cmd()
 			switch change {
 			case "wallet":
-				fetchWalletStateCmd(m.screenCtx)
-				statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: false}})
+				statusUpdate(&m, walletObservationMsg(t, &m, false, nil))
 			case "client":
 				m.screenCtx.LndClient = &lndrpc.Client{}
 			case "network":
@@ -174,14 +172,12 @@ func TestOnChainCoalescesWithoutDiscardingCurrentRead(t *testing.T) {
 func TestOnChainPresenceFailurePreservesSelectionAndRejectsFreshness(t *testing.T) {
 	m, s, r := onChainModel(t)
 	m.nav.ActiveItem = secOnChain
-	m.lndClient = &lndrpc.Client{}
 	coin := lndrpc.UTXO{Txid: "retained", Address: "retained-address"}
 	good := app.OnChainSnapshot{Utxos: freshStatus([]lndrpc.UTXO{coin}), OnChainTxs: freshStatus([]lndrpc.OnChainTx(nil))}
 	publishOnChain(t, &m, good)
 	s.ocCtx.Selection.Toggle(coin)
 	inFlight := statusUpdate(&m, requestOnChainCmd())
-	fetchWalletStateCmd(m.screenCtx)
-	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("presence unavailable")})
+	statusUpdate(&m, walletObservationMsg(t, &m, false, errors.New("presence unavailable")))
 	r.next = good
 	statusUpdate(&m, inFlight())
 	if s.ocCtx.Utxos.Fresh() || !s.ocCtx.Utxos.Known() || !s.ocCtx.Selection.Contains(coin) {
@@ -190,8 +186,7 @@ func TestOnChainPresenceFailurePreservesSelectionAndRejectsFreshness(t *testing.
 	if cmd := statusUpdate(&m, requestOnChainCmd()); cmd != nil {
 		t.Fatal("unknown wallet admitted another list read")
 	}
-	fetchWalletStateCmd(m.screenCtx)
-	refresh := statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: true}})
+	refresh := statusUpdate(&m, walletObservationMsg(t, &m, true, nil))
 	if refresh == nil {
 		t.Fatal("presence recovery did not request visible lists")
 	}

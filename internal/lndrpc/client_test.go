@@ -265,6 +265,9 @@ func TestRestageDue(t *testing.T) {
 func TestCancelledReconnectDoesNotReadCredentialsOrRestage(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+	if client, err := NewContext(ctx); client != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled initialization returned client=%v err=%v", client, err)
+	}
 	client := &Client{}
 	if err := client.dial(ctx, true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled dial reached filesystem or RPC work: %v", err)

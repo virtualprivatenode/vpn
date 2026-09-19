@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
@@ -159,8 +158,7 @@ func TestOpenDetailsRejectPreviousScopeAndDelayedOpens(t *testing.T) {
 			original := []Screen{m.tabs[0].Screen, m.tabs[1].Screen}
 			switch change {
 			case "wallet":
-				fetchWalletStateCmd(m.screenCtx)
-				statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: false}})
+				statusUpdate(&m, walletObservationMsg(t, &m, false, nil))
 			case "client":
 				m.screenCtx.LndClient = &lndrpc.Client{}
 			case "network":

@@ -1,12 +1,8 @@
 package tui
 
 import (
-	"errors"
-	"fmt"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
 func (m Model) routeWalletCreation(owner *WalletCreateScreen, msg tea.Msg) (Model, tea.Cmd) {
@@ -45,17 +41,7 @@ func (m Model) finishWalletCreation(msg walletFinalizedMsg) (Model, tea.Cmd) {
 	}
 	s.clientErr = nil
 	if msg.result.CredentialsStaged && m.lndClient == nil {
-		open := m.screenCtx.openWalletClient
-		if open == nil {
-			open = lndrpc.NewStagedClient
-		}
-		client, err := open()
-		if err != nil {
-			s.clientErr = fmt.Errorf("wallet credentials were staged, but the TUI client could not be initialized: %w", err)
-			s.result.Err = errors.Join(s.result.Err, s.clientErr)
-		} else {
-			m.lndClient, m.screenCtx.LndClient = client, client
-		}
+		return m, m.initializeWalletClient(s)
 	}
 	if s.result.Err == nil && s.canContinue() {
 		return m.continueWalletCreation(s)

@@ -107,6 +107,9 @@ func (s *WalletHomeScreen) HandleKey(
 	case "backspace":
 		return s, emitFocusSidebar
 	case "enter":
+		if s.ctx.walletClientUnavailable() {
+			return s, fetchWalletStateCmd(s.ctx)
+		}
 		// No wallet → trigger wallet creation flow
 		if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 			return s, fetchWalletStateCmd(s.ctx)
@@ -228,6 +231,9 @@ func (s *WalletHomeScreen) View(
 	cfg := s.ctx.Cfg
 	status := s.ctx.Status
 
+	if s.ctx.walletClientUnavailable() {
+		return s.ctx.walletConnectionNotice(w)
+	}
 	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 		return renderWalletStateUnavailable(w, h)
 	}
@@ -471,7 +477,7 @@ func (s *WalletHomeScreen) View(
 // ── HelpBindings ────────────────────────────────────────
 
 func (s *WalletHomeScreen) HelpBindings() []key.Binding {
-	if !s.ctx.walletDisplayAvailable() {
+	if s.ctx.walletClientUnavailable() || !s.ctx.walletDisplayAvailable() {
 		return walletUnavailableHelpBindings(s.ctx)
 	}
 	if s.focusZone == walletHomeZoneList {

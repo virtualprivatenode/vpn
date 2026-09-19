@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 )
 
@@ -24,18 +23,6 @@ func fetchLatestVersionCmd() tea.Cmd {
 	return func() tea.Msg {
 		return latestVersionMsg(
 			installer.CheckLatestVersion())
-	}
-}
-
-// ── Live-read node facts ─────────────────────────────────
-
-func fetchWalletStateCmd(owner *ScreenContext) tea.Cmd {
-	owner.walletRevision++
-	revision := owner.walletRevision
-	return func() tea.Msg {
-		var state helper.WalletStateResult
-		err := helper.Call(helper.VerbReadWalletState, nil, &state)
-		return walletStateMsg{owner: owner, revision: revision, state: state, err: err}
 	}
 }
 

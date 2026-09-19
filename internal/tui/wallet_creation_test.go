@@ -1,13 +1,13 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
@@ -17,7 +17,13 @@ func walletCreationFixture(t *testing.T) (Model, *WalletCreateScreen, *int) {
 	ctx.WalletCreation = app.NewWalletCreation()
 	t.Cleanup(ctx.WalletCreation.Close)
 	opened := new(int)
-	ctx.openWalletClient = func() (*lndrpc.Client, error) { *opened++; return &lndrpc.Client{}, nil }
+	ctx.WalletRuntime = &stubWalletRuntime{open: func(_ context.Context, staged bool) app.WalletClientResult {
+		if !staged {
+			t.Error("creation initialization requested ordinary probe/repair")
+		}
+		*opened++
+		return app.WalletClientResult{Client: &lndrpc.Client{}}
+	}}
 	s := NewWalletCreateScreen(ctx)
 	s.attempt = &walletCreationAttempt{finalization: 1, execution: app.WalletExecution{Created: true, SeedAcknowledged: true}}
 	s.step = walletFinalizing
@@ -37,7 +43,12 @@ func deliverWallet(t *testing.T, m *Model, msg tea.Msg) tea.Cmd {
 
 func TestWalletFinalizationRoutesFailureAndRetryToHiddenOwner(t *testing.T) {
 	m, s, opened := walletCreationFixture(t)
-	staleRead := walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: false}}
+	s.step = walletConfirm
+	m.screenCtx.walletCreationOwner = nil
+	staleRead := walletObservationMsg(t, &m, false, nil)
+	s.startWaitingForLND()
+	s.step = walletFinalizing
+	s.attempt.finalization = 1
 	failure := walletFinalizedMsg{owner: s, attempt: s.attempt, revision: 1,
 		result: app.WalletCreationResult{Presence: app.WalletPresent, SeedAcknowledged: true, Err: errors.New("staging failed")}}
 	deliverWallet(t, &m, failure)
@@ -69,7 +80,11 @@ func TestWalletFinalizationRoutesFailureAndRetryToHiddenOwner(t *testing.T) {
 	}
 	success := walletFinalizedMsg{owner: s, attempt: s.attempt, revision: 3,
 		result: app.WalletCreationResult{Presence: app.WalletPresent, CredentialsStaged: true, SeedAcknowledged: true}}
-	deliverWallet(t, &m, success)
+	cmd = deliverWallet(t, &m, success)
+	if cmd == nil || s.step != walletInitializing || *opened != 0 {
+		t.Fatal("staged initialization did not remain asynchronous")
+	}
+	deliverWallet(t, &m, cmd())
 	if m.tabs[0].Kind != tabAutoUnlock || m.tabs[0].Section != secOnChain || *opened != 1 || m.screenCtx.walletCreationOwner != nil {
 		t.Fatal("success did not transform its owning tab exactly once")
 	}
@@ -82,8 +97,12 @@ func TestWalletFinalizationRoutesFailureAndRetryToHiddenOwner(t *testing.T) {
 
 func TestWalletAttemptsAndNavigation(t *testing.T) {
 	m, s, opened := walletCreationFixture(t)
-	s.step = walletWaiting
-	s.attempt = &walletCreationAttempt{}
+	s.step = walletConfirm
+	m.screenCtx.walletCreationOwner = nil
+	read := walletObservationMsg(t, &m, true, nil)
+	if s.startWaitingForLND() == nil {
+		t.Fatal("known absence did not admit creation")
+	}
 	ready := walletLNDReadyMsg{owner: s, attempt: s.attempt, network: "signet"}
 	if cmd := deliverWallet(t, &m, ready); cmd == nil || s.step != walletExec {
 		t.Fatal("hidden readiness result lost")
@@ -91,7 +110,9 @@ func TestWalletAttemptsAndNavigation(t *testing.T) {
 	if cmd := deliverWallet(t, &m, ready); cmd != nil {
 		t.Fatal("duplicate readiness started another terminal command")
 	}
-	read := walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: true}}
+	if cmd := deliverWallet(t, &m, fetchWalletStateCmd(m.screenCtx)()); cmd != nil {
+		t.Fatal("ordinary read admitted during wallet creation")
+	}
 	deliverWallet(t, &m, read)
 	if m.state.WalletExists || *opened != 0 {
 		t.Fatal("poll published wallet during creation")
@@ -127,7 +148,8 @@ func TestWalletAttemptsAndNavigation(t *testing.T) {
 func TestWalletDelayedDoneAndTerminalFailure(t *testing.T) {
 	m, s, _ := walletCreationFixture(t)
 	result := app.WalletCreationResult{Presence: app.WalletPresent, CredentialsStaged: true, SeedAcknowledged: true, Err: errors.New("terminal restoration failed")}
-	deliverWallet(t, &m, walletFinalizedMsg{owner: s, attempt: s.attempt, revision: 1, result: result})
+	cmd := deliverWallet(t, &m, walletFinalizedMsg{owner: s, attempt: s.attempt, revision: 1, result: result})
+	deliverWallet(t, &m, cmd())
 	if s.step != walletResult || m.tabs[0].Kind != tabWalletCreate || !s.canContinue() {
 		t.Fatal("terminal error hid a created wallet or automatically advanced")
 	}
@@ -144,9 +166,12 @@ func TestWalletDelayedDoneAndTerminalFailure(t *testing.T) {
 
 func TestWalletClientFailureDoesNotEraseStagingSuccess(t *testing.T) {
 	m, s, _ := walletCreationFixture(t)
-	m.screenCtx.openWalletClient = func() (*lndrpc.Client, error) { return nil, errors.New("staged file unreadable") }
+	m.screenCtx.WalletRuntime.(*stubWalletRuntime).open = func(context.Context, bool) app.WalletClientResult {
+		return app.WalletClientResult{Err: errors.New("staged file unreadable")}
+	}
 	r := app.WalletCreationResult{Presence: app.WalletPresent, CredentialsStaged: true, SeedAcknowledged: true}
-	deliverWallet(t, &m, walletFinalizedMsg{owner: s, attempt: s.attempt, revision: 1, result: r})
+	cmd := deliverWallet(t, &m, walletFinalizedMsg{owner: s, attempt: s.attempt, revision: 1, result: r})
+	deliverWallet(t, &m, cmd())
 	if !s.result.CredentialsStaged || !s.retrySetup() || s.canContinue() || s.result.Err == nil {
 		t.Fatal("client initialization failure was misclassified")
 	}
