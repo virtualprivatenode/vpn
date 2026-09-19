@@ -232,12 +232,6 @@ type focusTabBarMsg struct{}
 // section home (activeTab = 0).
 type focusParentMsg struct{}
 
-// showQRMsg tells Model to show the fullscreen QR view.
-type showQRMsg struct {
-	URL   string
-	Label string
-}
-
 // refreshStatusMsg tells Model to re-fetch node status.
 // statusResultMsg carries a completed observation and its request identity.
 type refreshStatusMsg struct{}

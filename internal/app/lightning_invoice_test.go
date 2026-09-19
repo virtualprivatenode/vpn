@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -66,13 +67,15 @@ func TestInvoiceLookupPreservesPendingAndUnknownOutcomes(t *testing.T) {
 		{"open", &lndrpc.Invoice{}, nil, InvoicePending},
 		{"paid", &lndrpc.Invoice{Settled: true}, nil, InvoicePaid},
 		{"expired", &lndrpc.Invoice{IsExpired: true}, nil, InvoiceExpired},
+		{"canceled", &lndrpc.Invoice{Canceled: true}, nil, InvoiceCanceled},
+		{"missing", nil, fmt.Errorf("lookup: %w", lndrpc.ErrInvoiceNotFound), InvoiceMissing},
 		{"lookup error", nil, errors.New("connection lost"), InvoicePending},
 		{"missing status", nil, nil, InvoicePending},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client.invoice, client.err = tc.invoice, tc.err
 			state, err := CheckLightningInvoice(client, invoice)
-			wantError := tc.err != nil || tc.invoice == nil
+			wantError := tc.want != InvoiceMissing && (tc.err != nil || tc.invoice == nil)
 			if state != tc.want || (err != nil) != wantError {
 				t.Fatalf("state=%v error=%v", state, err)
 			}

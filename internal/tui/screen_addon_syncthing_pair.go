@@ -40,6 +40,7 @@ type SyncthingPairScreen struct {
 	focusZone int // 0=input, 1=buttons
 	btnIdx    int
 	pairError string
+	display   qrCopyDisplayState
 }
 
 func NewSyncthingPairScreen(
@@ -358,12 +359,9 @@ func (s *SyncthingPairScreen) handlePostPairKey(
 			if vpsDeviceID == "" {
 				return s, nil
 			}
-			return s, func() tea.Msg {
-				return showQRMsg{
-					URL:   vpsDeviceID,
-					Label: "Syncthing Device ID",
-				}
-			}
+			return s, s.display.command(&qrCopyDisplayRequest{
+				owner: s, text: vpsDeviceID, label: "Syncthing Device ID", pair: s.attempt,
+			})
 		case 1: // Done
 			return s, closeSyncthingCmd(s, s.attempt)
 		}

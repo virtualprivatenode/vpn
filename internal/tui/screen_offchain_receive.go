@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -20,6 +19,8 @@ const (
 	recvStepWaiting                  // invoice created, waiting for payment
 	recvStepPaid                     // payment received
 	recvStepExpired                  // invoice expired
+	recvStepCanceled                 // LND retained the canceled invoice
+	recvStepMissing                  // LND no longer has the invoice
 )
 
 const (
@@ -32,6 +33,7 @@ const (
 // Each creation attempt owns its results, even after a tab is closed and reopened.
 type invoiceAttempt struct {
 	request app.InvoiceRequest
+	wallet  walletObservationScope
 }
 
 type ReceiveScreen struct {
@@ -42,6 +44,7 @@ type ReceiveScreen struct {
 	invoice     app.LightningInvoice
 	checking    bool
 	lookupError string
+	display     qrCopyDisplayState
 
 	// Input state
 	amountInput AmountInput
@@ -97,7 +100,7 @@ func (s *ReceiveScreen) HandleKey(
 		return s, nil
 	case recvStepWaiting:
 		return s.handleWaitingKey(keyStr)
-	case recvStepPaid, recvStepExpired:
+	case recvStepPaid, recvStepExpired, recvStepCanceled, recvStepMissing:
 		return s.handleResultKey(keyStr)
 	}
 	return s, nil
@@ -135,8 +138,8 @@ func (s *ReceiveScreen) View(w, h int) string {
 		return s.viewWaiting(w, h)
 	case recvStepPaid:
 		return s.viewPaid(w, h)
-	case recvStepExpired:
-		return s.viewExpired(w, h)
+	case recvStepExpired, recvStepCanceled, recvStepMissing:
+		return s.viewInvoiceResult(w, h)
 	}
 	return ""
 }
@@ -150,7 +153,7 @@ func (s *ReceiveScreen) HelpBindings() []key.Binding {
 	case recvStepWaiting:
 		return actionButtonBindings(
 			s.buttonIdx, s.ctx.HasTabs)
-	case recvStepPaid, recvStepExpired:
+	case recvStepPaid, recvStepExpired, recvStepCanceled, recvStepMissing:
 		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
@@ -381,7 +384,7 @@ func (s *ReceiveScreen) submitInvoice() (Screen, tea.Cmd) {
 		s.inputError = "Enter an amount"
 		return s, nil
 	}
-	s.attempt = &invoiceAttempt{request: app.InvoiceRequest{
+	s.attempt = &invoiceAttempt{wallet: s.ctx.walletObservationScope(), request: app.InvoiceRequest{
 		AmountSats: s.amountInput.Sats(),
 		Memo:       s.memoInput.Value(),
 		Blinded:    s.blindPaths,
@@ -419,19 +422,14 @@ func (s *ReceiveScreen) handleWaitingKey(
 		}
 		return s, nil
 	case "enter":
-		if s.buttonIdx == 0 && s.invoice.PaymentRequest() != "" {
-			return s, func() tea.Msg {
-				return showQRMsg{
-					URL: s.invoice.PaymentRequest(),
-					Label: fmt.Sprintf(
-						"Invoice — %s sats",
-						formatSats(s.invoice.AmountSats())),
-				}
-			}
+		if s.attempt == nil {
+			return s, nil
 		}
-		if s.buttonIdx == 1 && s.invoice.PaymentRequest() != "" {
-			return s, showInvoiceCmd(s.invoice.PaymentRequest())
-		}
+		return s, s.display.command(&qrCopyDisplayRequest{
+			owner: s, text: s.invoice.PaymentRequest(),
+			label: "Invoice - " + formatSats(s.invoice.AmountSats()) + " sats",
+			copy:  s.buttonIdx == 1, wallet: s.attempt.wallet, invoice: s.attempt,
+		})
 	}
 	return s, nil
 }
@@ -507,6 +505,12 @@ func (s *ReceiveScreen) handleInvoiceStatus(msg invoiceStatusMsg) (Screen, tea.C
 			return s, paymentHistoryChangedCmd
 		case app.InvoiceExpired:
 			s.step = recvStepExpired
+			return s, paymentHistoryChangedCmd
+		case app.InvoiceCanceled:
+			s.step = recvStepCanceled
+			return s, paymentHistoryChangedCmd
+		case app.InvoiceMissing:
+			s.step = recvStepMissing
 			return s, paymentHistoryChangedCmd
 		}
 	}
@@ -585,6 +589,9 @@ func (s *ReceiveScreen) viewWaiting(
 		}
 	}
 
+	if s.display.failed {
+		p.warn("Copy display did not complete. Try again.")
+	}
 	btnFocused := s.ctx.ContentFocused
 	return p.renderWithBottomButtons(
 		[]string{"Show QR", "Copyable Invoice"},
@@ -603,12 +610,22 @@ func (s *ReceiveScreen) viewPaid(
 		s.ctx.ContentFocused, h)
 }
 
-func (s *ReceiveScreen) viewExpired(
+func (s *ReceiveScreen) viewInvoiceResult(
 	w, h int,
 ) string {
 	p := newPane(w)
-	p.title(theme.Warning, "Invoice Expired")
-	p.dim("Create a new invoice to try again.")
+	switch s.step {
+	case recvStepCanceled:
+		p.title(theme.Warning, "Invoice Canceled")
+		p.dim("This invoice was canceled.")
+	case recvStepMissing:
+		p.title(theme.Warning, "Invoice unavailable")
+		p.dim("LND no longer has this invoice.")
+		p.dim("Payment status could not be determined.")
+	default:
+		p.title(theme.Warning, "Invoice Expired")
+		p.dim("Create a new invoice to try again.")
+	}
 	return p.renderWithBottomButtons(
 		[]string{"Done"}, 0,
 		s.ctx.ContentFocused, h)

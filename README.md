@@ -261,7 +261,7 @@ everything a peer needs to open a channel with you:
 - Peer count, active channels, node capacity
 - Outbound, inbound, on-chain, and total spendable balances
 - QR codes for your advertised URIs (Tor, clearnet, or both)
-- A `Copy URIs` button that drops to a shell view with clean
+- A `Copy URIs` button that opens a terminal view with clean
   clearnet/Tor section labels for easy copy-paste
 
 ### P2P Mode
