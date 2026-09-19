@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
@@ -38,9 +37,10 @@ func (*controlledStatusReader) Close() {}
 func statusModelFixture(t *testing.T) (Model, *controlledStatusReader) {
 	t.Helper()
 	cfg := config.Default()
-	ctx := &ScreenContext{Cfg: cfg, State: &RuntimeState{WalletKnown: true, WalletExists: true}}
+	client := &lndrpc.Client{}
+	ctx := &ScreenContext{Cfg: cfg, LndClient: client, State: &RuntimeState{WalletKnown: true, WalletExists: true}}
 	r := &controlledStatusReader{calls: make(chan statusReadCall, 4), done: t.Context().Done()}
-	return Model{cfg: cfg, state: ctx.State, screenCtx: ctx, statusCollector: r, nav: NewNavSidebar()}, r
+	return Model{cfg: cfg, state: ctx.State, screenCtx: ctx, lndClient: client, statusCollector: r, nav: NewNavSidebar()}, r
 }
 func startStatusCommand(t *testing.T, cmd tea.Cmd, r *controlledStatusReader) (statusReadCall, <-chan tea.Msg) {
 	t.Helper()
@@ -163,7 +163,6 @@ func TestStatusFailureRenderingAndRecovery(t *testing.T) {
 
 func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 	m, reader := statusModelFixture(t)
-	m.lndClient = &lndrpc.Client{}
 	oc := &OnChainContext{OnChainSnapshot: app.OnChainSnapshot{OnChainTxs: freshStatus([]lndrpc.OnChainTx{{Amount: 10000}, {Amount: 10000}})}}
 	m.sectionScreens[secOnChain] = NewOnChainHomeScreen(m.screenCtx, oc)
 	m.sectionScreens[secWallet] = NewWalletHomeScreen(m.screenCtx)
@@ -192,7 +191,7 @@ func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 	// Schedule through the real timer. Supply asynchronous results below without
 	// running helper I/O or waiting for the next timer.
 	statusUpdate(&m, tickMsg(time.Now()))
-	failedPresence := walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("LND stopped")}
+	failedPresence := walletObservationMsg(t, &m, false, errors.New("LND stopped"))
 	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	statusUpdate(&m, failedPresence)
 	assertStale()
@@ -209,7 +208,7 @@ func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 	call.result <- app.StatusSnapshot{Balance: app.Observation[lndrpc.WalletBalance]{Err: failed}, Channels: app.Observation[app.ChannelStatus]{Err: failed}}
 	statusUpdate(&m, <-done)
 	assertStale()
-	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: true}})
+	statusUpdate(&m, walletObservationMsg(t, &m, true, nil))
 	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	call.result <- good
 	statusUpdate(&m, <-done)
@@ -225,7 +224,6 @@ func TestStatusRetainsWalletDisplayAcrossPresenceFailure(t *testing.T) {
 
 func TestStatusPresenceChangeRejectsPriorWalletCompletion(t *testing.T) {
 	m, reader := statusModelFixture(t)
-	m.lndClient = &lndrpc.Client{}
 	m.sectionScreens[secOnChain] = NewOnChainHomeScreen(m.screenCtx, &OnChainContext{})
 	m.nav.ActiveItem = secOnChain
 	good := app.StatusSnapshot{Balance: freshStatus(lndrpc.WalletBalance{TotalBalance: "20000"})}
@@ -234,9 +232,9 @@ func TestStatusPresenceChangeRejectsPriorWalletCompletion(t *testing.T) {
 	statusUpdate(&m, <-done)
 	call, done = startStatusCommand(t, statusUpdate(&m, refreshStatusMsg{}), reader)
 	for _, exists := range []bool{false, true} {
-		statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: exists}})
+		statusUpdate(&m, walletObservationMsg(t, &m, exists, nil))
 	}
-	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("new wallet not observable")})
+	statusUpdate(&m, walletObservationMsg(t, &m, false, errors.New("new wallet not observable")))
 	if m.screenCtx.Status != nil {
 		t.Fatal("confirmed presence change retained the previous wallet snapshot")
 	}

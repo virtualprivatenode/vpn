@@ -88,7 +88,7 @@ var (
 	syncthingInstallSteps        = installer.SyncthingInstallSteps
 	syncthingResiduePresent      = installer.SyncthingResiduePresent
 	verifySyncthingPrerequisites = installer.VerifySyncthingInstallPrerequisites
-	walletExists                 = installer.WalletExists
+	walletExists                 = host.WalletExists
 	keyVerificationPending       = host.KeyVerificationPending
 	verifyAdminLogin             = host.VerifyAdminLogin
 	stageSyncthingWebPassword    = host.StageSyncthingWebPassword

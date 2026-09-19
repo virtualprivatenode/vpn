@@ -1,4 +1,4 @@
-package installer
+package host
 
 import (
 	"errors"
@@ -7,7 +7,6 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/host"
 )
 
 // WalletExists asks LND's always-running State service whether its wallet has
@@ -19,7 +18,7 @@ func WalletExists(network string) (bool, error) {
 		return false, err
 	}
 
-	state, stateErr := host.ReadLNDWalletState()
+	state, stateErr := ReadLNDWalletState()
 	return walletExistsFromState(state, stateErr)
 }
 

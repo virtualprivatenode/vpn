@@ -107,6 +107,9 @@ func (s *OnChainHomeScreen) HandleKey(
 	case "backspace":
 		return s, emitFocusSidebar
 	case "enter":
+		if s.ctx.walletClientUnavailable() {
+			return s, fetchWalletStateCmd(s.ctx)
+		}
 		// No wallet → trigger wallet creation flow
 		if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 			return s, fetchWalletStateCmd(s.ctx)
@@ -535,6 +538,9 @@ func (s *OnChainHomeScreen) View(
 
 	// ── Fixed header ─────────────────────────────
 
+	if s.ctx.walletClientUnavailable() {
+		return s.ctx.walletConnectionNotice(w)
+	}
 	if !s.ctx.walletKnown() && !s.ctx.walletDisplayAvailable() {
 		return renderWalletStateUnavailable(w, h)
 	}
@@ -1004,7 +1010,7 @@ func (s *OnChainHomeScreen) HelpBindings() []key.Binding {
 	if s.labelEditing {
 		return s.labelPopupBindings()
 	}
-	if !s.ctx.walletDisplayAvailable() {
+	if s.ctx.walletClientUnavailable() || !s.ctx.walletDisplayAvailable() {
 		return walletUnavailableHelpBindings(s.ctx)
 	}
 	switch s.focusZone {

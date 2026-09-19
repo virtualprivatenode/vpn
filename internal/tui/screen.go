@@ -64,9 +64,11 @@ type ScreenContext struct {
 	syncthingRevision   uint64
 	WalletCreation      *app.WalletCreation
 	walletCreationOwner *WalletCreateScreen
-	walletRevision      uint64 // Orders presence reads and invalidates replies across lifecycle changes.
+	WalletRuntime       walletRuntime
+	walletRead          *walletStateRequest
+	walletReadPending   bool
+	walletClient        *walletClientRequest
 	walletGeneration    uint64 // Scopes retained observations; routine reads do not change it.
-	openWalletClient    func() (*lndrpc.Client, error)
 	HelperWorkflows     *app.HelperWorkflows
 	SSHAccess           *app.SSHAccess
 	sshAuthRevision     uint64
@@ -135,7 +137,8 @@ type RuntimeState struct {
 }
 
 func (c *ScreenContext) invalidateWalletObservations() {
-	c.walletRevision++
+	c.cancelWalletRead()
+	c.cancelWalletClient()
 	c.walletGeneration++
 	c.Status = nil
 	if c.ChannelHistory != nil {
@@ -175,7 +178,7 @@ func (c *ScreenContext) disabledWalletButtons(indices ...int) []int {
 
 func walletUnavailableHelpBindings(c *ScreenContext) []key.Binding {
 	enter := kEnterCreateWallet
-	if !c.walletKnown() {
+	if !c.walletKnown() || c.walletClientUnavailable() {
 		enter = kEnterRetryWalletRead
 	}
 	return []key.Binding{enter, kSidebar, kBack, kQuit}

@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -258,15 +257,13 @@ func TestHistoryScopeRejectsOldResultsAndOpenCommands(t *testing.T) {
 func TestHistoryPresenceRecovery(t *testing.T) {
 	m, home, r := historyModel(t)
 	m.nav.ActiveItem = secWallet
-	m.lndClient = &lndrpc.Client{}
 	good := historySnapshot([]lndrpc.PaymentEntry{{Index: 1, IsIncoming: true, Memo: "retained", Status: "OPEN"}}, nil)
 	publishHistory(t, &m, good)
 	home.focusZone = walletHomeZoneList
 	_, open := home.HandleKey("enter", tea.KeyPressMsg{})
 	statusUpdate(&m, open())
 	active := statusUpdate(&m, requestPaymentHistoryCmd())
-	fetchWalletStateCmd(m.screenCtx)
-	statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, err: errors.New("presence unavailable")})
+	statusUpdate(&m, walletObservationMsg(t, &m, false, errors.New("presence unavailable")))
 	statusUpdate(&m, active())
 	if m.screenCtx.PaymentHistory.Fresh() || !strings.Contains(renderDetail(t, &m, 1), "Showing stale data") {
 		t.Fatal("unknown presence accepted a fresh list")
@@ -274,8 +271,7 @@ func TestHistoryPresenceRecovery(t *testing.T) {
 	if statusUpdate(&m, requestPaymentHistoryCmd()) != nil {
 		t.Fatal("unknown presence admitted history")
 	}
-	fetchWalletStateCmd(m.screenCtx)
-	refresh := statusUpdate(&m, walletStateMsg{owner: m.screenCtx, revision: m.screenCtx.walletRevision, state: helper.WalletStateResult{WalletExists: true}})
+	refresh := statusUpdate(&m, walletObservationMsg(t, &m, true, nil))
 	if refresh == nil || !strings.Contains(renderDetail(t, &m, 1), "Showing stale data") || strings.Contains(historyView(t, home), "No payments") {
 		t.Fatal("presence recovery erased intermediate error state")
 	}

@@ -46,26 +46,20 @@ type Client struct {
 	mu          sync.RWMutex
 }
 
-// New creates a new LND gRPC client. It reads the TLS certificate
-// and admin macaroon, establishes the connection, and verifies it
-// with a GetInfo call.
-//
-// Returns a client even if LND is not available — RPC methods
-// check for a live connection internally and return
-// errNotConnected if the connection is nil.
-func New() *Client {
+// NewContext initializes an existing wallet's client with the caller's lifetime.
+// An unavailable GetInfo response retains the transport for normal queries;
+// unreadable staged credentials and cancellation return no client. Startup uses
+// the existing probe and rate-limited repair policy, not the creation path.
+func NewContext(ctx context.Context) (*Client, error) {
 	c := &Client{}
-	if err := c.connect(); err != nil {
-		logger.Status("LND gRPC not available: %v", err)
-		return c
-	}
-	return c
-}
-
-func (c *Client) connect() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.dial(context.Background(), true)
+	err := c.dial(ctx, true)
+	c.mu.Unlock()
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
 }
 
 // dial establishes the connection; the caller holds c.mu.

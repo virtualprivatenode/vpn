@@ -226,7 +226,8 @@ func TestConnectionInfoScopeChangesAndCredentialFailureRequireFreshRead(t *testi
 	}
 	statusUpdate(&m, follow())
 	_, oldAction := s.HandleKey("enter", tea.KeyPressMsg{})
-	m.screenCtx.walletRevision++ // Ordinary wallet observations do not retire the credential read.
+	// Complete a routine observation while the pairing action is queued.
+	statusUpdate(&m, walletObservationMsg(t, &m, true, nil))
 	statusUpdate(&m, oldAction())
 	if m.subview != svQR {
 		t.Fatal("routine observation invalidated current pairing")

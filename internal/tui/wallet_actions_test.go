@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -28,17 +27,17 @@ func exerciseUnavailableWalletAction(t *testing.T, ctx *ScreenContext, screen Sc
 		m.activeTab = 1
 		ctx.HasTabs = true
 	}
-	statusUpdate(&m, walletStateMsg{owner: ctx, revision: ctx.walletRevision, err: errors.New("LND stopped")})
+	statusUpdate(&m, walletObservationMsg(t, &m, false, errors.New("LND stopped")))
 	if cmd := statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
 		t.Fatal("unknown wallet state allowed submission")
 	}
-	statusUpdate(&m, walletStateMsg{owner: ctx, revision: ctx.walletRevision, state: helper.WalletStateResult{WalletExists: true}})
+	statusUpdate(&m, walletObservationMsg(t, &m, true, nil))
 	cmd := statusUpdate(&m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("verified wallet still blocked explicit submission")
 	}
 	// Work admitted before a later outage still owns its result.
-	statusUpdate(&m, walletStateMsg{owner: ctx, revision: ctx.walletRevision, err: errors.New("presence read failed after submission")})
+	statusUpdate(&m, walletObservationMsg(t, &m, false, errors.New("presence read failed after submission")))
 	statusUpdate(&m, cmd())
 	verify()
 }
@@ -142,7 +141,7 @@ func TestWalletInputDraftsStayVisibleDuringOutage(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := test.ctx
 			m := Model{screenCtx: ctx, state: ctx.State}
-			statusUpdate(&m, walletStateMsg{owner: ctx, revision: ctx.walletRevision, err: errors.New("LND stopped")})
+			statusUpdate(&m, walletObservationMsg(t, &m, false, errors.New("LND stopped")))
 			if view := ansi.Strip(test.screen.View(82, 40)); !strings.Contains(view, test.draft) {
 				t.Fatalf("outage hid the input draft:\n%s", view)
 			}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
@@ -95,13 +94,6 @@ type latestVersionMsg string
 // Used to refresh stale data without replacing the screen
 // or its in-progress state.
 type tabActivatedMsg struct{}
-
-type walletStateMsg struct {
-	owner    *ScreenContext
-	revision uint64
-	state    helper.WalletStateResult
-	err      error
-}
 
 type syncthingPairedMsg struct {
 	owner   *SyncthingPairScreen
@@ -249,15 +241,9 @@ func NewModel(
 	state *RuntimeState, version string,
 ) Model {
 	theme.Init(prefs.Theme != "light")
-	// Creation owns credential staging before client publication. Startup can
-	// initialize an existing wallet independently of that interactive workflow.
-	var client *lndrpc.Client
-	if cfg.HasLND() && state.WalletKnown && state.WalletExists {
-		client = lndrpc.New()
-	}
 	m := Model{
 		cfg: cfg, prefs: prefs, state: state,
-		lndClient: client, version: version,
+		version: version,
 		subview: svNone, statusCollector: app.NewStatusCollector(),
 		nav: NewNavSidebar(),
 	}
@@ -266,7 +252,6 @@ func NewModel(
 		HelperWorkflows: app.NewHelperWorkflows(installer.SyncthingVersionStr()),
 		Cfg:             cfg,
 		State:           state,
-		LndClient:       client,
 		Version:         version,
 	}
 	m.screenCtx.ChannelHistory = &channelHistoryContext{reader: app.NewChannelHistoryReader()}
@@ -329,6 +314,9 @@ func Show(
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
+		if m.screenCtx.WalletRuntime != nil {
+			m.screenCtx.WalletRuntime.Close()
+		}
 		if m.screenCtx.Fees != nil {
 			m.screenCtx.Fees.Close()
 		}
@@ -374,14 +362,6 @@ func Show(
 
 func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 	state := &RuntimeState{}
-	var wallet helper.WalletStateResult
-	if err := helper.Call(
-		helper.VerbReadWalletState, nil, &wallet); err != nil {
-		logger.TUI("read live wallet state: %v", err)
-	} else {
-		state.WalletExists = wallet.WalletExists
-		state.WalletKnown = true
-	}
 	if enabled, err := app.NewSSHAccess().PasswordAuth(); err != nil {
 		logger.TUI("read live SSH password authentication: %v", err)
 	} else {
