@@ -130,16 +130,37 @@ func TestReceiveContinuesAfterPendingOrUnavailableStatus(t *testing.T) {
 	}
 }
 
-func TestReceiveExpiryStopsMonitoring(t *testing.T) {
-	client := &screenInvoiceClient{status: &lndrpc.Invoice{IsExpired: true}}
-	s := receiveScreen(client)
-	_, create := s.submitInvoice()
-	_, check := s.HandleMsg(create())
-	if _, next := s.HandleMsg(createdInvoiceCheck(t, check)()); !isHistoryChange(next) || s.step != recvStepExpired {
-		t.Fatal("expiry did not stop monitoring")
-	}
-	if _, next := s.HandleMsg(invoiceCheckMsg{attempt: s.attempt}); next != nil {
-		t.Fatal("expired invoice restarted monitoring")
+func TestReceiveTerminalOutcomesStopMonitoringWithoutRecreatingInvoice(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status *lndrpc.Invoice
+		err    error
+		step   recvStep
+	}{
+		{"expired", &lndrpc.Invoice{IsExpired: true}, nil, recvStepExpired},
+		{"canceled", &lndrpc.Invoice{Canceled: true}, nil, recvStepCanceled},
+		{"missing", nil, lndrpc.ErrInvoiceNotFound, recvStepMissing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &screenInvoiceClient{}
+			s := receiveScreen(client)
+			_, create := s.submitInvoice()
+			_, check := s.HandleMsg(create())
+			client.status, client.err = tc.status, tc.err
+			if _, next := s.HandleMsg(createdInvoiceCheck(t, check)()); !isHistoryChange(next) || s.step != tc.step {
+				t.Fatal("lookup did not retire the invoice with its distinct outcome")
+			}
+			if _, next := s.HandleMsg(invoiceCheckMsg{attempt: s.attempt}); next != nil {
+				t.Fatal("retired invoice restarted monitoring")
+			}
+			_, done := s.HandleKey("enter", tea.KeyPressMsg{})
+			if done == nil {
+				t.Fatal("retired invoice has no Done action")
+			}
+			if _, ok := done().(closeTabMsg); !ok || len(client.requests) != 1 {
+				t.Fatal("Done did not close the tab or recreated an invoice")
+			}
+		})
 	}
 }
 

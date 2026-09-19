@@ -19,6 +19,8 @@ const (
 	recvStepWaiting                  // invoice created, waiting for payment
 	recvStepPaid                     // payment received
 	recvStepExpired                  // invoice expired
+	recvStepCanceled                 // LND retained the canceled invoice
+	recvStepMissing                  // LND no longer has the invoice
 )
 
 const (
@@ -98,7 +100,7 @@ func (s *ReceiveScreen) HandleKey(
 		return s, nil
 	case recvStepWaiting:
 		return s.handleWaitingKey(keyStr)
-	case recvStepPaid, recvStepExpired:
+	case recvStepPaid, recvStepExpired, recvStepCanceled, recvStepMissing:
 		return s.handleResultKey(keyStr)
 	}
 	return s, nil
@@ -136,8 +138,8 @@ func (s *ReceiveScreen) View(w, h int) string {
 		return s.viewWaiting(w, h)
 	case recvStepPaid:
 		return s.viewPaid(w, h)
-	case recvStepExpired:
-		return s.viewExpired(w, h)
+	case recvStepExpired, recvStepCanceled, recvStepMissing:
+		return s.viewInvoiceResult(w, h)
 	}
 	return ""
 }
@@ -151,7 +153,7 @@ func (s *ReceiveScreen) HelpBindings() []key.Binding {
 	case recvStepWaiting:
 		return actionButtonBindings(
 			s.buttonIdx, s.ctx.HasTabs)
-	case recvStepPaid, recvStepExpired:
+	case recvStepPaid, recvStepExpired, recvStepCanceled, recvStepMissing:
 		return resultBindings(s.ctx.HasTabs)
 	}
 	return nil
@@ -504,6 +506,12 @@ func (s *ReceiveScreen) handleInvoiceStatus(msg invoiceStatusMsg) (Screen, tea.C
 		case app.InvoiceExpired:
 			s.step = recvStepExpired
 			return s, paymentHistoryChangedCmd
+		case app.InvoiceCanceled:
+			s.step = recvStepCanceled
+			return s, paymentHistoryChangedCmd
+		case app.InvoiceMissing:
+			s.step = recvStepMissing
+			return s, paymentHistoryChangedCmd
 		}
 	}
 	// Only this screen schedules the next lookup. Closing its tab drops the
@@ -602,12 +610,22 @@ func (s *ReceiveScreen) viewPaid(
 		s.ctx.ContentFocused, h)
 }
 
-func (s *ReceiveScreen) viewExpired(
+func (s *ReceiveScreen) viewInvoiceResult(
 	w, h int,
 ) string {
 	p := newPane(w)
-	p.title(theme.Warning, "Invoice Expired")
-	p.dim("Create a new invoice to try again.")
+	switch s.step {
+	case recvStepCanceled:
+		p.title(theme.Warning, "Invoice Canceled")
+		p.dim("This invoice was canceled.")
+	case recvStepMissing:
+		p.title(theme.Warning, "Invoice unavailable")
+		p.dim("LND no longer has this invoice.")
+		p.dim("Payment status could not be determined.")
+	default:
+		p.title(theme.Warning, "Invoice Expired")
+		p.dim("Create a new invoice to try again.")
+	}
 	return p.renderWithBottomButtons(
 		[]string{"Done"}, 0,
 		s.ctx.ContentFocused, h)

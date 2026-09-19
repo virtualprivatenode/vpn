@@ -165,7 +165,7 @@ func TestNodeDisplaysRequireCurrentAdvertisements(t *testing.T) {
 }
 
 func TestInvoiceQRRetainsUnknownOutcomeAndRetiresTerminalOutcome(t *testing.T) {
-	for _, outcome := range []app.InvoiceState{app.InvoicePaid, app.InvoiceExpired} {
+	for _, outcome := range []app.InvoiceState{app.InvoicePaid, app.InvoiceExpired, app.InvoiceCanceled, app.InvoiceMissing} {
 		m, screen, want := qrCopyDisplayModel(t, "invoice qr")
 		s := screen.(*ReceiveScreen)
 		statusUpdate(&m, displayAction(t, s))
@@ -182,6 +182,12 @@ func TestInvoiceQRRetainsUnknownOutcomeAndRetiresTerminalOutcome(t *testing.T) {
 		if m.subview != svNone {
 			t.Fatal("invalidated QR could not be dismissed")
 		}
+		for _, copy := range []bool{false, true} {
+			late := &qrCopyDisplayRequest{owner: s, text: want, invoice: s.attempt, wallet: s.attempt.wallet, copy: copy}
+			if cmd := statusUpdate(&m, s.display.command(late)()); cmd != nil || m.subview != svNone {
+				t.Fatal("retired invoice readmitted QR or Copy")
+			}
+		}
 	}
 	for _, action := range []string{"invoice qr", "invoice copy"} {
 		m, s, _ := qrCopyDisplayModel(t, action)
@@ -193,6 +199,32 @@ func TestInvoiceQRRetainsUnknownOutcomeAndRetiresTerminalOutcome(t *testing.T) {
 		if cmd := statusUpdate(&m, displayAction(t, s)); cmd != nil || m.subview != svNone {
 			t.Fatal("old wallet invoice was readmitted in a new wallet session")
 		}
+	}
+}
+
+func TestInvoiceCopyReturnDoesNotReviveMissingInvoice(t *testing.T) {
+	m, screen, _ := qrCopyDisplayModel(t, "invoice copy")
+	s := screen.(*ReceiveScreen)
+	request := displayAction(t, s).(qrCopyDisplayMsg).request
+	if statusUpdate(&m, qrCopyDisplayMsg{request: request}) == nil {
+		t.Fatal("Copy was not admitted")
+	}
+	// A queued lookup may complete while terminal I/O has suspended rendering.
+	s.invoices.(*screenInvoiceClient).err = lndrpc.ErrInvoiceNotFound
+	result := checkInvoiceCmd(s.invoices, s.attempt, s.invoice)()
+	statusUpdate(&m, qrCopyDisplayDoneMsg{request: request})
+	statusUpdate(&m, result)
+	if m.copyTerminal != nil || s.step != recvStepMissing || request.current() {
+		t.Fatal("return from Copy retained a missing invoice")
+	}
+	view := s.View(82, 40)
+	if !strings.Contains(view, "Invoice unavailable") || strings.Contains(view, "Payment Received") || strings.Contains(view, "Invoice Expired") {
+		t.Fatal("missing invoice claimed a payment outcome")
+	}
+	// An obsolete completion cannot revive a retired request or change its result.
+	statusUpdate(&m, qrCopyDisplayDoneMsg{request: request, err: errors.New("late failure")})
+	if s.step != recvStepMissing || s.display.failed {
+		t.Fatal("obsolete Copy completion changed the retired invoice")
 	}
 }
 

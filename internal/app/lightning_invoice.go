@@ -34,6 +34,8 @@ const (
 	InvoicePending InvoiceState = iota
 	InvoicePaid
 	InvoiceExpired
+	InvoiceCanceled
+	InvoiceMissing
 )
 
 func CreateLightningInvoice(client LightningInvoiceClient, request InvoiceRequest) (LightningInvoice, error) {
@@ -61,8 +63,8 @@ func CreateLightningInvoice(client LightningInvoiceClient, request InvoiceReques
 	}, nil
 }
 
-// CheckLightningInvoice performs one lookup. A lookup error does not establish
-// whether payment succeeded; the caller decides when to check again.
+// CheckLightningInvoice distinguishes a missing record from a failed lookup.
+// Neither establishes whether payment succeeded.
 func CheckLightningInvoice(client LightningInvoiceClient, invoice LightningInvoice) (InvoiceState, error) {
 	if invoice.paymentRequest == "" {
 		return InvoicePending, errors.New("Create an invoice before checking payment")
@@ -71,6 +73,9 @@ func CheckLightningInvoice(client LightningInvoiceClient, invoice LightningInvoi
 		return InvoicePending, errors.New("LND not connected")
 	}
 	status, err := client.LookupInvoice(invoice.paymentHash[:])
+	if errors.Is(err, lndrpc.ErrInvoiceNotFound) {
+		return InvoiceMissing, nil
+	}
 	if err != nil {
 		return InvoicePending, err
 	}
@@ -79,6 +84,9 @@ func CheckLightningInvoice(client LightningInvoiceClient, invoice LightningInvoi
 	}
 	if status.Settled {
 		return InvoicePaid, nil
+	}
+	if status.Canceled {
+		return InvoiceCanceled, nil
 	}
 	if status.IsExpired {
 		return InvoiceExpired, nil

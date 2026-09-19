@@ -2,10 +2,13 @@ package lndrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ── Data types ───────────────────────────────────────────
@@ -16,6 +19,7 @@ type Invoice struct {
 	AmountSats     int64
 	Memo           string
 	Settled        bool
+	Canceled       bool
 	CreationDate   int64
 	SettleDate     int64
 	Expiry         int64
@@ -126,6 +130,9 @@ func (c *Client) decodePayReqContext(parent context.Context, payReq string) (*De
 
 // ── Invoice lookup ───────────────────────────────────────
 
+// ErrInvoiceNotFound means LND has no record for the queried payment hash.
+var ErrInvoiceNotFound = errors.New("invoice not found")
+
 // LookupInvoice checks the status of an invoice by payment hash.
 func (c *Client) LookupInvoice(paymentHash []byte) (*Invoice, error) {
 	rpc := c.rpc()
@@ -139,12 +146,14 @@ func (c *Client) LookupInvoice(paymentHash []byte) (*Invoice, error) {
 		RHash: paymentHash,
 	})
 	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, ErrInvoiceNotFound
+		}
 		c.handleError(err)
 		return nil, err
 	}
 
-	// Use LND's state field; check expiry client-side
-	// for OPEN invoices (LND doesn't auto-expire them)
+	// An overdue OPEN observation can precede LND's cancellation and cleanup.
 	settled := resp.GetState() == lnrpc.Invoice_SETTLED
 	isExpired := false
 	if resp.GetState() == lnrpc.Invoice_OPEN {
@@ -153,8 +162,6 @@ func (c *Client) LookupInvoice(paymentHash []byte) (*Invoice, error) {
 			now := time.Now().Unix()
 			isExpired = (resp.GetCreationDate() + expiry) < now
 		}
-	} else if resp.GetState() == lnrpc.Invoice_CANCELED {
-		isExpired = true
 	}
 
 	return &Invoice{
@@ -163,6 +170,7 @@ func (c *Client) LookupInvoice(paymentHash []byte) (*Invoice, error) {
 		AmountSats:     resp.GetValue(),
 		Memo:           resp.GetMemo(),
 		Settled:        settled,
+		Canceled:       resp.GetState() == lnrpc.Invoice_CANCELED,
 		CreationDate:   resp.GetCreationDate(),
 		SettleDate:     resp.GetSettleDate(),
 		Expiry:         resp.GetExpiry(),
@@ -206,8 +214,7 @@ func (c *Client) ListInvoicesContext(parent context.Context, limit uint64) ([]Pa
 		case lnrpc.Invoice_ACCEPTED:
 			status = "ACCEPTED"
 		case lnrpc.Invoice_OPEN:
-			// LND keeps expired invoices as OPEN;
-			// check expiry client-side.
+			// Account for expiry before LND's watcher cancels and cleans up.
 			status = "OPEN"
 			now := time.Now().Unix()
 			expiry := inv.GetExpiry()
