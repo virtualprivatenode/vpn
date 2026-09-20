@@ -106,10 +106,7 @@ func TestSortKeySourcesRootFirst(t *testing.T) {
 // ── generateAdminPassword ────────────────────────────────
 
 func TestGenerateAdminPassword(t *testing.T) {
-	pw, err := generateAdminPassword()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	pw := generateAdminPassword()
 	if len(pw) != 25 {
 		t.Errorf("length: got %d, want 25", len(pw))
 	}
@@ -126,7 +123,7 @@ func TestGenerateAdminPassword(t *testing.T) {
 		t.Errorf("generated password fails validation: %v", err)
 	}
 	// Two draws must differ (sanity, not a randomness test).
-	pw2, _ := generateAdminPassword()
+	pw2 := generateAdminPassword()
 	if pw == pw2 {
 		t.Error("two generated passwords identical")
 	}

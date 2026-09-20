@@ -161,7 +161,7 @@ func (s *SyncthingInstallScreen) View(
 	p.line(" " + theme.Value.Render(
 		"  * Auto-configure LND channel backup sync"))
 	p.line(" " + theme.Value.Render(
-		"  * Restart Tor"))
+		"  * Reload Tor configuration"))
 	p.blank()
 	p.dim("After install, pair your local Syncthing")
 	p.dim("from the Syncthing details screen.")

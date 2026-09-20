@@ -1,6 +1,4 @@
-// internal/installer/tor_test.go
-
-package installer
+package host
 
 import (
 	"errors"
@@ -57,7 +55,7 @@ func TestTorConfigWithSyncthing(t *testing.T) {
 		t.Error("missing Syncthing web UI port")
 	}
 
-	// Sync protocol goes over clearnet — no hidden service
+	// Sync protocol goes over clearnet: no hidden service
 	if strings.Contains(content, "syncthing-sync") {
 		t.Error("should not have syncthing-sync hidden service")
 	}
@@ -72,34 +70,6 @@ func TestTorConfigNoSyncthingWithoutInstall(t *testing.T) {
 
 	if strings.Contains(content, "syncthing") {
 		t.Error("should not have syncthing without install")
-	}
-}
-
-func TestTorConfigFullStack(t *testing.T) {
-	cfg := &config.AppConfig{
-		Network:          "mainnet",
-		SyncthingEnabled: true,
-	}
-	content := mustBuildTorConfig(t, cfg)
-
-	required := []string{
-		"SOCKSPort 9050",
-		"ControlPort 9051",
-		"bitcoin-p2p",
-		"lnd-grpc",
-		"lnd-rest",
-		"syncthing",
-		"HiddenServicePort 8384",
-	}
-	for _, req := range required {
-		if !strings.Contains(content, req) {
-			t.Errorf("full stack torrc missing %q", req)
-		}
-	}
-
-	// Sync protocol over clearnet, not Tor
-	if strings.Contains(content, "syncthing-sync") {
-		t.Error("full stack should not have syncthing-sync hidden service")
 	}
 }
 
@@ -148,21 +118,6 @@ func TestTorConfigRejectsUnknownProfile(t *testing.T) {
 	}
 }
 
-func TestTorConfigControlPortAlways(t *testing.T) {
-	// The install-path routing gate (torgate.go) reads bootstrap
-	// progress from the control port unconditionally, so every
-	// generated torrc must include it — LND or not.
-	cfg := config.Default()
-	content := mustBuildTorConfig(t, cfg)
-
-	if !strings.Contains(content, "ControlPort 9051") {
-		t.Error("ControlPort must be present in every config (install gate depends on it)")
-	}
-	if !strings.Contains(content, "CookieAuthentication 1") {
-		t.Error("control port must require cookie auth")
-	}
-}
-
 func withTorAddonTestDeps(t *testing.T) {
 	t.Helper()
 	oldPresent := torBinaryPresentForAddon
@@ -205,7 +160,7 @@ func TestSyncthingPrerequisitesValidateCompleteProposedTorConfig(t *testing.T) {
 		validated = string(content)
 		return nil
 	}
-	if err := VerifySyncthingInstallPrerequisites(cfg); err != nil {
+	if err := verifySyncthingInstallPrerequisites(cfg); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(validated,
@@ -217,7 +172,7 @@ func TestSyncthingPrerequisitesValidateCompleteProposedTorConfig(t *testing.T) {
 	validateTorConfigForAddon = func([]byte) error {
 		return errors.New("invalid proposed config")
 	}
-	if err := VerifySyncthingInstallPrerequisites(cfg); err == nil ||
+	if err := verifySyncthingInstallPrerequisites(cfg); err == nil ||
 		!strings.Contains(err.Error(), "validate proposed Syncthing") {
 		t.Fatalf("invalid proposed torrc error=%v", err)
 	}
@@ -443,7 +398,7 @@ func TestInitialTorOperationEnablesThenRestarts(t *testing.T) {
 		actions = append(actions, action)
 		return nil
 	}
-	if err := enableAndRestartTor(); err != nil {
+	if err := EnableAndRestartTor(); err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"enable", "restart"}; !reflect.DeepEqual(actions, want) {

@@ -71,9 +71,8 @@ const (
 type InstallStep struct {
 	// Key is the stable, versionless ledger key ("tor.install",
 	// "btc.download"). Names carry versions and copy edits; keys
-	// identify the step across binary versions. Runtime step
-	// lists (P2P upgrade, Syncthing) leave Key empty — they run
-	// through the TUI engine and never touch the ledger.
+	// identify the step across binary versions. The legacy self-update
+	// list leaves Key empty and runs through the helper without a ledger.
 	Key string
 	// Name is display-only.
 	Name  string

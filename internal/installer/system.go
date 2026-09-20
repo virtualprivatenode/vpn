@@ -3,13 +3,12 @@
 package installer
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"strings"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -17,34 +16,6 @@ import (
 // The OS check formerly here (checkOS, Debian 13-or-newer) is
 // superseded by the preflight's exactly-13 assertion (ruling ix).
 // See preflight.go.
-
-func createSystemUser(username, home string) error {
-	if _, err := user.Lookup(username); err == nil {
-		return nil
-	} else {
-		var unknown user.UnknownUserError
-		if !errors.As(err, &unknown) {
-			return fmt.Errorf("look up system user %s: %w", username, err)
-		}
-	}
-	return system.SudoRun("adduser",
-		"--system", "--group",
-		"--home", home,
-		"--shell", "/usr/sbin/nologin",
-		username)
-}
-
-func createSystemGroup(name string) error {
-	if _, err := user.LookupGroup(name); err == nil {
-		return nil
-	} else {
-		var unknown user.UnknownGroupError
-		if !errors.As(err, &unknown) {
-			return fmt.Errorf("look up system group %s: %w", name, err)
-		}
-	}
-	return system.SudoRun("groupadd", "--system", name)
-}
 
 // ensureRootOwnedVarLibVPN revalidates the lifecycle-owned ancestor before a
 // later install step uses it. Creation belongs exclusively to lifecycle
@@ -60,11 +31,11 @@ func createBaseServiceIdentities() error {
 	if err := ensureRootOwnedVarLibVPN(); err != nil {
 		return err
 	}
-	if err := createSystemUser(
+	if err := host.CreateSystemUser(
 		bitcoinUser, paths.BitcoinDataDir); err != nil {
 		return err
 	}
-	if err := createSystemUser(lndUser, paths.LNDDataDir); err != nil {
+	if err := host.CreateSystemUser(lndUser, paths.LNDDataDir); err != nil {
 		return err
 	}
 	if err := createBitcoinDirs(bitcoinUser); err != nil {

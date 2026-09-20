@@ -1,6 +1,4 @@
-// internal/installer/tor.go
-
-package installer
+package host
 
 import (
 	"bytes"
@@ -11,17 +9,12 @@ import (
 	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
-func installTor() error {
-	return system.SudoRun("apt-get", "install", "-y", "-qq", "tor", "torsocks")
-}
-
 // BuildTorConfig generates the complete torrc content from config state.
-// Pure logic — no side effects.
+// Pure logic: no side effects.
 // Note: HiddenServiceDir paths are hardcoded strings because they are
 // torrc config content read by Tor, not Go logic paths.
 func BuildTorConfig(cfg *config.AppConfig) (string, error) {
@@ -34,7 +27,7 @@ func BuildTorConfig(cfg *config.AppConfig) (string, error) {
 	b.WriteString("# Virtual Private Node — Tor Configuration\n")
 	b.WriteString("SOCKSPort 9050\n")
 
-	// Control port: always emitted. Two consumers — the install-path
+	// Control port: always emitted. Two consumers: the install-path
 	// Tor routing gate (torgate.go reads bootstrap progress here,
 	// unconditionally) and LND's P2P onion management. Loopback-only,
 	// cookie-authenticated; emitting it without LND adds no exposure.
@@ -68,15 +61,15 @@ HiddenServiceDir /var/lib/tor/syncthing/
 HiddenServicePort 8384 127.0.0.1:8384
 `)
 		// Sync protocol (port 22000) goes over clearnet.
-		// No hidden service needed — Syncthing uses mutual TLS
+		// No hidden service needed: Syncthing uses mutual TLS
 		// with explicit device approval for authentication.
 	}
 
 	return b.String(), nil
 }
 
-// RebuildTorConfig writes the torrc to disk.
-func RebuildTorConfig(cfg *config.AppConfig) error {
+// WriteTorConfig writes the torrc to disk.
+func WriteTorConfig(cfg *config.AppConfig) error {
 	content, err := BuildTorConfig(cfg)
 	if err != nil {
 		return err
@@ -140,19 +133,12 @@ var (
 	}
 )
 
-// enableAndRestartTor belongs to initial installation. That operation owns
+// EnableAndRestartTor belongs to initial installation. That operation owns
 // establishing Tor's boot persistence as part of the base node.
-func enableAndRestartTor() error {
+func EnableAndRestartTor() error {
 	if err := runTorServiceAction("enable"); err != nil {
 		return err
 	}
-	return restartTor()
-}
-
-// restartTor reloads the project-owned canonical torrc without changing the
-// unit's enablement policy. Post-install add-ons may call this only after
-// proving the required base Tor state through the prerequisite below.
-func restartTor() error {
 	return runTorServiceAction("restart")
 }
 
@@ -186,12 +172,12 @@ func verifySyncthingTorPrerequisite(cfg *config.AppConfig) error {
 	return nil
 }
 
-var requireActiveFirewallForAddon = host.RequireActiveFirewall
+var requireActiveFirewallForAddon = RequireActiveFirewall
 
-// VerifySyncthingInstallPrerequisites is the root helper's before-mutation
+// verifySyncthingInstallPrerequisites is the root helper's before-mutation
 // gate. UFW and Tor must already be healthy base-node facilities; the optional
 // add-on never installs, enables, or globally repairs either one.
-func VerifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
+func verifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
 	if err := requireActiveFirewallForAddon(); err != nil {
 		return err
 	}
@@ -200,7 +186,7 @@ func VerifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
 	}
 
 	// Validate the complete proposed add-on configuration before any
-	// Syncthing installation step mutates the host. The transaction below
+	// Syncthing installation step mutates the  The transaction below
 	// validates it again immediately before the authoritative write.
 	proposedCfg := *cfg
 	proposedCfg.SyncthingEnabled = true
@@ -221,7 +207,7 @@ func waitForSyncthingOnion() error {
 			paths.TorSyncthingHostname)
 		if err == nil {
 			hostname := strings.TrimSpace(string(data))
-			if host.ValidV3OnionHostname(hostname) {
+			if ValidV3OnionHostname(hostname) {
 				return nil
 			}
 			lastErr = fmt.Errorf(
@@ -262,7 +248,8 @@ func syncthingTorFailure(previous []byte, cause error) error {
 // configureAndReloadTorForSyncthing validates the complete proposed torrc,
 // writes it atomically, and applies it with a SIGHUP-backed systemd reload.
 // Reload preserves LND's controller connection and dynamic onion registration.
-// Any post-write failure restores and reloads the exact prior base config.
+// Reload or post-reload readiness failures restore and reload the exact prior
+// base config. A failure to write the proposed config returns without rollback.
 // This add-on operation deliberately does not enable or restart Tor.
 func configureAndReloadTorForSyncthing(cfg *config.AppConfig) error {
 	baseCfg := *cfg

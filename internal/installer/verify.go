@@ -2,21 +2,11 @@
 
 // Trust model
 //
-// All signing-key fingerprints are pinned in this file as the sole trust
-// anchors. Keys are fetched fresh each run and imported into an ephemeral
-// GPG home directory (os.MkdirTemp, 0700). Signatures are verified via
-// gpg --status-fd 1; only [GNUPG:] VALIDSIG lines whose primary-key
-// fingerprint (the LAST whitespace-delimited field) matches a pinned
-// value are counted. Distinct signers are counted once (deduped by
-// primary fingerprint). Any [GNUPG:] BADSIG line is a hard stop. The
-// GPG exit code is never trusted.
-//
-// Four callers use verifyIsolated:
-//   - verifySelfUpdate:      threshold 1 vs the vpn release key
-//   - verifyBitcoinCoreSigs: threshold 2 distinct builder fingerprints
-//   - verifyLNDSig:          threshold 1 vs roasbeef's fingerprint
-//   - verifySyncthingSig:    threshold 1 vs the Syncthing release key
-//                            (CLEARSIGNED — dataFile == "")
+// This file pins trusted signing-key fingerprints for Bitcoin Core, LND and
+// VPN releases. Each workflow obtains verification inputs and enforces its
+// signer threshold. artifact.VerifySignature owns isolated GPG verification;
+// callers reject bad signatures and insufficient trusted signers.
+// Syncthing provisioning keeps its release-specific trust policy in host.
 
 package installer
 
@@ -27,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/virtualprivatenode/vpn/internal/artifact"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -99,33 +90,6 @@ var lndSigner = struct {
 	keyURL:      "https://raw.githubusercontent.com/lightningnetwork/lnd/master/scripts/keys/roasbeef.asc",
 }
 
-// syncthingSigner is the trusted Syncthing release signer.
-// Source: https://syncthing.net/release-key.txt, linked from
-// https://syncthing.net/security/ ("Release Signatures").
-// Cross-checked June 9 2026 against an independent temporal
-// channel: the apt keyring on a months-old production install
-// (/etc/apt/keyrings/syncthing-archive-keyring.gpg) holds the
-// identical primary fingerprint. Empirically bound: the v2.1.1
-// sha256sum.txt.asc VALIDSIG primary fingerprint (last field)
-// matches this pin on a live verification.
-//
-// NOTE: Syncthing dual-signs releases during key rotation — the
-// v2.1.1 checksum file carries a second signature from the
-// pre-rotation key (ends D26E6ED000654A3E), which our keyring
-// cannot check (ERRSIG/NO_PUBKEY) and which makes gpg exit
-// non-zero even on a genuine release. This is why exit-code
-// trust is unusable here and VALIDSIG parsing is the sole
-// source of truth (the v0.6.1 finding A/B design).
-var syncthingSigner = struct {
-	name        string
-	fingerprint string
-	keyURL      string
-}{
-	name:        "Syncthing Release Management",
-	fingerprint: "FBA2E162F2F44657B38F0309E5665F9BD5970C47",
-	keyURL:      "https://syncthing.net/release-key.txt",
-}
-
 // ── GPG setup ────────────────────────────────────────────
 
 func ensureGPG() error {
@@ -133,97 +97,6 @@ func ensureGPG() error {
 		return nil
 	}
 	return system.SudoRun("apt-get", "install", "-y", "-qq", "gnupg")
-}
-
-// ── Isolated signature verification ─────────────────────
-
-// verifyIsolated verifies a detached GPG signature inside an
-// ephemeral keyring. It creates a temporary GPG home directory,
-// imports the provided key files, and runs gpg --verify with
-// --status-fd 1. Only VALIDSIG lines whose primary-key
-// fingerprint (the LAST field) matches a pinned fingerprint are
-// counted, and each primary fingerprint is counted at most once
-// (distinct signers). Any BADSIG line sets badSig = true.
-//
-// The GPG exit code is intentionally ignored — the VALIDSIG and
-// BADSIG parsing is the sole source of truth. (Empirically
-// necessary: Syncthing's dual-signed v2.1.1 release makes gpg
-// exit non-zero on a genuine artifact — see syncthingSigner.)
-//
-// dataFile == "" means sigFile is CLEARSIGNED (data and
-// signature in one file, e.g. Syncthing's sha256sum.txt.asc);
-// gpg is invoked with the single file argument. Otherwise the
-// signature is detached and gpg gets both arguments.
-func verifyIsolated(
-	keyFiles []string,
-	sigFile, dataFile string,
-	pinnedFPs map[string]bool,
-) (distinctValidSigners int, badSig bool, err error) {
-	// Ephemeral GPG home — 0700, random path, cleaned up on return.
-	gpgHome, err := os.MkdirTemp("", "vpn-gpg-")
-	if err != nil {
-		return 0, false, fmt.Errorf(
-			"create ephemeral gpg home: %w", err)
-	}
-	defer os.RemoveAll(gpgHome)
-
-	// Import key files into the ephemeral keyring.
-	for _, kf := range keyFiles {
-		output, importErr := system.RunCombinedOutput(
-			"gpg", "--homedir", gpgHome,
-			"--batch", "--import", kf)
-		if importErr != nil {
-			logger.Verify("SKIP key import %s: %v: %s",
-				filepath.Base(kf), importErr, output)
-		}
-	}
-
-	// Verify — exit code intentionally discarded.
-	// Clearsigned input (dataFile == "") takes one file argument.
-	args := []string{"--homedir", gpgHome, "--batch",
-		"--verify", "--status-fd", "1", sigFile}
-	if dataFile != "" {
-		args = append(args, dataFile)
-	}
-	output, _ := system.RunCombinedOutput("gpg", args...)
-
-	// Parse status output.
-	seen := make(map[string]bool)
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-
-		if strings.HasPrefix(trimmed, "[GNUPG:] BADSIG") {
-			badSig = true
-			logger.Verify("BADSIG: %s", trimmed)
-		}
-
-		if strings.HasPrefix(trimmed, "[GNUPG:] VALIDSIG") {
-			fields := strings.Fields(trimmed)
-			// VALIDSIG layout (after [GNUPG:] VALIDSIG):
-			//   <signing-fpr> <date> <ts> <exp> <ver> <res>
-			//   <pkalgo> <halgo> <sigclass> <primary-fpr>
-			// The LAST field is the primary-key fingerprint.
-			// When a subkey signs, the first field after
-			// VALIDSIG is the subkey fingerprint — we must
-			// match the LAST field (primary) against our pins.
-			if len(fields) >= 3 {
-				primaryFP := fields[len(fields)-1]
-				if pinnedFPs[primaryFP] {
-					if !seen[primaryFP] {
-						seen[primaryFP] = true
-						logger.Verify(
-							"VALIDSIG pinned: %s", primaryFP)
-					}
-				} else {
-					logger.Verify(
-						"VALIDSIG unpinned (ignored): %s",
-						primaryFP)
-				}
-			}
-		}
-	}
-
-	return len(seen), badSig, nil
 }
 
 // ── Bitcoin Core verification ───────────────────────────
@@ -272,7 +145,7 @@ func verifyBitcoinCoreSigs(workDir string, minValid int) error {
 			"could not download any Bitcoin Core signing keys")
 	}
 
-	distinct, hasBadSig, err := verifyIsolated(
+	distinct, hasBadSig, err := artifact.VerifySignature(
 		keyFiles, sigFile, sumsFile, pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(
@@ -355,7 +228,7 @@ func verifyLNDSig(workDir string, version string) error {
 
 	pinnedFPs := map[string]bool{lndSigner.fingerprint: true}
 
-	distinct, hasBadSig, err := verifyIsolated(
+	distinct, hasBadSig, err := artifact.VerifySignature(
 		[]string{keyFile}, sigFile, manifestFile, pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(
@@ -402,81 +275,6 @@ func verifyLND(workDir string) error {
 	return nil
 }
 
-// ── Syncthing verification ──────────────────────────────
-
-// verifySyncthingSig verifies the CLEARSIGNED checksum file
-// (sha256sum.txt.asc) against the pinned release fingerprint.
-// Unlike Bitcoin Core and LND (detached signatures: signature
-// and data in separate files), Syncthing ships the checksum
-// list and its signature in ONE file. Must run BEFORE
-// verifySyncthingChecksum — the checksums inside the file are
-// untrusted until the signature over them validates.
-func verifySyncthingSig(workDir string) error {
-	logger.Verify("--- Syncthing signature verification ---")
-
-	ascFile := filepath.Join(workDir, "sha256sum.txt.asc")
-	if _, err := os.Stat(ascFile); err != nil {
-		logger.Verify("FAIL: sha256sum.txt.asc not found")
-		return fmt.Errorf("sha256sum.txt.asc not found")
-	}
-
-	keyFile := filepath.Join(workDir, "syncthing-release-key.txt")
-	if err := system.DownloadRequireTor(
-		syncthingSigner.keyURL, keyFile); err != nil {
-		logger.Verify("FAIL: download Syncthing signing key: %v", err)
-		return fmt.Errorf("download Syncthing signing key: %w", err)
-	}
-
-	pinnedFPs := map[string]bool{syncthingSigner.fingerprint: true}
-
-	// dataFile "" → clearsigned, single-argument verify.
-	distinct, hasBadSig, err := verifyIsolated(
-		[]string{keyFile}, ascFile, "", pinnedFPs)
-	if err != nil {
-		return fmt.Errorf(
-			"Syncthing signature verification failed: %w", err)
-	}
-
-	if hasBadSig {
-		logger.Verify("FAIL: bad Syncthing signature detected")
-		return fmt.Errorf(
-			"bad Syncthing signature detected — verification aborted")
-	}
-
-	if distinct < 1 {
-		logger.Verify(
-			"FAIL: Syncthing signature not valid against pinned fingerprint")
-		return fmt.Errorf("Syncthing signature verification failed")
-	}
-
-	logger.Verify(
-		"OK Syncthing: signature valid (release key, pinned fingerprint)")
-	return nil
-}
-
-// verifySyncthingChecksum checks the tarball against the
-// now-trusted clearsigned checksum file. Same sha256sum
-// pattern as verifyBitcoin/verifyLND — the only difference is
-// that the checksum source is the clearsigned .asc itself:
-// sha256sum skips the PGP armor lines (reported as "improperly
-// formatted" warnings) and matches the real checksum lines.
-func verifySyncthingChecksum(workDir string) error {
-	logger.Verify("--- Syncthing checksum verification ---")
-	// exec.Command used directly because sha256sum --check needs
-	// working directory set to where the tarball was downloaded.
-	cmd := exec.Command("sha256sum",
-		"--ignore-missing", "--check", "sha256sum.txt.asc")
-	cmd.Dir = workDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Verify("FAIL: Syncthing checksum: %s", string(output))
-		return fmt.Errorf("checksum failed: %w: %s", err, output)
-	}
-	logger.Verify("OK Syncthing checksum: %s",
-		strings.TrimSpace(string(output)))
-	return nil
-}
-
 // ── Self-update verification ────────────────────────────
 
 func verifySelfUpdate(workDir string) error {
@@ -495,8 +293,8 @@ func verifySelfUpdate(workDir string) error {
 	}
 
 	// Download the release signing key fresh into the work
-	// directory. verifyIsolated imports it into an ephemeral
-	// GPG home — the shared keyring is never touched.
+	// directory. artifact.VerifySignature imports it into an ephemeral
+	// GPG home; the shared keyring is never touched.
 	keyFile := filepath.Join(workDir, "release-key.asc")
 	keyURL := fmt.Sprintf(
 		"https://keys.openpgp.org/vks/v1/by-fingerprint/%s",
@@ -511,7 +309,7 @@ func verifySelfUpdate(workDir string) error {
 
 	pinnedFPs := map[string]bool{vpnReleaseFP: true}
 
-	distinct, hasBadSig, err := verifyIsolated(
+	distinct, hasBadSig, err := artifact.VerifySignature(
 		[]string{keyFile}, sigFile, sumsFile, pinnedFPs)
 	if err != nil {
 		return fmt.Errorf(

@@ -78,24 +78,20 @@ var verbs = map[string]verbDef{
 }
 
 var (
-	setLoginPassword             = host.SetLoginPassword
-	clearPasswordPendingMarker   = host.ClearPasswordPendingMarker
-	loadSystemConfig             = config.Load
-	saveSystemConfig             = config.Save
-	setupAutoUnlock              = host.SetupAutoUnlock
-	disableAutoUnlock            = host.DisableAutoUnlock
-	upgradeP2P                   = host.UpgradeP2PToHybrid
-	syncthingInstallSteps        = installer.SyncthingInstallSteps
-	syncthingResiduePresent      = installer.SyncthingResiduePresent
-	verifySyncthingPrerequisites = installer.VerifySyncthingInstallPrerequisites
-	walletExists                 = host.WalletExists
-	keyVerificationPending       = host.KeyVerificationPending
-	verifyAdminLogin             = host.VerifyAdminLogin
-	stageSyncthingWebPassword    = host.StageSyncthingWebPassword
-	restageFacts                 = restage
-	controlNodeService           = host.ControlService
-	updatePackages               = host.UpdatePackages
-	requestReboot                = host.RequestReboot
+	setLoginPassword           = host.SetLoginPassword
+	clearPasswordPendingMarker = host.ClearPasswordPendingMarker
+	loadSystemConfig           = config.Load
+	setupAutoUnlock            = host.SetupAutoUnlock
+	disableAutoUnlock          = host.DisableAutoUnlock
+	upgradeP2P                 = host.UpgradeP2PToHybrid
+	installSyncthing           = host.InstallSyncthing
+	walletExists               = host.WalletExists
+	keyVerificationPending     = host.KeyVerificationPending
+	verifyAdminLogin           = host.VerifyAdminLogin
+	restageFacts               = restage
+	controlNodeService         = host.ControlService
+	updatePackages             = host.UpdatePackages
+	requestReboot              = host.RequestReboot
 )
 
 // decode unmarshals params strictly: unknown fields are an
@@ -423,45 +419,11 @@ func verbUpgradeP2PToHybrid(ctx *verbCtx, params json.RawMessage) (any, error) {
 	}, ctx.emitStep)
 }
 
-func verbSyncthingInstall(ctx *verbCtx, _ json.RawMessage) (any, error) {
-	cfg, err := loadConfig()
-	if err != nil {
+func verbSyncthingInstall(ctx *verbCtx, params json.RawMessage) (any, error) {
+	if err := rejectParams(params); err != nil {
 		return nil, err
 	}
-	if cfg.SyncthingEnabled {
-		return nil, errors.New("Syncthing is already enabled")
-	}
-	residue, err := syncthingResiduePresent()
-	if err != nil {
-		return nil, err
-	}
-	if residue {
-		return nil, errors.New("Syncthing add-on residue exists while desired enablement is false — refusing to modify it; ADDON-001 recovery is not implemented")
-	}
-	if err := verifySyncthingPrerequisites(cfg); err != nil {
-		return nil, err
-	}
-	cfg.SyncthingEnabled = true
-	steps, password, err := syncthingInstallSteps(cfg)
-	if err != nil {
-		return nil, err
-	}
-	if err := runSteps(ctx, steps); err != nil {
-		return nil, err
-	}
-	// Stage the two credentials the admin user needs from the new component:
-	// the API key and generated Web password. The device ID and onion hostname
-	// remain live reads; the Tor step above already proved the onion exists.
-	if err := restageFacts(helper.VerbSyncthingInstall); err != nil {
-		return nil, err
-	}
-	if err := stageSyncthingWebPassword(password); err != nil {
-		return nil, fmt.Errorf("stage Syncthing Web password: %w", err)
-	}
-	ctx.emitStep(len(steps))
-	if err := saveSystemConfig(cfg); err != nil {
-		return nil, fmt.Errorf("publish Syncthing setting: %w", err)
-	}
-	ctx.emitStep(len(steps) + 1)
-	return nil, nil
+	return nil, installSyncthing(func() error {
+		return restageFacts(helper.VerbSyncthingInstall)
+	}, ctx.emitStep)
 }

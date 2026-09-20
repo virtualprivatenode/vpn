@@ -6,8 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtualprivatenode/vpn/internal/component"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/syncthing"
@@ -249,7 +249,7 @@ func NewModel(
 	}
 	m.screenCtx = &ScreenContext{
 		Syncthing:       app.NewSyncthing(),
-		HelperWorkflows: app.NewHelperWorkflows(installer.SyncthingVersionStr()),
+		HelperWorkflows: app.NewHelperWorkflows(component.SyncthingVersion),
 		Cfg:             cfg,
 		State:           state,
 		Version:         version,
