@@ -232,20 +232,6 @@ func TestSelfUpdateStepNamesAligned(t *testing.T) {
 		helper.SelfUpdateStepNames(v))
 }
 
-func TestUpgradeP2PToHybridStepNamesAligned(t *testing.T) {
-	cfg := config.Default()
-	cfg.P2PMode = "hybrid"
-	server := stepNames(installer.UpgradeP2PToHybridSteps(
-		cfg, "203.0.113.7"))
-	// The verb reports two root-side completion steps after the installer
-	// transition: staging only the regenerated TLS certificate, then
-	// publishing authoritative desired state.
-	server = append(server, "Restaging LND TLS certificate")
-	server = append(server, "Publishing node configuration")
-	assertNamesEqual(t, helper.VerbUpgradeP2PToHybrid,
-		server, helper.UpgradeP2PToHybridStepNames())
-}
-
 func TestSyncthingInstallStepNamesAligned(t *testing.T) {
 	cfg := config.Default()
 	cfg.SyncthingEnabled = true

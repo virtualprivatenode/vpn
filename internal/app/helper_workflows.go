@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
+	"github.com/virtualprivatenode/vpn/internal/p2p"
+	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 type P2PConnection interface{ ReconnectContext(context.Context) }
@@ -61,6 +64,7 @@ type HelperWorkflows struct {
 	workers          sync.WaitGroup
 	start            func(context.Context, string, any) (helperSession, error)
 	loadConfig       func() (*config.AppConfig, error)
+	address          func(context.Context) (string, error)
 }
 
 func NewHelperWorkflows(syncthingVersion string) *HelperWorkflows {
@@ -71,6 +75,7 @@ func NewHelperWorkflows(syncthingVersion string) *HelperWorkflows {
 			return helper.StartContext(ctx, verb, params)
 		},
 		loadConfig: config.Load,
+		address:    system.ReadPublicIPv4,
 	}
 }
 
@@ -86,9 +91,38 @@ func (w *HelperWorkflows) InstallSyncthing() *HelperOperation {
 		helper.SyncthingInstallStepNames(w.syncthingVersion), nil)
 }
 
-func (w *HelperWorkflows) UpgradeP2P(client P2PConnection) *HelperOperation {
-	return w.begin(P2PUpgrade, helper.VerbUpgradeP2PToHybrid, nil,
+func (w *HelperWorkflows) UpgradeP2P(request p2p.UpgradeRequest, client P2PConnection) *HelperOperation {
+	return w.begin(P2PUpgrade, helper.VerbUpgradeP2PToHybrid,
+		helper.UpgradeP2PParams{ExpectedIPv4: request.Address()},
 		helper.UpgradeP2PToHybridStepNames(), client)
+}
+
+// ReadP2PAddress makes a fresh, bounded observation for one confirmation screen.
+// Both screen cancellation and terminal shutdown release the read.
+func (w *HelperWorkflows) ReadP2PAddress(parent context.Context) (p2p.UpgradeRequest, error) {
+	w.mu.Lock()
+	if err := w.ctx.Err(); err != nil {
+		w.mu.Unlock()
+		return p2p.UpgradeRequest{}, err
+	}
+	w.workers.Add(1)
+	w.mu.Unlock()
+	defer w.workers.Done()
+	ctx, cancel := context.WithTimeout(w.ctx, 3*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(parent, cancel)
+	defer stop()
+	if err := parent.Err(); err != nil {
+		return p2p.UpgradeRequest{}, err
+	}
+	address, err := w.address(ctx)
+	if err := ctx.Err(); err != nil {
+		return p2p.UpgradeRequest{}, err
+	}
+	if err != nil {
+		return p2p.UpgradeRequest{}, err
+	}
+	return p2p.NewUpgradeRequest(address)
 }
 
 func (w *HelperWorkflows) UpdateSelf(version string) *HelperOperation {

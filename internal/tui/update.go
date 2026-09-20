@@ -580,6 +580,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case p2pAddressResultMsg:
+		if msg.read != nil {
+			for _, tab := range m.tabs {
+				if tab.Screen == msg.read.owner && msg.read.owner.ctx == m.screenCtx {
+					_, cmd := msg.read.owner.HandleMsg(msg)
+					return m, cmd
+				}
+			}
+		}
+		return m, nil
 	case helperProgressMsg:
 		for _, tab := range m.tabs {
 			if progress := helperProgress(tab.Screen); progress != nil && progress.operation == msg.operation {
@@ -915,6 +925,7 @@ func (m Model) closeScreenTab(screen Screen) (tea.Model, tea.Cmd) {
 		} else {
 			m.releaseWalletCreation(tab.Screen)
 			cancelScreenFees(tab.Screen)
+			cancelP2PAddressRead(tab.Screen)
 			m.tabs = append(m.tabs[:i], m.tabs[i+1:]...)
 			m.sectionFocus[tab.Section] = 0
 			return m, nil
@@ -964,6 +975,7 @@ func (m Model) closeTab(
 		if shouldRemove(t) {
 			m.releaseWalletCreation(t.Screen)
 			cancelScreenFees(t.Screen)
+			cancelP2PAddressRead(t.Screen)
 			continue
 		}
 		newTabs = append(newTabs, t)
@@ -1086,6 +1098,7 @@ func (m *Model) setTabScreen(
 			m.tabs[i].Section == target.Section {
 			if m.tabs[i].Screen != s {
 				cancelScreenFees(m.tabs[i].Screen)
+				cancelP2PAddressRead(m.tabs[i].Screen)
 			}
 			m.tabs[i].Screen = s
 			return

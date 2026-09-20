@@ -729,13 +729,13 @@ func buildInstallSteps(
 				// Re-read the onion after the dedicated LND Tor
 				// restart and rewrite lnd.conf with the preserved,
 				// LND-only bitcoind credential. Missing or invalid
-				// onion state fails closed inside writeLNDConfig.
-				return writeLNDConfig(cfg, "")
+				// onion state fails closed inside host.WriteLNDConfig.
+				return host.WriteLNDConfig(cfg, "")
 			}},
 		{Key: "lnd.start", Name: "Starting LND", Fn: startLND},
 		{Key: "lnd.tls-san", Kind: StepGate,
 			Name: "Verifying LND TLS onion certificate",
-			Fn:   verifyLNDTLSOnionSAN},
+			Fn:   host.VerifyLNDTLSOnionSAN},
 		// LND owns its TLS certificate lifecycle. At startup it
 		// replaces an expired certificate, and tlsautorefresh
 		// also replaces one whose configured SAN inputs changed.
@@ -783,52 +783,6 @@ func buildInstallSteps(
 				return setupShellEnvironment(cfg)
 			}},
 	}
-}
-
-// UpgradeP2PToHybridSteps returns the one-way post-install transition from
-// Tor-only to hybrid (clearnet+Tor) P2P. The root helper has already required
-// authoritative mode=tor and supplies a validated hybrid desired view. These
-// steps touch only LND's project-owned config, the two P2P-owned UFW rules,
-// and LND itself; the helper owns persistence after every postcondition passes.
-func UpgradeP2PToHybridSteps(
-	cfg *config.AppConfig, publicIPv4 string,
-) []InstallStep {
-	// Note: we deliberately do NOT manually delete
-	// the TLS cert here. LND has tlsautorefresh=1 in
-	// its config, so when we rewrite lnd.conf with the
-	// new tlsextraip line and restart LND, LND detects
-	// the parameter change and replaces the cert and key
-	// itself as part of startup. This
-	// avoids the race where our gRPC client tries to
-	// read the cert during the window between manual
-	// deletion and LND's regeneration.
-	steps := []InstallStep{
-		{Name: "Checking active firewall",
-			Fn: requireActiveUFW},
-		{Name: "Updating LND config",
-			Fn: func() error {
-				return writeLNDConfig(cfg, publicIPv4)
-			}},
-		{Name: "Adding hybrid P2P firewall rules",
-			Fn: allowHybridP2PFirewallRules},
-		{Name: "Restarting LND",
-			Fn: func() error {
-				if err := system.SudoRun(
-					"systemctl", "restart", "lnd"); err != nil {
-					return err
-				}
-				if !system.IsServiceActive("lnd") {
-					return fmt.Errorf("LND is not active after P2P restart")
-				}
-				return nil
-			}},
-		{Name: "Verifying LND TLS IP certificate",
-			Fn: func() error {
-				return verifyLNDTLSIPSAN(publicIPv4)
-			}},
-	}
-
-	return steps
 }
 
 // ── Syncthing installation ───────────────────────────────
@@ -894,7 +848,7 @@ func SyncthingInstallSteps(
 				return configureSyncthingAuth(syncPassword)
 			}},
 		{Name: "Adding Syncthing firewall rule",
-			Fn: allowSyncthingFirewallRule},
+			Fn: host.AllowSyncthingFirewallRule},
 		{Name: "Reloading Tor configuration",
 			Fn: func() error {
 				return configureAndReloadTorForSyncthing(cfg)

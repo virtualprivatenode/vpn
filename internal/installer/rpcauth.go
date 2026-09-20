@@ -32,8 +32,6 @@ import (
 const (
 	// BitcoindRPCUser is the identity the node's own tooling uses.
 	BitcoindRPCUser = "vpn"
-	// LNDBitcoindRPCUser is LND's independent Bitcoin RPC identity.
-	LNDBitcoindRPCUser = "lnd"
 )
 
 type nodeRPCAuthCredentials struct {
@@ -78,7 +76,7 @@ func writeRPCAuthCredentials() (nodeRPCAuthCredentials, error) {
 	if err != nil {
 		return nodeRPCAuthCredentials{}, err
 	}
-	lndLine, lndPassword, err := generateRPCAuth(LNDBitcoindRPCUser)
+	lndLine, lndPassword, err := generateRPCAuth(host.LNDBitcoindRPCUser)
 	if err != nil {
 		return nodeRPCAuthCredentials{}, err
 	}

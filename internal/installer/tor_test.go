@@ -174,7 +174,7 @@ func withTorAddonTestDeps(t *testing.T) {
 	oldValidate := validateTorConfigForAddon
 	oldWrite := writeTorConfigForAddon
 	oldRun := runTorServiceAction
-	oldReadUFWStatus := readUFWStatusForFeature
+	oldFirewallCheck := requireActiveFirewallForAddon
 	t.Cleanup(func() {
 		torBinaryPresentForAddon = oldPresent
 		torServiceEnabledForAddon = oldEnabled
@@ -185,7 +185,7 @@ func withTorAddonTestDeps(t *testing.T) {
 		validateTorConfigForAddon = oldValidate
 		writeTorConfigForAddon = oldWrite
 		runTorServiceAction = oldRun
-		readUFWStatusForFeature = oldReadUFWStatus
+		requireActiveFirewallForAddon = oldFirewallCheck
 	})
 }
 
@@ -195,9 +195,7 @@ func TestSyncthingPrerequisitesValidateCompleteProposedTorConfig(t *testing.T) {
 	torBinaryPresentForAddon = func() bool { return true }
 	torServiceEnabledForAddon = func() bool { return true }
 	torServiceActiveForAddon = func() bool { return true }
-	readUFWStatusForFeature = func() (string, error) {
-		return "Status: active\n", nil
-	}
+	requireActiveFirewallForAddon = func() error { return nil }
 	readTorConfigForAddon = func(string) ([]byte, error) {
 		return []byte(mustBuildTorConfig(t, cfg)), nil
 	}

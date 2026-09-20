@@ -11,6 +11,7 @@ import (
 
 	"github.com/virtualprivatenode/vpn/internal/bitcoin"
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -132,7 +133,7 @@ func writeBitcoinConfig(cfg *config.AppConfig) error {
 		"chown", "root:"+bitcoinUser, paths.BitcoinConf); err != nil {
 		return err
 	}
-	return writeLNDConfigWithRPCPassword(cfg, "", creds.lndPassword)
+	return host.WriteLNDConfigWithRPCPassword(cfg, "", creds.lndPassword)
 }
 
 func bitcoindServiceUnit(username string) string {

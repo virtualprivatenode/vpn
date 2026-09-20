@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
@@ -185,11 +186,13 @@ func verifySyncthingTorPrerequisite(cfg *config.AppConfig) error {
 	return nil
 }
 
+var requireActiveFirewallForAddon = host.RequireActiveFirewall
+
 // VerifySyncthingInstallPrerequisites is the root helper's before-mutation
 // gate. UFW and Tor must already be healthy base-node facilities; the optional
 // add-on never installs, enables, or globally repairs either one.
 func VerifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
-	if err := requireActiveUFW(); err != nil {
+	if err := requireActiveFirewallForAddon(); err != nil {
 		return err
 	}
 	if err := verifySyncthingTorPrerequisite(cfg); err != nil {
@@ -211,20 +214,6 @@ func VerifySyncthingInstallPrerequisites(cfg *config.AppConfig) error {
 	return nil
 }
 
-func validV3OnionHostname(hostname string) bool {
-	const suffix = ".onion"
-	if len(hostname) != 56+len(suffix) ||
-		!strings.HasSuffix(hostname, suffix) {
-		return false
-	}
-	for _, c := range strings.TrimSuffix(hostname, suffix) {
-		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
-			return false
-		}
-	}
-	return true
-}
-
 func waitForSyncthingOnion() error {
 	var lastErr error
 	for i := 0; i < 60; i++ {
@@ -232,7 +221,7 @@ func waitForSyncthingOnion() error {
 			paths.TorSyncthingHostname)
 		if err == nil {
 			hostname := strings.TrimSpace(string(data))
-			if validV3OnionHostname(hostname) {
+			if host.ValidV3OnionHostname(hostname) {
 				return nil
 			}
 			lastErr = fmt.Errorf(

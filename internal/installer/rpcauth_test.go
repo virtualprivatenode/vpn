@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/virtualprivatenode/vpn/internal/host"
 )
 
 // The rpcauth line must be exactly what bitcoind's reference
@@ -62,10 +64,10 @@ func TestBitcoindRPCIdentitiesAreDistinct(t *testing.T) {
 	if BitcoindRPCUser != "vpn" {
 		t.Errorf("TUI RPC user: got %q", BitcoindRPCUser)
 	}
-	if LNDBitcoindRPCUser != "lnd" {
-		t.Errorf("LND RPC user: got %q", LNDBitcoindRPCUser)
+	if host.LNDBitcoindRPCUser != "lnd" {
+		t.Errorf("LND RPC user: got %q", host.LNDBitcoindRPCUser)
 	}
-	if BitcoindRPCUser == LNDBitcoindRPCUser {
+	if BitcoindRPCUser == host.LNDBitcoindRPCUser {
 		t.Error("TUI and LND share a Bitcoin RPC identity")
 	}
 }
