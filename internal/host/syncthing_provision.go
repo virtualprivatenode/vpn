@@ -1,7 +1,4 @@
-// internal/installer/syncthing.go
-
-// Package installer provisions VPN and coordinates fresh or resumed installation.
-package installer
+package host
 
 import (
 	"context"
@@ -12,14 +9,13 @@ import (
 	"net/http"
 	"os"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/virtualprivatenode/vpn/internal/component"
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/syncthing"
@@ -41,11 +37,11 @@ var syncthingResiduePaths = []string{
 	paths.LNDBackupExport,
 }
 
-// SyncthingResiduePresent conservatively detects known add-on artifacts before
+// syncthingResiduePresent conservatively detects known add-on artifacts before
 // a fresh install attempt. It does not classify, adopt, clean, or repair them;
-// any evidence causes the helper to refuse without mutation so ADDON-001 can
-// define recovery later.
-func SyncthingResiduePresent() (bool, error) {
+// any evidence causes refusal without mutation. Retained-state recovery is
+// not supported.
+func syncthingResiduePresent() (bool, error) {
 	for _, path := range syncthingResiduePaths {
 		if _, err := os.Lstat(path); err == nil {
 			return true, nil
@@ -64,48 +60,6 @@ func SyncthingResiduePresent() (bool, error) {
 		return false, fmt.Errorf("inspect Syncthing backup group: %w", err)
 	}
 	return false, nil
-}
-
-// downloadSyncthing fetches the pinned release tarball and its
-// clearsigned checksum file from GitHub over Tor.
-func downloadSyncthing(version, workDir string) error {
-	filename := fmt.Sprintf(
-		"syncthing-linux-amd64-v%s.tar.gz", version)
-	url := fmt.Sprintf(
-		"https://github.com/syncthing/syncthing/releases/download/v%s/%s",
-		version, filename)
-	ascURL := fmt.Sprintf(
-		"https://github.com/syncthing/syncthing/releases/download/v%s/sha256sum.txt.asc",
-		version)
-	if err := system.DownloadRequireTor(
-		url, filepath.Join(workDir, filename)); err != nil {
-		return err
-	}
-	if err := system.DownloadRequireTor(ascURL,
-		filepath.Join(workDir, "sha256sum.txt.asc")); err != nil {
-		return fmt.Errorf("download Syncthing checksums: %w", err)
-	}
-	return nil
-}
-
-// extractAndInstallSyncthing unpacks the verified tarball and
-// installs the binary to /usr/local/bin (LND pattern).
-// Tarball layout (verified June 9 2026):
-// syncthing-linux-amd64-v<ver>/syncthing
-func extractAndInstallSyncthing(version, workDir string) error {
-	filename := fmt.Sprintf(
-		"syncthing-linux-amd64-v%s.tar.gz", version)
-	if err := system.Run("tar", "-xzf",
-		filepath.Join(workDir, filename),
-		"-C", workDir); err != nil {
-		return err
-	}
-	src := filepath.Join(workDir,
-		fmt.Sprintf("syncthing-linux-amd64-v%s", version),
-		"syncthing")
-	return system.SudoRun("install", "-m", "0755",
-		"-o", "root", "-g", "root",
-		src, "/usr/local/bin/")
 }
 
 type syncthingDirSpec struct {
@@ -134,7 +88,7 @@ func syncthingDirSpecs() []syncthingDirSpec {
 		{paths.LNDBackupExport,
 			lndUser + ":" + backupGroup, 0750},
 		// Syncthing requires a marker in every folder it serves. A
-		// custom, installer-owned marker lets it validate this folder
+		// custom, project-owned marker lets it validate this folder
 		// without receiving the write access used to create .stfolder.
 		{paths.LNDBackupExportMarker,
 			"root:" + backupGroup, 0750},
@@ -157,10 +111,10 @@ func createSyncthingDirs() error {
 	return nil
 }
 
-// writeSyncthingService writes the systemd unit for the pinned
+// syncthingServiceUnit renders the systemd unit for the pinned
 // Syncthing binary. STNOUPGRADE=1 disables the binary's
 // self-upgrader (the GitHub release binary is NOT built with
-// [noupgrade], verified June 9 2026 — this env var plus
+// [noupgrade], verified June 9 2026: this env var plus
 // autoUpgradeIntervalH=0 in the config are the two controls).
 // STNODEFAULTFOLDER=1 prevents creation of the default ~/Sync
 // folder on first run. --no-restart + Restart=on-failure keeps
@@ -199,7 +153,7 @@ func writeSyncthingService() error {
 //
 // Finding H history: the previous implementation round-tripped
 // the generated config through Go structs carrying `,innerxml`,
-// which re-emitted captured raw XML alongside the typed fields —
+// which re-emitted captured raw XML alongside the typed fields;
 // duplicate <gui>/<options> blocks whose last-wins resolution
 // kept the generate defaults, silently leaving discovery and
 // relays ENABLED on every install. Struct round-trips are
@@ -214,7 +168,7 @@ func configureSyncthingAuth(password string) error {
 	// 1. Crypto identity only: TLS cert/key + device ID. The
 	//    generated config.xml is read for its identity values,
 	//    then overwritten by the authored template. Explicit
-	//    binary path — never PATH resolution — so a leftover
+	//    binary path: never PATH resolution: so a leftover
 	//    apt-installed /usr/bin/syncthing can never be the one
 	//    that generates the identity. runuser (util-linux)
 	//    drops from root to the service user; this box has no
@@ -226,7 +180,7 @@ func configureSyncthingAuth(password string) error {
 	}
 
 	// 2. Extract device ID, device name, and API key from the
-	//    generated config. Read by exact path — `generate` can
+	//    generated config. Read by exact path: `generate` can
 	//    leave its own .syncthing.tmp.* scratch alongside.
 	output, err := system.SudoRunOutput("cat",
 		paths.SyncthingConfigXML)
@@ -278,18 +232,18 @@ func configureSyncthingAuth(password string) error {
 		return err
 	}
 
-	// 5. Self-verify gate — the daemon must never start with a
+	// 5. Self-verify gate: the daemon must never start with a
 	//    config we have not verified.
 	return verifySyncthingConfig()
 }
 
 // verifySyncthingConfig is the pre-start self-verify gate.
-// Gate (a) — version tripwire: the installed binary must be the
+// Gate (a): version tripwire: the installed binary must be the
 // pinned version and the written config must carry the pinned
 // schema version. When the pinned version is bumped in a future
 // release, this fails until the template is re-reviewed against
-// the new version's generate output — deliberately.
-// Gate (b) — field check: every privacy field must be PRESENT
+// the new version's generate output: deliberately.
+// Gate (b): field check: every privacy field must be PRESENT
 // with its exact intended value, with single <gui>/<options>
 // blocks and a single listen address. An absent field means the
 // schema assumption broke; refusing to start converts a silent
@@ -311,10 +265,10 @@ func verifySyncthingConfig() error {
 	if err != nil {
 		return fmt.Errorf("syncthing --version: %w", err)
 	}
-	if !strings.Contains(verOut, "syncthing v"+syncthingVersion+" ") {
+	if !strings.Contains(verOut, "syncthing v"+component.SyncthingVersion+" ") {
 		return fmt.Errorf(
 			"version tripwire: installed Syncthing is not the "+
-				"pinned v%s: %q", syncthingVersion,
+				"pinned v%s: %q", component.SyncthingVersion,
 			strings.TrimSpace(verOut))
 	}
 
@@ -509,7 +463,7 @@ func startSyncthing() error {
 // confirmSyncthingPrivacy verifies effective network, reporting and GUI settings
 // after startup. Missing or mismatched values trigger stop and disable.
 func confirmSyncthingPrivacy() error {
-	apiKey, err := host.SyncthingAPIKey()
+	apiKey, err := SyncthingAPIKey()
 	if err == nil {
 		err = syncthing.NewClient(apiKey).ConfirmPrivacy(context.Background())
 	}
@@ -526,7 +480,7 @@ func confirmSyncthingPrivacy() error {
 // Send Only folder in Syncthing so it can be shared with
 // paired devices.
 func registerBackupFolder() error {
-	apiKey, err := host.SyncthingAPIKey()
+	apiKey, err := SyncthingAPIKey()
 	if err != nil {
 		return fmt.Errorf("get API key: %w", err)
 	}
@@ -548,7 +502,7 @@ func registerBackupFolder() error {
 	}
 
 	// Get local device ID to include in folder config
-	localID := host.SyncthingDeviceID()
+	localID := SyncthingDeviceID()
 	if localID == "" {
 		return fmt.Errorf("cannot determine local device ID")
 	}

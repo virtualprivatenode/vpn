@@ -26,6 +26,7 @@ package installer
 // operator's decisions live in internal/tui/install.
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/user"
@@ -328,19 +329,16 @@ func installSelfBinary() error {
 }
 
 // generateAdminPassword returns a random alphanumeric password
-// for the --unattended fallback (ruling vii). 25 characters from
-// a 62-symbol alphabet (~148 bits) — same shape the retired
-// bootstrap printed. Uses rejection sampling for uniformity.
-func generateAdminPassword() (string, error) {
+// for the --unattended fallback: 25 characters from a 62-symbol
+// alphabet (~148 bits). Uses rejection sampling for uniformity.
+func generateAdminPassword() string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
 		"abcdefghijklmnopqrstuvwxyz0123456789"
 	const length = 25
 	out := make([]byte, 0, length)
 	buf := make([]byte, 64)
 	for len(out) < length {
-		if _, err := randRead(buf); err != nil {
-			return "", fmt.Errorf("generate password: %w", err)
-		}
+		rand.Read(buf)
 		for _, b := range buf {
 			// Reject bytes that would bias the modulus.
 			if int(b) >= 248 { // 248 = 4*62
@@ -352,7 +350,7 @@ func generateAdminPassword() (string, error) {
 			}
 		}
 	}
-	return string(out), nil
+	return string(out)
 }
 
 // SortKeySources orders sources root-first then by user name for

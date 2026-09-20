@@ -1,14 +1,11 @@
-// internal/installer/syncthing_template.go
-
-package installer
+package host
 
 import "strings"
 
 // syncthingConfigSchema is the config schema version this
-// template is authored against. Tied to syncthingVersion
-// (setup.go): bumping the pinned Syncthing version without
+// template is authored against. Tied to component.SyncthingVersion: bumping the pinned Syncthing version without
 // re-reviewing this template against the new version's
-// `syncthing generate` output MUST fail the install — that is
+// `syncthing generate` output MUST fail the install: that is
 // the version tripwire (verifySyncthingConfig, gate a/b).
 const syncthingConfigSchema = "52"
 
@@ -18,7 +15,7 @@ const syncthingConfigSchema = "52"
 // output of the pinned v2.1.1 GitHub binary (captured June 9
 // 2026), with these deliberate deltas ONLY:
 //
-//	Privacy (finding H field set — each verified by the
+//	Privacy (finding H field set: each verified by the
 //	self-verify gate):
 //	  listenAddress        default → tcp://0.0.0.0:22000 (single;
 //	                       kills QUIC/UDP+STUN and relay listeners)
@@ -45,7 +42,7 @@ const syncthingConfigSchema = "52"
 // Every other field is generate-output verbatim, kept at default
 // deliberately. Per-field rationale doc: finding T work item.
 //
-// Placeholders (strings.NewReplacer, NOT fmt.Sprintf — the
+// Placeholders (strings.NewReplacer, NOT fmt.Sprintf: the
 // template contains literal '%' in unit="%" attributes):
 //
 //	{{DEVICE_ID}}    device ID from the generated TLS cert

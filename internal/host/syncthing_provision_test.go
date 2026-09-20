@@ -1,6 +1,4 @@
-// internal/installer/syncthing_test.go
-
-package installer
+package host
 
 import (
 	"encoding/json"

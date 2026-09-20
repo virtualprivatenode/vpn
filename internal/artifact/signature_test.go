@@ -1,6 +1,4 @@
-// internal/installer/verify_test.go
-
-package installer
+package artifact
 
 import (
 	"fmt"
@@ -141,7 +139,7 @@ func testSign(
 }
 
 // testClearsign creates a CLEARSIGNED file from dataFile using
-// the key identified by fingerprint — data and signature in one
+// the key identified by fingerprint: data and signature in one
 // file, the format Syncthing uses for sha256sum.txt.asc.
 func testClearsign(
 	t *testing.T, gpgHome, fingerprint,
@@ -165,7 +163,7 @@ func testClearsign(
 
 // ── Hermetic test suite ─────────────────────────────────
 
-func TestVerifyIsolated(t *testing.T) {
+func TestVerifySignature(t *testing.T) {
 	if !gpgAvailable() {
 		t.Skip("gpg not available — skipping")
 	}
@@ -203,7 +201,7 @@ func TestVerifyIsolated(t *testing.T) {
 		t.Fatalf("write tampered data: %v", err)
 	}
 
-	// Export all keys to files (for verifyIsolated to import).
+	// Export all keys to files (for VerifySignature to import).
 	keyAlpha := filepath.Join(dataDir, "alpha.asc")
 	keyBeta := filepath.Join(dataDir, "beta.asc")
 	keySubkey := filepath.Join(dataDir, "subkey.asc")
@@ -245,7 +243,7 @@ func TestVerifyIsolated(t *testing.T) {
 	// ── Case 1: Good sig from a pinned key → accept ────
 	t.Run("pinned_key_accepts", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha}, sigAlpha, dataFile, pinned)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -261,7 +259,7 @@ func TestVerifyIsolated(t *testing.T) {
 	// ── Case 2: Tampered file → BADSIG → reject ────────
 	t.Run("tampered_file_badsig", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		_, bad, err := verifyIsolated(
+		_, bad, err := VerifySignature(
 			[]string{keyAlpha}, sigAlpha, tamperedFile, pinned)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -275,7 +273,7 @@ func TestVerifyIsolated(t *testing.T) {
 	t.Run("unpinned_key_rejects", func(t *testing.T) {
 		// Alpha signed, but only Beta is pinned.
 		pinned := map[string]bool{fpBeta: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha}, sigAlpha, dataFile, pinned)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -294,7 +292,7 @@ func TestVerifyIsolated(t *testing.T) {
 	//     → fails threshold 2
 	t.Run("same_key_twice_counts_once", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha},
 			sigAlphaAlpha, dataFile, pinned)
 		if err != nil {
@@ -308,10 +306,6 @@ func TestVerifyIsolated(t *testing.T) {
 				"(same key signing twice should count once)",
 				distinct)
 		}
-		// Would fail threshold 2.
-		if distinct >= 2 {
-			t.Fatal("same key twice should not clear threshold 2")
-		}
 	})
 
 	// ── Case 5: Two different pinned keys → clears 2 ───
@@ -320,7 +314,7 @@ func TestVerifyIsolated(t *testing.T) {
 			fpAlpha: true,
 			fpBeta:  true,
 		}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha, keyBeta},
 			sigAlphaBeta, dataFile, pinned)
 		if err != nil {
@@ -337,11 +331,11 @@ func TestVerifyIsolated(t *testing.T) {
 	// ── Case 6: Subkey-signed → matches primary FP ─────
 	t.Run("subkey_signed_matches_primary", func(t *testing.T) {
 		// fpSubkey is the PRIMARY fingerprint. The signing
-		// subkey has a different fingerprint. verifyIsolated
+		// subkey has a different fingerprint. VerifySignature
 		// must match the VALIDSIG last field (primary), not
 		// the first field (subkey).
 		pinned := map[string]bool{fpSubkey: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keySubkey},
 			sigSubkey, dataFile, pinned)
 		if err != nil {
@@ -360,7 +354,7 @@ func TestVerifyIsolated(t *testing.T) {
 
 // ── Clearsign test suite (Syncthing path) ───────────────
 //
-// verifyIsolated with dataFile == "" verifies a CLEARSIGNED
+// VerifySignature with dataFile == "" verifies a CLEARSIGNED
 // file (the format of Syncthing's sha256sum.txt.asc). These
 // cases are the automated mirror of the live verification
 // session of June 9 2026: a genuine v2.1.1 file produced
@@ -368,7 +362,7 @@ func TestVerifyIsolated(t *testing.T) {
 // field, and tampering with the checksum text inside the
 // armor produced BADSIG with no VALIDSIG.
 
-func TestVerifyIsolatedClearsign(t *testing.T) {
+func TestVerifySignatureClearsign(t *testing.T) {
 	if !gpgAvailable() {
 		t.Skip("gpg not available — skipping")
 	}
@@ -425,7 +419,7 @@ func TestVerifyIsolatedClearsign(t *testing.T) {
 	// ── Case 1: Clearsigned by pinned key → accept ─────
 	t.Run("clearsign_pinned_key_accepts", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha}, clearAlpha, "", pinned)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -441,7 +435,7 @@ func TestVerifyIsolatedClearsign(t *testing.T) {
 	// ── Case 2: Tampered inside the armor → BADSIG ─────
 	t.Run("clearsign_tampered_badsig", func(t *testing.T) {
 		pinned := map[string]bool{fpAlpha: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha}, tamperedFile, "", pinned)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -459,7 +453,7 @@ func TestVerifyIsolatedClearsign(t *testing.T) {
 	t.Run("clearsign_unpinned_key_rejects", func(t *testing.T) {
 		// Alpha clearsigned, but only Beta is pinned.
 		pinned := map[string]bool{fpBeta: true}
-		distinct, bad, err := verifyIsolated(
+		distinct, bad, err := VerifySignature(
 			[]string{keyAlpha}, clearAlpha, "", pinned)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -473,56 +467,4 @@ func TestVerifyIsolatedClearsign(t *testing.T) {
 				distinct)
 		}
 	})
-}
-
-// ── Anchor validation ───────────────────────────────────
-
-func TestSignerFingerprints(t *testing.T) {
-	if len(bitcoinCoreSigners) != 5 {
-		t.Errorf("expected 5 Bitcoin Core signers, got %d",
-			len(bitcoinCoreSigners))
-	}
-
-	for _, signer := range bitcoinCoreSigners {
-		if len(signer.fingerprint) != 40 {
-			t.Errorf("signer %s: fingerprint length %d, want 40",
-				signer.name, len(signer.fingerprint))
-		}
-		if signer.name == "" {
-			t.Error("signer has empty name")
-		}
-		if signer.keyURL == "" {
-			t.Errorf("signer %s has empty keyURL", signer.name)
-		}
-	}
-
-	if len(lndSigner.fingerprint) != 40 {
-		t.Errorf("LND signer fingerprint length %d, want 40",
-			len(lndSigner.fingerprint))
-	}
-	if lndSigner.keyURL == "" {
-		t.Error("LND signer has empty keyURL")
-	}
-
-	if len(syncthingSigner.fingerprint) != 40 {
-		t.Errorf("Syncthing signer fingerprint length %d, want 40",
-			len(syncthingSigner.fingerprint))
-	}
-	if syncthingSigner.keyURL == "" {
-		t.Error("Syncthing signer has empty keyURL")
-	}
-}
-
-func TestReleaseKeyFingerprint(t *testing.T) {
-	if len(vpnReleaseFP) != 40 {
-		t.Errorf("release key fingerprint length %d, want 40",
-			len(vpnReleaseFP))
-	}
-
-	// Cross-check: must match the value published in docs/verifying.md.
-	expected := "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
-	if vpnReleaseFP != expected {
-		t.Errorf("release FP = %s, want %s",
-			vpnReleaseFP, expected)
-	}
 }

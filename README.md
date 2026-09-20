@@ -399,7 +399,7 @@ All software is verified with GPG signatures and SHA256 checksums:
 - **LND** — Roasbeef's signing key verified against known fingerprint.
 - **Syncthing** — pinned release binary, verified against the Syncthing
   release signing key's known fingerprint. The release checksums are
-  clearsigned by the same key. The installer also writes Syncthing's
+  clearsigned by the same key. VPN also writes Syncthing's
   entire configuration itself and refuses to start the daemon if any
   privacy setting does not verify.
 - **vpn binary** — signed with a key hosted on an independent

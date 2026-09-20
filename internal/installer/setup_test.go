@@ -267,25 +267,6 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 	})
 }
 
-func TestVersionConstants(t *testing.T) {
-	if bitcoinVersion == "" {
-		t.Error("bitcoinVersion is empty")
-	}
-	if lndVersion == "" {
-		t.Error("lndVersion is empty")
-	}
-	for name, value := range map[string]string{
-		"bitcoinUser":   bitcoinUser,
-		"lndUser":       lndUser,
-		"syncthingUser": syncthingUser,
-		"backupGroup":   backupGroup,
-	} {
-		if value == "" {
-			t.Errorf("%s is empty", name)
-		}
-	}
-}
-
 func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 	cfg := config.Default()
 	steps := buildInstallSteps(cfg, &InstallDecisions{})
@@ -328,16 +309,6 @@ func TestSetAndGetVersion(t *testing.T) {
 	SetVersion("1.2.3")
 	if GetVersion() != "1.2.3" {
 		t.Errorf("GetVersion: got %q, want %q", GetVersion(), "1.2.3")
-	}
-}
-
-func TestLndVersionStr(t *testing.T) {
-	v := LndVersionStr()
-	if v == "" {
-		t.Error("LndVersionStr returned empty")
-	}
-	if v != lndVersion {
-		t.Errorf("got %q, want %q", v, lndVersion)
 	}
 }
 

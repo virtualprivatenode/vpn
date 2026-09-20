@@ -10,7 +10,7 @@
 //  1. HARD GATE — no external dependency. Wait for Tor to report
 //     bootstrap PROGRESS=100 on its own control port (127.0.0.1:9051,
 //     cookie auth). Local, deterministic; the install step fails on
-//     timeout. This is the postcondition for restartTor: rc=0 means
+//     timeout. This is the postcondition for host.EnableAndRestartTor: rc=0 means
 //     "the unit started", PROGRESS=100 means "Tor is routing".
 //
 //  2. TRIPWIRE — best-effort external probe. torsocks-fetch
@@ -45,11 +45,8 @@ import (
 
 // Tor runtime constants. These are Tor-owned values, not Go logic
 // paths (same rationale as the HiddenServiceDir strings in tor.go):
-// the control port matches the generated torrc (BuildTorConfig — note
-// the ControlPort stanza is currently inside the HasLND() branch;
-// LND is mandatory in this install generation, so this gate is always
-// present on the install path), and the cookie path is Debian's
-// packaged tor.service runtime layout.
+// the control port matches host.BuildTorConfig. The cookie path is Debian's
+// packaged Tor runtime layout.
 const (
 	torControlAddr = "127.0.0.1:9051"
 	torCookiePath  = "/run/tor/control.authcookie"
@@ -95,7 +92,7 @@ func verifyTorRouting() error {
 // drop, because Tor resets its counter to zero when it restarts
 // mid-bootstrap, and rebootstrapping is activity, not a stall.
 // Poll errors are retried silently within the same clocks —
-// immediately after restartTor the control port may not be
+// immediately after host.EnableAndRestartTor the control port may not be
 // listening yet.
 func waitForTorBootstrap(
 	stallWindow, ceiling time.Duration,

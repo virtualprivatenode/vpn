@@ -23,8 +23,6 @@ import (
 )
 
 const (
-	lndUser          = "lnd"
-	backupGroup      = "vpn-lnd-backup"
 	backupFileName   = "channel.backup"
 	maxTempNameTries = 16
 )

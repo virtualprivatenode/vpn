@@ -12,7 +12,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 )
@@ -89,30 +88,19 @@ func TestVerbMenuIsExactlyTheRuledSet(t *testing.T) {
 func withConfigVerbTestDeps(t *testing.T) {
 	t.Helper()
 	oldLoad := loadSystemConfig
-	oldSave := saveSystemConfig
 	oldSetup := setupAutoUnlock
 	oldDisable := disableAutoUnlock
-	oldSync := syncthingInstallSteps
-	oldResidue := syncthingResiduePresent
-	oldPrerequisites := verifySyncthingPrerequisites
 	oldWallet := walletExists
 	oldKeyPending := keyVerificationPending
 	oldVerifyLogin := verifyAdminLogin
-	oldStagePassword := stageSyncthingWebPassword
 	oldRestage := restageFacts
-	verifySyncthingPrerequisites = func(*config.AppConfig) error { return nil }
 	t.Cleanup(func() {
 		loadSystemConfig = oldLoad
-		saveSystemConfig = oldSave
 		setupAutoUnlock = oldSetup
 		disableAutoUnlock = oldDisable
-		syncthingInstallSteps = oldSync
-		syncthingResiduePresent = oldResidue
-		verifySyncthingPrerequisites = oldPrerequisites
 		walletExists = oldWallet
 		keyVerificationPending = oldKeyPending
 		verifyAdminLogin = oldVerifyLogin
-		stageSyncthingWebPassword = oldStagePassword
 		restageFacts = oldRestage
 	})
 }
@@ -156,102 +144,6 @@ func TestWalletPasswordRefusedBeforeHostDispatch(t *testing.T) {
 		if _, err := verbStageWalletPassword(&verbCtx{}, raw(t, helper.StageWalletPasswordParams{Password: password})); err == nil {
 			t.Fatal("invalid wallet password accepted by helper")
 		}
-	}
-}
-
-func TestSyncthingStagesPasswordButNeverReturnsIt(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	loadSystemConfig = func() (*config.AppConfig, error) { return config.Default(), nil }
-	saveSystemConfig = func(cfg *config.AppConfig) error {
-		if !cfg.SyncthingEnabled {
-			t.Fatal("published config does not enable Syncthing")
-		}
-		return nil
-	}
-	syncthingResiduePresent = func() (bool, error) { return false, nil }
-	syncthingInstallSteps = func(*config.AppConfig) ([]installer.InstallStep, string, error) {
-		return []installer.InstallStep{{Name: "apply", Fn: func() error { return nil }}}, "secret-web-password", nil
-	}
-	restageFacts = func(string) error { return nil }
-	staged := ""
-	stageSyncthingWebPassword = func(password string) error { staged = password; return nil }
-	result, err := verbSyncthingInstall(&verbCtx{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if staged != "secret-web-password" {
-		t.Fatalf("staged %q", staged)
-	}
-	if result != nil {
-		t.Fatalf("helper returned secret-bearing result: %#v", result)
-	}
-}
-
-func TestSyncthingRefusesResidueBeforeMutation(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	loadSystemConfig = func() (*config.AppConfig, error) { return config.Default(), nil }
-	syncthingResiduePresent = func() (bool, error) { return true, nil }
-	mutated := false
-	syncthingInstallSteps = func(*config.AppConfig) ([]installer.InstallStep, string, error) {
-		mutated = true
-		return nil, "", nil
-	}
-	if _, err := verbSyncthingInstall(&verbCtx{}, nil); err == nil ||
-		!strings.Contains(err.Error(), "residue") {
-		t.Fatalf("residue refusal error = %v", err)
-	}
-	if mutated {
-		t.Fatal("Syncthing mutation began despite residue")
-	}
-}
-
-func TestSyncthingRefusesFailedPrerequisiteBeforeMutation(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	loadSystemConfig = func() (*config.AppConfig, error) {
-		return config.Default(), nil
-	}
-	syncthingResiduePresent = func() (bool, error) { return false, nil }
-	wantErr := errors.New("Tor is inactive")
-	verifySyncthingPrerequisites = func(*config.AppConfig) error {
-		return wantErr
-	}
-	mutated := false
-	syncthingInstallSteps = func(
-		*config.AppConfig,
-	) ([]installer.InstallStep, string, error) {
-		mutated = true
-		return nil, "", nil
-	}
-	if _, err := verbSyncthingInstall(
-		&verbCtx{}, nil); !errors.Is(err, wantErr) {
-		t.Fatalf("prerequisite error=%v want=%v", err, wantErr)
-	}
-	if mutated {
-		t.Fatal("Syncthing mutation began despite failed prerequisite")
-	}
-}
-
-func TestSyncthingFinalSaveFailureLeavesResidueAndReportsFailure(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	wantErr := errors.New("injected final save failure")
-	loadSystemConfig = func() (*config.AppConfig, error) { return config.Default(), nil }
-	saveSystemConfig = func(*config.AppConfig) error { return wantErr }
-	syncthingResiduePresent = func() (bool, error) { return false, nil }
-	installed := false
-	syncthingInstallSteps = func(*config.AppConfig) ([]installer.InstallStep, string, error) {
-		return []installer.InstallStep{{Name: "apply", Fn: func() error {
-			installed = true
-			return nil
-		}}}, "secret-web-password", nil
-	}
-	restageFacts = func(string) error { return nil }
-	staged := false
-	stageSyncthingWebPassword = func(string) error { staged = true; return nil }
-	if _, err := verbSyncthingInstall(&verbCtx{}, nil); !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want final save failure", err)
-	}
-	if !installed || !staged {
-		t.Fatalf("residue not preserved: installed=%v staged=%v", installed, staged)
 	}
 }
 

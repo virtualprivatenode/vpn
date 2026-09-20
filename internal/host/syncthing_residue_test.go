@@ -1,4 +1,4 @@
-package installer
+package host
 
 import (
 	"testing"

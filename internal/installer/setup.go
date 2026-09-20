@@ -1,3 +1,4 @@
+// Package installer owns initial preflight, lifecycle, sequencing and completion.
 package installer
 
 import (
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/virtualprivatenode/vpn/internal/component"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
@@ -19,20 +21,15 @@ import (
 )
 
 const (
-	bitcoinVersion   = "29.3"
-	lndVersion       = "0.21.2-beta"
-	syncthingVersion = "2.1.1"
-	bitcoinUser      = "bitcoin"
-	lndUser          = "lnd"
-	syncthingUser    = "syncthing"
-	backupGroup      = "vpn-lnd-backup"
+	bitcoinUser   = "bitcoin"
+	lndUser       = "lnd"
+	syncthingUser = "syncthing"
+	backupGroup   = "vpn-lnd-backup"
 )
 
 var appVersion = "dev"
 
-func SetVersion(v string)         { appVersion = v }
-func LndVersionStr() string       { return lndVersion }
-func SyncthingVersionStr() string { return syncthingVersion }
+func SetVersion(v string) { appVersion = v }
 
 // ── Main install flow ────────────────────────────────────
 //
@@ -488,10 +485,7 @@ func fillUnattendedDecisions(
 }
 
 func fillGeneratedPassword(dec *InstallDecisions) error {
-	gen, err := generateAdminPassword()
-	if err != nil {
-		return err
-	}
+	gen := generateAdminPassword()
 	pw, err := loginpassword.New(gen)
 	if err != nil {
 		return err
@@ -615,10 +609,10 @@ func buildInstallSteps(
 			Fn: disableIPv6},
 		{Key: "tor.configure", Name: "Configuring Tor",
 			Fn: func() error {
-				if err := RebuildTorConfig(cfg); err != nil {
+				if err := host.WriteTorConfig(cfg); err != nil {
 					return err
 				}
-				return enableAndRestartTor()
+				return host.EnableAndRestartTor()
 			}},
 		// HARD GATE (IA-2-K): no Tor-dependent network step below —
 		// apt over the socks5h proxy, every DownloadRequireTor —
@@ -639,14 +633,14 @@ func buildInstallSteps(
 				return ensureGPG()
 			}},
 		{Key: "btc.download", Group: "btc",
-			Name: "Downloading Bitcoin Core " + bitcoinVersion,
+			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion,
 			Fn: func() error {
 				var err error
 				btcWork, err = os.MkdirTemp("", "vpn-btc-")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadBitcoin(bitcoinVersion, btcWork)
+				return downloadBitcoin(component.BitcoinCoreVersion, btcWork)
 			}},
 		{Key: "btc.verify", Group: "btc",
 			Name: "Verifying Bitcoin Core",
@@ -661,7 +655,7 @@ func buildInstallSteps(
 			Name: "Installing Bitcoin Core",
 			Fn: func() error {
 				if err := extractAndInstallBitcoin(
-					bitcoinVersion, btcWork); err != nil {
+					component.BitcoinCoreVersion, btcWork); err != nil {
 					return err
 				}
 				os.RemoveAll(btcWork)
@@ -695,13 +689,13 @@ func buildInstallSteps(
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadLND(lndVersion, lndWork)
+				return downloadLND(component.LNDVersion, lndWork)
 			}},
 		{Key: "lnd.verify", Group: "lnd",
 			Name: "Verifying LND",
 			Fn: func() error {
 				if err := verifyLNDSig(
-					lndWork, lndVersion); err != nil {
+					lndWork, component.LNDVersion); err != nil {
 					return err
 				}
 				return verifyLND(lndWork)
@@ -710,7 +704,7 @@ func buildInstallSteps(
 			Name: "Installing LND",
 			Fn: func() error {
 				if err := extractAndInstallLND(
-					lndVersion, lndWork); err != nil {
+					component.LNDVersion, lndWork); err != nil {
 					return err
 				}
 				os.RemoveAll(lndWork)
@@ -718,10 +712,10 @@ func buildInstallSteps(
 			}},
 		{Key: "tor.lnd", Name: "Configuring Tor for LND",
 			Fn: func() error {
-				if err := RebuildTorConfig(cfg); err != nil {
+				if err := host.WriteTorConfig(cfg); err != nil {
 					return err
 				}
-				return enableAndRestartTor()
+				return host.EnableAndRestartTor()
 			}},
 		{Key: "lnd.configure",
 			Name: "Finalizing LND onion configuration",
@@ -783,85 +777,6 @@ func buildInstallSteps(
 				return setupShellEnvironment(cfg)
 			}},
 	}
-}
-
-// ── Syncthing installation ───────────────────────────────
-
-// SyncthingInstallSteps returns the install step list and a
-// generated password. The root helper supplies a view with
-// SyncthingEnabled=true so the canonical Tor template includes the add-on;
-// UFW receives only Syncthing's owned rule. The helper stages the password and
-// owns desired-state publication.
-func SyncthingInstallSteps(
-	cfg *config.AppConfig,
-) ([]InstallStep, string, error) {
-	passBytes := make([]byte, 12)
-	if _, err := randRead(passBytes); err != nil {
-		return nil, "", fmt.Errorf(
-			"generate password: %w", err)
-	}
-	syncPassword := hexEncode(passBytes)
-
-	var syncWork string
-	steps := []InstallStep{
-		{Name: "Downloading Syncthing " + syncthingVersion,
-			Fn: func() error {
-				var err error
-				syncWork, err = os.MkdirTemp("", "vpn-sync-")
-				if err != nil {
-					return fmt.Errorf("create work dir: %w", err)
-				}
-				return downloadSyncthing(
-					syncthingVersion, syncWork)
-			}},
-		{Name: "Verifying Syncthing",
-			Fn: func() error {
-				if err := verifySyncthingSig(syncWork); err != nil {
-					return err
-				}
-				return verifySyncthingChecksum(syncWork)
-			}},
-		{Name: "Installing Syncthing",
-			Fn: func() error {
-				if err := extractAndInstallSyncthing(
-					syncthingVersion, syncWork); err != nil {
-					return err
-				}
-				os.RemoveAll(syncWork)
-				return nil
-			}},
-		{Name: "Creating Syncthing directories",
-			Fn: func() error {
-				if err := createSystemGroup(backupGroup); err != nil {
-					return err
-				}
-				if err := createSystemUser(syncthingUser,
-					paths.SyncthingDataDir); err != nil {
-					return err
-				}
-				return createSyncthingDirs()
-			}},
-		{Name: "Creating Syncthing service",
-			Fn: writeSyncthingService},
-		{Name: "Configuring Syncthing authentication",
-			Fn: func() error {
-				return configureSyncthingAuth(syncPassword)
-			}},
-		{Name: "Adding Syncthing firewall rule",
-			Fn: host.AllowSyncthingFirewallRule},
-		{Name: "Reloading Tor configuration",
-			Fn: func() error {
-				return configureAndReloadTorForSyncthing(cfg)
-			}},
-		{Name: "Starting Syncthing", Fn: startSyncthing},
-		{Name: "Registering backup folder",
-			Fn: registerBackupFolder},
-		{Name: "Setting up channel backup watcher",
-			Fn: func() error {
-				return setupChannelBackupWatcher(cfg)
-			}},
-	}
-	return steps, syncPassword, nil
 }
 
 // ── Self-update ──────────────────────────────────────────
@@ -1097,12 +1012,4 @@ func lncliNetworkFlag(net *config.NetworkConfig) string {
 		return ""
 	}
 	return fmt.Sprintf("\n        --network=%s \\", net.LNDNetwork)
-}
-
-func randRead(b []byte) (int, error) {
-	return randReadImpl(b)
-}
-
-func hexEncode(b []byte) string {
-	return hexEncodeImpl(b)
 }

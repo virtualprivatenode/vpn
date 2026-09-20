@@ -7,7 +7,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/paths"
@@ -230,21 +229,4 @@ func TestSelfUpdateStepNamesAligned(t *testing.T) {
 	assertNamesEqual(t, helper.VerbSelfUpdate,
 		stepNames(installer.SelfUpdateSteps(v)),
 		helper.SelfUpdateStepNames(v))
-}
-
-func TestSyncthingInstallStepNamesAligned(t *testing.T) {
-	cfg := config.Default()
-	cfg.SyncthingEnabled = true
-	steps, _, err := installer.SyncthingInstallSteps(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := stepNames(steps)
-	// The verb reports one extra step: staging the new
-	// component's facts.
-	server = append(server, "Staging Syncthing facts")
-	server = append(server, "Publishing node configuration")
-	assertNamesEqual(t, helper.VerbSyncthingInstall,
-		server, helper.SyncthingInstallStepNames(
-			installer.SyncthingVersionStr()))
 }
