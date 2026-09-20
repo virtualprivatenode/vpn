@@ -92,8 +92,6 @@ func withConfigVerbTestDeps(t *testing.T) {
 	oldSave := saveSystemConfig
 	oldSetup := setupAutoUnlock
 	oldDisable := disableAutoUnlock
-	oldIP := publicIPv4
-	oldP2P := p2pUpgradeSteps
 	oldSync := syncthingInstallSteps
 	oldResidue := syncthingResiduePresent
 	oldPrerequisites := verifySyncthingPrerequisites
@@ -108,8 +106,6 @@ func withConfigVerbTestDeps(t *testing.T) {
 		saveSystemConfig = oldSave
 		setupAutoUnlock = oldSetup
 		disableAutoUnlock = oldDisable
-		publicIPv4 = oldIP
-		p2pUpgradeSteps = oldP2P
 		syncthingInstallSteps = oldSync
 		syncthingResiduePresent = oldResidue
 		verifySyncthingPrerequisites = oldPrerequisites
@@ -160,22 +156,6 @@ func TestWalletPasswordRefusedBeforeHostDispatch(t *testing.T) {
 		if _, err := verbStageWalletPassword(&verbCtx{}, raw(t, helper.StageWalletPasswordParams{Password: password})); err == nil {
 			t.Fatal("invalid wallet password accepted by helper")
 		}
-	}
-}
-
-func TestP2PPersistenceFailureIsOperationFailure(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	wantErr := errors.New("injected config save failure")
-	loadSystemConfig = func() (*config.AppConfig, error) { return config.Default(), nil }
-	saveSystemConfig = func(*config.AppConfig) error { return wantErr }
-	publicIPv4 = func() string { return "203.0.113.7" }
-	p2pUpgradeSteps = func(*config.AppConfig, string) []installer.InstallStep {
-		return []installer.InstallStep{{Name: "apply", Fn: func() error { return nil }}}
-	}
-	restageFacts = func(string) error { return nil }
-	if _, err := verbUpgradeP2PToHybrid(
-		&verbCtx{}, nil); !errors.Is(err, wantErr) {
-		t.Fatalf("error = %v, want injected save failure", err)
 	}
 }
 
@@ -466,43 +446,6 @@ func TestSetUserPasswordValidation(t *testing.T) {
 			t.Errorf("accepted user=%q pwlen=%d",
 				c.User, len(c.Password))
 		}
-	}
-}
-
-func TestP2PUpgradeRefusesAnythingButTorCurrentMode(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	cfg := config.Default()
-	cfg.P2PMode = "hybrid"
-	loadSystemConfig = func() (*config.AppConfig, error) { return cfg, nil }
-	called := false
-	publicIPv4 = func() string { called = true; return "203.0.113.7" }
-	p2pUpgradeSteps = func(*config.AppConfig, string) []installer.InstallStep {
-		called = true
-		return nil
-	}
-	if _, err := verbUpgradeP2PToHybrid(&verbCtx{}, nil); err == nil {
-		t.Fatal("hybrid-to-hybrid transition accepted")
-	}
-	if called {
-		t.Fatal("P2P mutation preparation began before current-mode refusal")
-	}
-}
-
-func TestP2PUpgradeAcceptsNoCallerSelectedMode(t *testing.T) {
-	withConfigVerbTestDeps(t)
-	loaded := false
-	loadSystemConfig = func() (*config.AppConfig, error) {
-		loaded = true
-		return config.Default(), nil
-	}
-	if _, err := verbUpgradeP2PToHybrid(
-		&verbCtx{}, raw(t, map[string]string{
-			"mode": "tor",
-		})); err == nil {
-		t.Fatal("one-way P2P upgrade accepted caller-selected mode")
-	}
-	if loaded {
-		t.Fatal("P2P request with parameters reached authoritative config read")
 	}
 }
 

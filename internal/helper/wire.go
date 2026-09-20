@@ -261,6 +261,12 @@ func PackageUpdateStepNames() []string {
 	}
 }
 
+// UpgradeP2PParams carries the reviewed address only as a precondition.
+// The root operation independently derives the address it will advertise.
+type UpgradeP2PParams struct {
+	ExpectedIPv4 string `json:"expected_ipv4"`
+}
+
 // UpgradeP2PToHybridStepNames mirrors the server's one-way P2P transition.
 func UpgradeP2PToHybridStepNames() []string {
 	return []string{

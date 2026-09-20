@@ -8,9 +8,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/p2p"
 )
 
-func progressFixture(kind app.HelperWorkflowKind, ctx *ScreenContext) *InstallProgressScreen {
+func progressFixture(t *testing.T, kind app.HelperWorkflowKind, ctx *ScreenContext) *InstallProgressScreen {
 	// A closed owner supplies real operation identity and step metadata without
 	// sending a request. Tests deliver controlled events through Model.Update.
 	w := app.NewHelperWorkflows("2.1.1")
@@ -20,7 +21,7 @@ func progressFixture(kind app.HelperWorkflowKind, ctx *ScreenContext) *InstallPr
 	case app.SyncthingInstall:
 		op = w.InstallSyncthing()
 	case app.P2PUpgrade:
-		op = w.UpgradeP2P(nil)
+		op = w.UpgradeP2P(reviewedP2PRequest(t), nil)
 	case app.SelfUpdate:
 		op = w.UpdateSelf("0.7.1")
 	}
@@ -31,7 +32,7 @@ func progressFixture(kind app.HelperWorkflowKind, ctx *ScreenContext) *InstallPr
 
 func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
-	progress := progressFixture(app.SelfUpdate, ctx)
+	progress := progressFixture(t, app.SelfUpdate, ctx)
 	owner := &SelfUpdateScreen{ctx: ctx, step: selfUpdateProgress, progress: progress}
 	idle := &P2PUpgradeScreen{ctx: ctx, step: p2pConfirm}
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx, tabs: []openTab{
@@ -68,7 +69,7 @@ func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 	if !progress.done || completed != 1 || idle.progress != nil {
 		t.Fatal("completion ownership or replay guard failed")
 	}
-	orphan := progressFixture(app.SelfUpdate, ctx)
+	orphan := progressFixture(t, app.SelfUpdate, ctx)
 	_, cmd := m.Update(helperProgressMsg{operation: orphan.operation, event: app.HelperProgress{Index: 0}})
 	if cmd != nil {
 		t.Fatal("removed operation reached another screen")
@@ -77,7 +78,7 @@ func TestHelperProgressRoutesToOwnerAndRejectsReplay(t *testing.T) {
 
 func TestHelperActiveTabAndDelayedClose(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
-	progress := progressFixture(app.SyncthingInstall, ctx)
+	progress := progressFixture(t, app.SyncthingInstall, ctx)
 	owner := &SyncthingInstallScreen{ctx: ctx, step: syncInstallProgress, progress: progress}
 	parent := NewAddonsHomeScreen(ctx)
 	m := Model{nav: NewNavSidebar(), screenCtx: ctx, activeTab: 2, tabs: []openTab{
@@ -116,7 +117,7 @@ func TestHelperActiveTabAndDelayedClose(t *testing.T) {
 
 func TestHelperConfigurationPublicationPreservesNewerSettings(t *testing.T) {
 	ctx := &ScreenContext{Cfg: config.Default()}
-	progress := progressFixture(app.SyncthingInstall, ctx)
+	progress := progressFixture(t, app.SyncthingInstall, ctx)
 	fresh := *ctx.Cfg
 	fresh.SyncthingEnabled = true
 	// This newer auto-unlock result arrives after the application read its file.
@@ -138,7 +139,7 @@ func TestHelperConfigurationPublicationPreservesNewerSettings(t *testing.T) {
 func TestHelperFailureDoesNotClaimRollback(t *testing.T) {
 	for _, succeeded := range []bool{false, true} {
 		ctx := &ScreenContext{Cfg: config.Default()}
-		s := progressFixture(app.P2PUpgrade, ctx)
+		s := progressFixture(t, app.P2PUpgrade, ctx)
 		called := 0
 		s.onFail = func() tea.Cmd { called++; return nil }
 		message := helperProgressMsg{operation: s.operation, event: app.HelperProgress{Result: &app.HelperWorkflowResult{HelperSucceeded: succeeded, Err: errors.New("injected failure")}}}
@@ -153,4 +154,13 @@ func TestHelperFailureDoesNotClaimRollback(t *testing.T) {
 			t.Fatalf("failure lost its outcome or repeated completion: %s", view)
 		}
 	}
+}
+
+func reviewedP2PRequest(t *testing.T) p2p.UpgradeRequest {
+	t.Helper()
+	request, err := p2p.NewUpgradeRequest("203.0.113.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
 }

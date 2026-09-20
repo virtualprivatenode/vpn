@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -8,25 +9,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/p2p"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// ── P2PUpgradeScreen ──────────────────────────────────
-// Flow: noIP error | confirm → confirm2 → install progress → done.
-// Opens as a tab from SystemHomeScreen when the user
-// presses 'p' on the LND service row in Tor-only mode.
-//
-// Four states:
-//   p2pNoIP     — PublicIPv4 returned ""; show error, Done
-//   p2pConfirm  — privacy warning + typed PUBLISH MY IP
-//   p2pConfirm2 — final warning with actual IP, Go Back / Confirm
-//   p2pProgress — delegated to InstallProgressScreen
-
+// P2PUpgradeScreen observes an address, collects explicit consent, then owns
+// the progress display. The submitted request retains the reviewed address.
 type p2pStep int
 
 const (
-	p2pNoIP p2pStep = iota
+	p2pLoading p2pStep = iota
+	p2pNoIP
 	p2pConfirm
 	p2pConfirm2
 	p2pProgress
@@ -50,33 +43,19 @@ type P2PUpgradeScreen struct {
 	// Confirm2 step (final warning)
 	confirm2Idx int // 0=Go Back, 1=Confirm
 
-	// Progress step — embedded screen
+	// Embedded progress screen.
 	progress *InstallProgressScreen
 
-	// Detected at construction
-	publicIP string
+	request     p2p.UpgradeRequest
+	addressRead *p2pAddressRead
 }
 
 func NewP2PUpgradeScreen(
 	ctx *ScreenContext,
 ) *P2PUpgradeScreen {
-	ip := system.PublicIPv4()
-
-	s := &P2PUpgradeScreen{
-		ctx:      ctx,
-		publicIP: ip,
-		btnIdx:   1, // default focus on Proceed
+	return &P2PUpgradeScreen{
+		ctx: ctx, step: p2pLoading, btnIdx: 1, input: newP2PConfirmInput(),
 	}
-
-	if ip == "" {
-		s.step = p2pNoIP
-		return s
-	}
-
-	s.step = p2pConfirm
-	s.focusZone = p2pZoneInput
-	s.input = newP2PConfirmInput()
-	return s
 }
 
 func newP2PConfirmInput() textinput.Model {
@@ -94,19 +73,25 @@ func newP2PConfirmInput() textinput.Model {
 // ── Screen interface ────────────────────────────────────
 
 func (s *P2PUpgradeScreen) Init() tea.Cmd {
-	return s.input.Focus()
+	if s.step != p2pLoading {
+		return nil
+	}
+	return s.readAddress()
 }
 
 func (s *P2PUpgradeScreen) HandleKey(
 	keyStr string, msg tea.KeyPressMsg,
 ) (Screen, tea.Cmd) {
-	// No-IP state
-	if s.step == p2pNoIP {
+	// Observation states cannot submit a mutation.
+	if s.step == p2pNoIP || s.step == p2pLoading {
 		switch keyStr {
 		case "ctrl+c":
 			return s, tea.Quit
 		case "enter":
-			return s, emitCloseTab
+			if s.step == p2pNoIP {
+				return s, s.readAddress()
+			}
+			return s, nil
 		case "left":
 			return s, emitFocusSidebar
 		case "up", "shift+tab":
@@ -256,7 +241,7 @@ func (s *P2PUpgradeScreen) HandleKey(
 		if s.btnIdx == 0 {
 			return s, emitCloseTab
 		}
-		// Proceed — only if input matches exactly
+		// Proceed only if input matches exactly.
 		if s.input.Value() != "PUBLISH MY IP" {
 			s.error = "Type PUBLISH MY IP to confirm"
 			return s, nil
@@ -284,7 +269,10 @@ func (s *P2PUpgradeScreen) startInstall() (
 	if s.ctx.LndClient != nil {
 		client = s.ctx.LndClient
 	}
-	operation := s.ctx.HelperWorkflows.UpgradeP2P(client)
+	if s.step != p2pConfirm2 || s.request.Address() == "" {
+		return s, nil
+	}
+	operation := s.ctx.HelperWorkflows.UpgradeP2P(s.request, client)
 
 	s.progress = NewInstallProgressScreen(
 		s.ctx, operation,
@@ -311,6 +299,18 @@ func (s *P2PUpgradeScreen) HandleMsg(
 		return s, cmd
 	}
 	switch msg := msg.(type) {
+	case p2pAddressResultMsg:
+		if msg.read == nil || msg.read != s.addressRead || s.step != p2pLoading {
+			return s, nil
+		}
+		s.cancelAddressRead()
+		if msg.err != nil || msg.request.Address() == "" {
+			s.step = p2pNoIP
+			return s, nil
+		}
+		s.request = msg.request
+		s.step = p2pConfirm
+		return s, s.input.Focus()
 	case tea.PasteMsg:
 		if s.step == p2pConfirm &&
 			s.focusZone == p2pZoneInput {
@@ -328,6 +328,12 @@ func (s *P2PUpgradeScreen) HandleMsg(
 func (s *P2PUpgradeScreen) View(
 	w, h int,
 ) string {
+	if s.step == p2pLoading {
+		p := newPane(w)
+		p.title(theme.Header, "Reading Public IPv4")
+		p.line(" " + theme.Value.Render("Checking the address for your review..."))
+		return p.render()
+	}
 	if s.step == p2pNoIP {
 		return s.viewNoIP(w, h)
 	}
@@ -359,7 +365,7 @@ func (s *P2PUpgradeScreen) viewNoIP(
 		"address."))
 
 	return p.renderWithBottomButtons(
-		[]string{"Done"}, 0, isFocused, h)
+		[]string{"Retry"}, 0, isFocused, h)
 }
 
 func (s *P2PUpgradeScreen) viewConfirm(
@@ -371,7 +377,7 @@ func (s *P2PUpgradeScreen) viewConfirm(
 	p.title(theme.Header,
 		"Upgrade to Clearnet + Tor (Hybrid P2P)")
 
-	p.field("Server IP: ", s.publicIP)
+	p.field("Server IP: ", s.request.Address())
 	p.blank()
 	p.line(" " + theme.Warn.Render(
 		"This will permanently change your"+
@@ -388,7 +394,7 @@ func (s *P2PUpgradeScreen) viewConfirm(
 		"  • This links your IP to your Lightning"+
 			" node identity"))
 	p.line(" " + theme.Value.Render(
-		"  • This CANNOT be undone — once published,"))
+		"  • This CANNOT be undone. Once published,"))
 	p.line(" " + theme.Value.Render(
 		"    your IP cannot be retracted from"+
 			" network gossip"))
@@ -436,7 +442,7 @@ func (s *P2PUpgradeScreen) viewConfirm2(
 	p.line(" " + theme.Value.Render(
 		"Your IP address:"))
 	p.blank()
-	p.mono(s.publicIP)
+	p.mono(s.request.Address())
 	p.blank()
 	p.line(" " + theme.Value.Render(
 		"will be permanently published to the"))
@@ -456,7 +462,10 @@ func (s *P2PUpgradeScreen) viewConfirm2(
 
 func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	if s.step == p2pNoIP {
-		return resultBindings(s.ctx.HasTabs)
+		return []key.Binding{bind("enter", "retry", "enter"), kSidebar, kBack, kQuit}
+	}
+	if s.step == p2pLoading {
+		return []key.Binding{kSidebar, kBack, kQuit}
 	}
 
 	if s.step == p2pProgress && s.progress != nil {
@@ -498,4 +507,47 @@ func (s *P2PUpgradeScreen) HelpBindings() []key.Binding {
 	}
 	binds = append(binds, kQuit)
 	return binds
+}
+
+// Each mounted screen owns at most one observation. Replaced or closed screens
+// cannot publish a late address into a different confirmation.
+type p2pAddressRead struct {
+	owner  *P2PUpgradeScreen
+	cancel context.CancelFunc
+}
+
+type p2pAddressResultMsg struct {
+	read    *p2pAddressRead
+	request p2p.UpgradeRequest
+	err     error
+}
+
+func (s *P2PUpgradeScreen) readAddress() tea.Cmd {
+	if s.addressRead != nil {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	read := &p2pAddressRead{owner: s, cancel: cancel}
+	s.addressRead = read
+	s.request = p2p.UpgradeRequest{}
+	s.error = ""
+	s.step = p2pLoading
+	workflows := s.ctx.HelperWorkflows
+	return func() tea.Msg {
+		request, err := workflows.ReadP2PAddress(ctx)
+		return p2pAddressResultMsg{read: read, request: request, err: err}
+	}
+}
+
+func (s *P2PUpgradeScreen) cancelAddressRead() {
+	if s.addressRead != nil {
+		s.addressRead.cancel()
+		s.addressRead = nil
+	}
+}
+
+func cancelP2PAddressRead(screen Screen) {
+	if s, ok := screen.(*P2PUpgradeScreen); ok {
+		s.cancelAddressRead()
+	}
 }

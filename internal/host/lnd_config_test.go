@@ -1,6 +1,4 @@
-// internal/installer/lnd_test.go
-
-package installer
+package host
 
 import (
 	"crypto/ed25519"
@@ -50,8 +48,8 @@ func activeLNDConfigValues(content string) map[string][]string {
 }
 
 // The generated lnd.conf binds by the literal loopback
-// addresses defined once in paths — the same constants every
-// client dials — and carries no host name anywhere. On this
+// addresses defined once in paths. the same constants every
+// client dials. and carries no host name anywhere. On this
 // node, which disables IPv6, the name localhost can resolve to
 // an unusable IPv6 address, so it must never appear.
 func TestBuildLNDConfigBindsByAddress(t *testing.T) {

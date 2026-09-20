@@ -18,6 +18,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
+	"github.com/virtualprivatenode/vpn/internal/p2p"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -65,7 +66,7 @@ var verbs = map[string]verbDef{
 	helper.VerbRebuildSSHConfig:     {3 * time.Minute, verbRebuildSSHConfig},
 	helper.VerbPackageUpdate:        {30 * time.Minute, verbPackageUpdate},
 	helper.VerbSelfUpdate:           {15 * time.Minute, verbSelfUpdate},
-	helper.VerbUpgradeP2PToHybrid:   {8 * time.Minute, verbUpgradeP2PToHybrid},
+	helper.VerbUpgradeP2PToHybrid:   {30 * time.Minute, verbUpgradeP2PToHybrid},
 	helper.VerbSyncthingInstall:     {30 * time.Minute, verbSyncthingInstall},
 	helper.VerbReadNodeAddresses:    {1 * time.Minute, verbReadNodeAddresses},
 	helper.VerbReadSSHAuth:          {1 * time.Minute, verbReadSSHAuth},
@@ -83,8 +84,7 @@ var (
 	saveSystemConfig             = config.Save
 	setupAutoUnlock              = host.SetupAutoUnlock
 	disableAutoUnlock            = host.DisableAutoUnlock
-	publicIPv4                   = system.PublicIPv4
-	p2pUpgradeSteps              = installer.UpgradeP2PToHybridSteps
+	upgradeP2P                   = host.UpgradeP2PToHybrid
 	syncthingInstallSteps        = installer.SyncthingInstallSteps
 	syncthingResiduePresent      = installer.SyncthingResiduePresent
 	verifySyncthingPrerequisites = installer.VerifySyncthingInstallPrerequisites
@@ -409,46 +409,18 @@ func verbSelfUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
 	return nil, nil
 }
 
-func verbUpgradeP2PToHybrid(
-	ctx *verbCtx, params json.RawMessage,
-) (any, error) {
-	if err := rejectParams(params); err != nil {
+func verbUpgradeP2PToHybrid(ctx *verbCtx, params json.RawMessage) (any, error) {
+	var p helper.UpgradeP2PParams
+	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	cfg, err := loadConfig()
+	request, err := p2p.NewUpgradeRequest(p.ExpectedIPv4)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.P2PMode != "tor" {
-		return nil, fmt.Errorf(
-			"hybrid P2P upgrade requires authoritative mode tor; current mode is %q",
-			cfg.P2PMode)
-	}
-	// Derived here, from the kernel routing table — the client cannot supply
-	// an address for LND to advertise.
-	publicIP := publicIPv4()
-	if publicIP == "" {
-		return nil, errors.New(
-			"could not determine this box's public IPv4 " +
-				"address — hybrid mode needs one")
-	}
-	cfg.P2PMode = "hybrid"
-	steps := p2pUpgradeSteps(cfg, publicIP)
-	if err := runSteps(ctx, steps); err != nil {
-		return nil, err
-	}
-	// The mode switch makes LND regenerate its TLS certificate
-	// (the cert's contents change), so the staged copy is now
-	// stale — re-stage it, reported as one more step.
-	if err := restageFacts(helper.VerbUpgradeP2PToHybrid); err != nil {
-		return nil, err
-	}
-	ctx.emitStep(len(steps))
-	if err := saveSystemConfig(cfg); err != nil {
-		return nil, fmt.Errorf("publish P2P setting: %w", err)
-	}
-	ctx.emitStep(len(steps) + 1)
-	return nil, nil
+	return nil, upgradeP2P(request, func() error {
+		return restageFacts(helper.VerbUpgradeP2PToHybrid)
+	}, ctx.emitStep)
 }
 
 func verbSyncthingInstall(ctx *verbCtx, _ json.RawMessage) (any, error) {
