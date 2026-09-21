@@ -1,15 +1,4 @@
-// internal/installer/helperstep.go
-
-package installer
-
-// The install steps that stand up the runtime privilege
-// boundary: the root helper's socket-activated units, the admin
-// user's journal-read access, and the staging board. Together
-// with identity.access having stopped granting sudo, these are
-// what make the end state true: the admin user holds no root
-// privilege of any kind — it can request the helper's fixed
-// operations over the socket, read the journal, and read the
-// staged facts, and that is all.
+package host
 
 import (
 	"fmt"
@@ -92,10 +81,9 @@ PrivateTmp=yes
 ProtectHome=read-only
 `
 
-// installHelperUnits is the helper.enable step: write both
-// units, reload systemd, enable and start the socket, and
-// verify the socket unit is actually listening.
-func installHelperUnits() error {
+// InstallHelperUnits writes both units, reloads systemd, and enables the socket.
+// It requires an active socket unit and a node at the configured path.
+func InstallHelperUnits() error {
 	if err := system.SudoWriteFile(paths.HelperSocketUnit,
 		[]byte(helperSocketUnit), 0644); err != nil {
 		return err
@@ -111,9 +99,8 @@ func installHelperUnits() error {
 		paths.HelperSocketUnitName); err != nil {
 		return err
 	}
-	// Postcondition: the socket unit reports active AND the
-	// node exists with the expected ownership story (root-owned
-	// file node; systemd applied SocketMode at creation).
+	// Confirm activation and node existence. Native validation separately
+	// checks the socket type, ownership and mode configured by the unit.
 	if !system.IsServiceActive(paths.HelperSocketUnitName) {
 		return fmt.Errorf("%s is not active after enable",
 			paths.HelperSocketUnitName)
@@ -127,10 +114,10 @@ func installHelperUnits() error {
 	return nil
 }
 
-// setupJournalAccess is the journal.access step: make journal
+// SetupJournalAccess is the journal.access step: make journal
 // storage persistent (an audit trail that vanishes at reboot
 // is not much of a record) and let the admin user read it.
-func setupJournalAccess() error {
+func SetupJournalAccess() error {
 	// Persistent journald storage hinges on /var/log/journal
 	// existing (Storage=auto). Assert it on the actual box
 	// rather than trusting packaging defaults; the tmpfiles
@@ -151,7 +138,7 @@ func setupJournalAccess() error {
 	}
 
 	// systemd-journal membership grants read on ALL system
-	// journals — sshd auth lines included, which the first-run
+	// journals: sshd auth lines included, which the first-run
 	// banner needs. Read-only: members cannot write or rewrite
 	// journal files. -aG, never -G: a bare -G REPLACES the
 	// supplementary group set.

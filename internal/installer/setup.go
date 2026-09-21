@@ -80,7 +80,7 @@ type installStartupDependencies struct {
 	lookup              identityLookup
 	acquireRunLock      func(string, string) (*os.File, error)
 	classifyLifecycle   func(lifecycleFS, identityLookup) (lifecycleState, error)
-	runPreflight        func() (SSHObservation, error)
+	runPreflight        func() (host.SSHObservation, error)
 	initializeLifecycle func(lifecycleFS, identityLookup, installContext) (*installLedger, error)
 }
 
@@ -404,7 +404,7 @@ func prepareInstallCompletion(
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("write %s: %w", config.DefaultPath, err)
 	}
-	if err := finalizeOwnership(); err != nil {
+	if err := host.SetOperatorLogOwnership(); err != nil {
 		return err
 	}
 	return nil
@@ -430,19 +430,6 @@ func printGeneratedPassword(password string) error {
 		paths.AdminUser, password)
 	if err != nil {
 		return fmt.Errorf("display generated login password: %w", err)
-	}
-	return nil
-}
-
-// finalizeOwnership hands only the operator-facing log to vpn. The system
-// configuration and its parent remain root:vpn and are never made writable by
-// the TUI identity.
-func finalizeOwnership() error {
-	owner := paths.AdminUser + ":" + paths.AdminUser
-	for _, p := range []string{paths.LogFile} {
-		if err := system.SudoRun("chown", owner, p); err != nil {
-			return fmt.Errorf("chown %s to %s: %w", p, owner, err)
-		}
 	}
 	return nil
 }
@@ -504,55 +491,6 @@ func strandsBox(
 	return keyCount == 0 && !passwordAuth && !allowConsoleOnly
 }
 
-// ── Absorbed bootstrap steps (script Phase 1) ────────────
-
-// installBasePackages is the SINGLE clearnet apt operation
-// (IA-2-L disclosure: op count unchanged from the script; ufw
-// joined its package list per ruling xvi(b) so the firewall can
-// come up immediately after).
-func installBasePackages() error {
-	if err := system.SudoRun("apt-get", "update", "-qq"); err != nil {
-		return err
-	}
-	return system.SudoRun("apt-get", "install", "-y", "-qq",
-		"sudo", "gnupg", "tor", "torsocks", "wget", "ufw")
-}
-
-// prepareHost absorbs the script's host fixes: hostname
-// resolution (prevents sudo delays) and NTP clock sync (Bitcoin
-// Core and LND depend on accurate time for block timestamps,
-// HTLC timeouts, and macaroon expiry; systemd-timesyncd uses the
-// Debian pool, UTC).
-func prepareHost() error {
-	if name, err := os.Hostname(); err == nil && name != "" {
-		if err := system.RunSilent(
-			"getent", "hosts", name); err != nil {
-			hosts, readErr := os.ReadFile("/etc/hosts")
-			if readErr == nil {
-				content := string(hosts)
-				if !strings.HasSuffix(content, "\n") {
-					content += "\n"
-				}
-				content += "127.0.0.1 " + name + "\n"
-				if err := system.SudoWriteFile("/etc/hosts",
-					[]byte(content), 0644); err != nil {
-					return fmt.Errorf(
-						"fix hostname resolution: %w", err)
-				}
-				logger.Install("hostname resolution fixed (%s)", name)
-			}
-		}
-	}
-	// Best-effort, like the script's `|| true`: a box without
-	// timedatectl still installs; the clock-sync gap is logged.
-	if err := system.SudoRunSilent(
-		"timedatectl", "set-ntp", "true"); err != nil {
-		logger.Install(
-			"WARNING: could not enable NTP sync (%v)", err)
-	}
-	return nil
-}
-
 // buildInstallSteps returns the initial-install step list. Every
 // step carries a stable Key (the ledger identity — versionless),
 // a Kind (gates re-run every pass), a Group where steps hand
@@ -582,18 +520,18 @@ func buildInstallSteps(
 	return []InstallStep{
 		{Key: "binary.install",
 			Name: "Installing the vpn binary",
-			Fn:   installSelfBinary},
+			Fn:   host.InstallInitialBinary},
 		{Key: "apt.base",
 			Name: "Installing base packages",
-			Fn:   installBasePackages},
+			Fn:   host.InstallBasePackages},
 		{Key: "firewall", Name: "Configuring firewall",
-			Fn: func() error { return configureInitialFirewall(cfg) }},
+			Fn: func() error { return host.ConfigureInitialFirewall(cfg) }},
 		{Key: "base.upgrade",
 			Name: "Upgrading base packages",
 			Fn:   host.UpgradePackages},
 		{Key: "host.prep",
 			Name: "Configuring hostname and clock sync",
-			Fn:   prepareHost},
+			Fn:   host.PrepareBaseHost},
 		{Key: "identity.access", Phase: PhaseFirstBoot,
 			Name: "Creating the admin user (" +
 				paths.AdminUser + ")",
@@ -606,7 +544,7 @@ func buildInstallSteps(
 				return createBaseServiceIdentities()
 			}},
 		{Key: "ipv6.disable", Name: "Disabling IPv6",
-			Fn: disableIPv6},
+			Fn: host.DisableIPv6},
 		{Key: "tor.configure", Name: "Configuring Tor",
 			Fn: func() error {
 				if err := host.WriteTorConfig(cfg); err != nil {
@@ -627,10 +565,10 @@ func buildInstallSteps(
 			Kind: StepGate, Fn: verifyTorRouting},
 		{Key: "apt.torproxy", Name: "Configuring apt for Tor",
 			Fn: func() error {
-				if err := configureAptTor(); err != nil {
+				if err := host.ConfigureAptTor(); err != nil {
 					return err
 				}
-				return ensureGPG()
+				return host.EnsureGPG()
 			}},
 		{Key: "btc.download", Group: "btc",
 			Name: "Downloading Bitcoin Core " + component.BitcoinCoreVersion,
@@ -664,16 +602,16 @@ func buildInstallSteps(
 			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
 		{Key: "security", Name: "Configuring security",
 			Fn: func() error {
-				if err := installUnattendedUpgrades(); err != nil {
+				if err := host.InstallUnattendedUpgrades(); err != nil {
 					return err
 				}
-				if err := configureUnattendedUpgrades(); err != nil {
+				if err := host.ConfigureUnattendedUpgrades(); err != nil {
 					return err
 				}
-				if err := installFail2ban(); err != nil {
+				if err := host.InstallFail2ban(); err != nil {
 					return err
 				}
-				return configureFail2ban()
+				return host.ConfigureFail2ban()
 			}},
 
 		// ── LND (Tor-only, non-interactive) ─────────
@@ -732,11 +670,8 @@ func buildInstallSteps(
 		{Key: "lnd.certwatch",
 			Name: "Watching the LND TLS certificate",
 			Fn:   host.InstallLNDCertWatch},
-		// The initial drop-in write + stale-drop-in deletion,
-		// with the ruling-xv binding order inside (observe →
-		// write new → delete old → validate → restart). Late in
-		// the list, matching the script's placement: everything
-		// the box needs to be reachable already ran.
+		// Harden SSH after the access prerequisites are installed. Old
+		// project drop-ins are lifecycle conflicts, not migration inputs.
 		{Key: "ssh.harden", Phase: PhaseFirstBoot,
 			Name: "Hardening SSH",
 			Fn: func() error {
@@ -753,10 +688,10 @@ func buildInstallSteps(
 		// of the helper's fixed, typed, journal-audited verbs.
 		{Key: "journal.access", Phase: PhaseFirstBoot,
 			Name: "Granting journal read access",
-			Fn:   setupJournalAccess},
+			Fn:   host.SetupJournalAccess},
 		{Key: "helper.enable", Phase: PhaseFirstBoot,
 			Name: "Enabling the root helper socket",
-			Fn:   installHelperUnits},
+			Fn:   host.InstallHelperUnits},
 		{Key: "state.stage", Phase: PhaseFirstBoot,
 			Name: "Staging node facts for the TUI",
 			Fn:   StageBoardAll},
