@@ -37,7 +37,7 @@ func writeBoard(path string, data []byte) error {
 	return b.write(path, data, os.Rename)
 }
 
-// StageBitcoindRPCPassword publishes the installer's generated operator
+// StageBitcoindRPCPassword publishes the initial provisioning operation's operator
 // credential. LND's separate Bitcoin RPC password is never staged here.
 func StageBitcoindRPCPassword(password string) error {
 	return writeBoard(paths.StateBitcoindRPCPass, []byte(password+"\n"))

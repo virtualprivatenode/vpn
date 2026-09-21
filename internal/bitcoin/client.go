@@ -2,7 +2,7 @@
 
 // Package bitcoin talks to the local bitcoind over its JSON-RPC
 // interface, authenticating with the node's own staged RPC
-// credential (see internal/installer/rpcauth.go). Plain HTTP to
+// credential (see internal/host/rpcauth.go). Plain HTTP to
 // 127.0.0.1 with basic auth — bitcoind's RPC is loopback-only
 // on this box — and no privileged operation anywhere: the
 // password is read from the staging board, which the admin
@@ -22,11 +22,8 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
-// RPCUser must match the rpcauth line the installer writes
-// into bitcoin.conf (installer.BitcoindRPCUser; duplicated
-// here as a plain constant because a bitcoin→installer import
-// would be backwards). A unit test in the installer package
-// asserts the two constants agree.
+// RPCUser is the operator RPC identity shared by the client, host provisioning
+// and the bitcoin-cli wrapper. LND has its own independent credential.
 const RPCUser = "vpn"
 
 type BlockchainInfo struct {

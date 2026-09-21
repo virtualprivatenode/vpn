@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -255,26 +254,13 @@ func verbStageLNDMacaroon(_ *verbCtx, _ json.RawMessage) (any, error) {
 // and change nothing; they get the same peer-credential check
 // and journal record as every other verb.
 
-// readHostname reads a Tor hidden-service hostname file. A
-// missing or empty file means that service is not configured
-// on this box — reported as an empty field, which screens
-// render as unavailable.
-func readHostname(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
-}
-
 func verbReadNodeAddresses(_ *verbCtx, _ json.RawMessage) (any, error) {
+	onions := host.ReadOnionAddresses()
 	return helper.NodeAddressesResult{
-		BitcoinP2POnion: readHostname(
-			paths.TorBitcoinP2P + "/hostname"),
-		LNDGRPCOnion: readHostname(
-			paths.TorLNDGRPC + "/hostname"),
-		LNDRESTOnion:   readHostname(paths.TorLNDRESTHostname),
-		SyncthingOnion: readHostname(paths.TorSyncthingHostname),
+		BitcoinP2POnion: onions.BitcoinP2P,
+		LNDGRPCOnion:    onions.LNDGRPC,
+		LNDRESTOnion:    onions.LNDREST,
+		SyncthingOnion:  onions.Syncthing,
 		// Read the certificate identity even when the daemon is stopped.
 		SyncthingDeviceID: host.SyncthingDeviceID(),
 	}, nil

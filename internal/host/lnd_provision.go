@@ -1,0 +1,70 @@
+package host
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/virtualprivatenode/vpn/internal/config"
+	"github.com/virtualprivatenode/vpn/internal/logger"
+	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/system"
+)
+
+func createLNDDirs(username string) error {
+	dirs := []struct {
+		path  string
+		owner string
+		mode  os.FileMode
+	}{
+		{paths.LNDDir, "root:" + username, 0750},
+		{paths.LNDDataDir, username + ":" + username, 0750},
+	}
+	for _, d := range dirs {
+		if err := system.SudoRun("mkdir", "-p", d.path); err != nil {
+			return err
+		}
+		if err := system.SudoRun("chown", d.owner, d.path); err != nil {
+			return err
+		}
+		if err := system.SudoRun("chmod", fmt.Sprintf("%o", d.mode), d.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WriteLNDServiceFromConfig writes the LND unit that matches the
+// node's desired state: the unlock variant when the config says
+// auto-unlock is enabled AND the wallet password file is actually
+// present, the plain variant otherwise. Requiring the file too is deliberate: a
+// unit pointing at a missing password file would keep LND from
+// starting at all.
+func WriteLNDServiceFromConfig(cfg *config.AppConfig) error {
+	withUnlock := false
+	if cfg.AutoUnlock {
+		_, err := os.Stat(paths.LNDWalletPassword)
+		withUnlock = err == nil
+	}
+	if cfg.AutoUnlock && !withUnlock {
+		logger.Install(
+			"auto_unlock is enabled in the config but %s is "+
+				"missing — writing the LND unit without the unlock "+
+				"flag; re-enable auto-unlock from the node TUI",
+			paths.LNDWalletPassword)
+	}
+	return system.SudoWriteFile(paths.LNDService,
+		[]byte(LNDServiceUnit(lndUser, withUnlock)), 0644)
+}
+
+// EnableAndRestartLND enables LND and restarts it with the installed configuration.
+// Restart also applies changes when LND is running during an interrupted-install
+// resume. The caller separately verifies and stages the TLS certificate.
+func EnableAndRestartLND() error {
+	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	if err := system.SudoRun("systemctl", "enable", "lnd"); err != nil {
+		return err
+	}
+	return system.SudoRun("systemctl", "restart", "lnd")
+}

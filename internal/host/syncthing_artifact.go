@@ -135,7 +135,7 @@ func verifySyncthingSig(workDir string) error {
 
 // verifySyncthingChecksum checks the tarball against the
 // now-trusted clearsigned checksum file. Same sha256sum
-// pattern as verifyBitcoin/verifyLND: the only difference is
+// pattern as verifyBitcoinChecksum/verifyLNDChecksum: the only difference is
 // that the checksum source is the clearsigned .asc itself:
 // sha256sum skips the PGP armor lines (reported as "improperly
 // formatted" warnings) and matches the real checksum lines.
