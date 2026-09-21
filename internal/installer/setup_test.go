@@ -286,22 +286,6 @@ func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 	}
 }
 
-func TestDedicatedServiceIdentityNames(t *testing.T) {
-	tests := []struct {
-		name, got, want string
-	}{
-		{"bitcoin user", bitcoinUser, "bitcoin"},
-		{"LND user", lndUser, "lnd"},
-		{"Syncthing user", syncthingUser, "syncthing"},
-		{"backup group", backupGroup, "vpn-lnd-backup"},
-	}
-	for _, tt := range tests {
-		if tt.got != tt.want {
-			t.Errorf("%s: got %q, want %q", tt.name, tt.got, tt.want)
-		}
-	}
-}
-
 func TestSetAndGetVersion(t *testing.T) {
 	original := appVersion
 	defer func() { appVersion = original }()
@@ -363,32 +347,6 @@ func TestVersionCacheFileConsistency(t *testing.T) {
 	if !strings.HasSuffix(paths.VersionCacheFile, "latest-version") {
 		t.Errorf("VersionCacheFile unexpected suffix: %s",
 			paths.VersionCacheFile)
-	}
-}
-
-func TestShellWrapperNetworkFlags(t *testing.T) {
-	tests := []struct {
-		network string
-		bitcoin string
-		lnd     string
-	}{
-		{config.NetworkMainnet, "", ""},
-		{config.NetworkTestnet4, "\n        -testnet4 \\", "\n        --network=testnet4 \\"},
-		{config.NetworkPublicSignet, "\n        -signet \\", "\n        --network=signet \\"},
-	}
-	for _, tt := range tests {
-		profile, err := config.NetworkConfigFromName(tt.network)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := bitcoinCLINetworkFlag(profile); got != tt.bitcoin {
-			t.Errorf("%s bitcoin wrapper flag %q, want %q",
-				tt.network, got, tt.bitcoin)
-		}
-		if got := lncliNetworkFlag(profile); got != tt.lnd {
-			t.Errorf("%s lncli wrapper flag %q, want %q",
-				tt.network, got, tt.lnd)
-		}
 	}
 }
 

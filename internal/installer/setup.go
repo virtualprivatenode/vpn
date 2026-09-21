@@ -640,32 +640,28 @@ func buildInstallSteps(
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadBitcoin(component.BitcoinCoreVersion, btcWork)
+				return host.DownloadBitcoinCore(component.BitcoinCoreVersion, btcWork)
 			}},
 		{Key: "btc.verify", Group: "btc",
 			Name: "Verifying Bitcoin Core",
 			Fn: func() error {
-				if err := verifyBitcoinCoreSigs(
-					btcWork, 2); err != nil {
-					return err
-				}
-				return verifyBitcoin(btcWork)
+				return host.VerifyBitcoinCore(btcWork)
 			}},
 		{Key: "btc.install", Group: "btc",
 			Name: "Installing Bitcoin Core",
 			Fn: func() error {
-				if err := extractAndInstallBitcoin(
+				if err := host.InstallBitcoinCoreBinaries(
 					component.BitcoinCoreVersion, btcWork); err != nil {
 					return err
 				}
 				os.RemoveAll(btcWork)
-				if err := writeBitcoinConfig(cfg); err != nil {
+				if err := host.WriteInitialNodeRPCConfig(cfg); err != nil {
 					return err
 				}
-				return writeBitcoindService(bitcoinUser)
+				return host.WriteBitcoindService()
 			}},
 		{Key: "btc.start", Name: "Starting Bitcoin Core",
-			Fn: func() error { return startBitcoind(cfg) }},
+			Fn: func() error { return host.EnableAndRestartBitcoind(cfg) }},
 		{Key: "security", Name: "Configuring security",
 			Fn: func() error {
 				if err := installUnattendedUpgrades(); err != nil {
@@ -689,26 +685,22 @@ func buildInstallSteps(
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				return downloadLND(component.LNDVersion, lndWork)
+				return host.DownloadLND(component.LNDVersion, lndWork)
 			}},
 		{Key: "lnd.verify", Group: "lnd",
 			Name: "Verifying LND",
 			Fn: func() error {
-				if err := verifyLNDSig(
-					lndWork, component.LNDVersion); err != nil {
-					return err
-				}
-				return verifyLND(lndWork)
+				return host.VerifyLND(component.LNDVersion, lndWork)
 			}},
 		{Key: "lnd.install", Group: "lnd",
 			Name: "Installing LND",
 			Fn: func() error {
-				if err := extractAndInstallLND(
+				if err := host.InstallLNDBinaries(
 					component.LNDVersion, lndWork); err != nil {
 					return err
 				}
 				os.RemoveAll(lndWork)
-				return writeLNDServiceFromConfig(cfg, lndUser)
+				return host.WriteLNDServiceFromConfig(cfg)
 			}},
 		{Key: "tor.lnd", Name: "Configuring Tor for LND",
 			Fn: func() error {
@@ -726,7 +718,7 @@ func buildInstallSteps(
 				// onion state fails closed inside host.WriteLNDConfig.
 				return host.WriteLNDConfig(cfg, "")
 			}},
-		{Key: "lnd.start", Name: "Starting LND", Fn: startLND},
+		{Key: "lnd.start", Name: "Starting LND", Fn: host.EnableAndRestartLND},
 		{Key: "lnd.tls-san", Kind: StepGate,
 			Name: "Verifying LND TLS onion certificate",
 			Fn:   host.VerifyLNDTLSOnionSAN},
@@ -735,11 +727,11 @@ func buildInstallSteps(
 		// also replaces one whose configured SAN inputs changed.
 		// No TUI operation necessarily requested that startup.
 		// This watch re-stages the TUI's copy within seconds of any
-		// rewrite. After lnd.start so a migration pass arms it
+		// rewrite. After lnd.start so an installation or resume arms it
 		// on the certificate LND is actually serving.
 		{Key: "lnd.certwatch",
 			Name: "Watching the LND TLS certificate",
-			Fn:   installLNDCertWatch},
+			Fn:   host.InstallLNDCertWatch},
 		// The initial drop-in write + stale-drop-in deletion,
 		// with the ruling-xv binding order inside (observe →
 		// write new → delete old → validate → restart). Late in
@@ -774,7 +766,7 @@ func buildInstallSteps(
 		// logging, and resume — the special case is dead.
 		{Key: "shellenv", Name: "Configuring shell environment",
 			Fn: func() error {
-				return setupShellEnvironment(cfg)
+				return host.SetupNodeCLI(cfg)
 			}},
 	}
 }
@@ -917,99 +909,4 @@ func writeVersionCache(version string) {
 
 func GetVersion() string {
 	return appVersion
-}
-
-// ── Helpers ──────────────────────────────────────────────
-
-// setupShellEnvironment writes the admin user's cli wrappers.
-// Both run with NO privilege: they are the recovery path a
-// zero-sudo box leans on when the TUI itself misbehaves,
-// so they must work exactly as the admin user.
-//
-//   - bitcoin-cli authenticates with the node's own RPC
-//     credential: the staged password is fed on stdin
-//     (-stdinrpcpass), never on the command line, where it
-//     would be visible in /proc/*/cmdline. The wrapper cannot
-//     read bitcoin.conf (root-owned) and does not need to —
-//     connection details are passed explicitly.
-//   - lncli reads the staged certificate and macaroon copies.
-//     The wallet-create ceremony passes its own flags
-//     (cert-only — no macaroon exists yet); this wrapper is
-//     for the day-to-day case.
-func setupShellEnvironment(cfg *config.AppConfig) error {
-	bashrc := paths.AdminBashrc
-	data, _ := os.ReadFile(bashrc)
-	existing := string(data)
-	net, err := cfg.NetworkConfig()
-	if err != nil {
-		return err
-	}
-
-	var content string
-
-	// bitcoin-cli wrapper
-	if !strings.Contains(existing, "bitcoin-cli()") {
-		btcNetFlag := bitcoinCLINetworkFlag(net)
-		content += fmt.Sprintf(`
-# -- Virtual Private Node --
-# RPC password comes from the staged credential file on stdin;
-# commands that themselves read stdin should be run with
-# explicit flags instead of this wrapper.
-bitcoin-cli() {
-    /usr/local/bin/bitcoin-cli \
-        -rpcconnect=127.0.0.1 \
-        -rpcport=%d \
-        -rpcuser=%s \
-        -stdinrpcpass \%s
-        "$@" < %s
-}
-export -f bitcoin-cli
-`, net.RPCPort, BitcoindRPCUser, btcNetFlag,
-			paths.StateBitcoindRPCPass)
-	}
-
-	// lncli wrapper — always set up now that LND is part of
-	// the initial install
-	if cfg.HasLND() &&
-		!strings.Contains(existing, "lncli()") {
-		lndNetFlag := lncliNetworkFlag(net)
-		content += fmt.Sprintf(`
-lncli() {
-    /usr/local/bin/lncli \
-        --rpcserver=%s \%s
-        --macaroonpath=%s \
-        --tlscertpath=%s \
-        "$@"
-}
-export -f lncli
-`, paths.LNDGRPCEndpoint, lndNetFlag,
-			paths.StateLNDMacaroon, paths.StateLNDTLSCert)
-	}
-
-	if content == "" {
-		return nil
-	}
-
-	f, err := os.OpenFile(bashrc,
-		os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(content)
-	return err
-}
-
-func bitcoinCLINetworkFlag(net *config.NetworkConfig) string {
-	if net.BitcoinCLIFlag == "" {
-		return ""
-	}
-	return "\n        " + net.BitcoinCLIFlag + " \\"
-}
-
-func lncliNetworkFlag(net *config.NetworkConfig) string {
-	if net.Name == config.NetworkMainnet {
-		return ""
-	}
-	return fmt.Sprintf("\n        --network=%s \\", net.LNDNetwork)
 }

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os/user"
 
+	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 const (
+	bitcoinUser   = "bitcoin"
 	lndUser       = "lnd"
 	syncthingUser = "syncthing"
 	backupGroup   = "vpn-lnd-backup"
@@ -42,4 +44,20 @@ func createSystemGroup(name string) error {
 		}
 	}
 	return system.SudoRun("groupadd", "--system", name)
+}
+
+// CreateBaseDaemonIdentities provisions the two base daemon identities and
+// directories. Installer must admit the fresh or interrupted lifecycle first;
+// this operation does not adopt existing node state.
+func CreateBaseDaemonIdentities() error {
+	if err := CreateSystemUser(bitcoinUser, paths.BitcoinDataDir); err != nil {
+		return err
+	}
+	if err := CreateSystemUser(lndUser, paths.LNDDataDir); err != nil {
+		return err
+	}
+	if err := createBitcoinDirs(bitcoinUser); err != nil {
+		return err
+	}
+	return createLNDDirs(lndUser)
 }

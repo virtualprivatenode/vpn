@@ -165,10 +165,9 @@ type SelfUpdateParams struct {
 // NodeAddressesResult is the read-node-addresses answer: the
 // node's Tor hidden-service hostnames and its Syncthing device
 // ID, read from their sources at the moment of the request. An
-// empty field means that service is not configured on this box
-// (its hostname file does not exist) — the screen renders the
-// feature unavailable rather than showing an address nobody
-// can reach.
+// empty field means the observation is unavailable, including when a
+// hostname file is missing or unreadable. It does not prove the service
+// is unconfigured or that an observed address is reachable.
 type NodeAddressesResult struct {
 	BitcoinP2POnion   string `json:"bitcoin_p2p_onion"`
 	LNDGRPCOnion      string `json:"lnd_grpc_onion"`

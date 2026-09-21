@@ -4,7 +4,6 @@ package installer
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
@@ -31,41 +30,7 @@ func createBaseServiceIdentities() error {
 	if err := ensureRootOwnedVarLibVPN(); err != nil {
 		return err
 	}
-	if err := host.CreateSystemUser(
-		bitcoinUser, paths.BitcoinDataDir); err != nil {
-		return err
-	}
-	if err := host.CreateSystemUser(lndUser, paths.LNDDataDir); err != nil {
-		return err
-	}
-	if err := createBitcoinDirs(bitcoinUser); err != nil {
-		return err
-	}
-	return createLNDDirs(lndUser)
-}
-
-func createBitcoinDirs(username string) error {
-	dirs := []struct {
-		path  string
-		owner string
-		mode  os.FileMode
-	}{
-		{paths.BitcoinDir, "root:" + username, 0750},
-		{paths.BitcoinDataDir, username + ":" + username, 0750},
-	}
-	for _, d := range dirs {
-		if err := system.SudoRun("mkdir", "-p", d.path); err != nil {
-			return fmt.Errorf("mkdir %s: %w", d.path, err)
-		}
-		if err := system.SudoRun("chown", d.owner, d.path); err != nil {
-			return err
-		}
-		if err := system.SudoRun("chmod",
-			fmt.Sprintf("%o", d.mode), d.path); err != nil {
-			return fmt.Errorf("chmod %s: %w", d.path, err)
-		}
-	}
-	return nil
+	return host.CreateBaseDaemonIdentities()
 }
 
 func disableIPv6() error {

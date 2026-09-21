@@ -1,21 +1,7 @@
-// internal/installer/certwatch.go
+package host
 
-package installer
-
-// The LND TLS certificate watch. At startup, LND replaces an
-// expired certificate; tlsautorefresh also replaces one whose
-// configured SAN inputs changed. That can happen on a crash
-// restart, reboot, or typed configuration change.
-// None of those moments is an operation the TUI
-// requested, so no operation can refresh the TUI's staged
-// copy of the certificate; without a watcher, the copy goes
-// stale the moment LND rewrites the file, and the TUI's
-// next connection fails until its self-heal notices. These two
-// units close that gap at the source: systemd watches the
-// certificate file itself and re-stages the copy within
-// seconds of a rewrite — hours before a human shows up to
-// read it. Same pattern as the channel-backup watcher
-// (lnd-backup-watch.path).
+// LND owns certificate renewal. The native path unit refreshes the operator's
+// staged certificate when LND replaces its source, independently of TUI requests.
 
 import (
 	"fmt"
@@ -26,7 +12,7 @@ import (
 )
 
 // lndCertWatchUnits renders the path unit and its oneshot
-// service. Pure — unit-tested.
+// service. Pure; unit-tested.
 func lndCertWatchUnits() (pathUnit, serviceUnit string) {
 	pathUnit = fmt.Sprintf(`[Unit]
 Description=Watch the LND TLS certificate for the node TUI
@@ -50,10 +36,10 @@ SyslogIdentifier=vpn-cert-stage
 	return pathUnit, serviceUnit
 }
 
-// installLNDCertWatch writes both units, reloads systemd, and
+// InstallLNDCertWatch writes both units, reloads systemd, and
 // enables and starts the path unit, verifying it is active.
 // Idempotent for a recognized interrupted base install.
-func installLNDCertWatch() error {
+func InstallLNDCertWatch() error {
 	pathUnit, serviceUnit := lndCertWatchUnits()
 	if err := system.SudoWriteFile(paths.LNDCertWatchPath,
 		[]byte(pathUnit), 0644); err != nil {

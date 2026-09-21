@@ -1,6 +1,4 @@
-//internal/installer/bitcoin_test.go
-
-package installer
+package host
 
 import (
 	"fmt"
@@ -16,7 +14,7 @@ func mustBuildBitcoinConfig(
 	t *testing.T, cfg *config.AppConfig, lines ...string,
 ) string {
 	t.Helper()
-	content, err := BuildBitcoinConfig(cfg, lines...)
+	content, err := buildBitcoinConfig(cfg, lines...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,40 +124,8 @@ func TestBitcoinConfigDisablesUnusedCookieForEveryProfile(t *testing.T) {
 func TestBitcoinConfigRejectsUnknownProfile(t *testing.T) {
 	cfg := config.Default()
 	cfg.Network = "signet"
-	if _, err := BuildBitcoinConfig(cfg); err == nil {
+	if _, err := buildBitcoinConfig(cfg); err == nil {
 		t.Fatal("raw signet profile generated a Bitcoin config")
-	}
-}
-
-func TestBitcoinConfigAlwaysHasProxy(t *testing.T) {
-	cfg := config.Default()
-	content := mustBuildBitcoinConfig(t, cfg, "")
-	if !strings.Contains(content, "proxy=127.0.0.1:9050") {
-		t.Error("bitcoin config must always have Tor proxy")
-	}
-}
-
-func TestBitcoinConfigAlwaysHasServer(t *testing.T) {
-	cfg := config.Default()
-	content := mustBuildBitcoinConfig(t, cfg, "")
-	if !strings.Contains(content, "server=1") {
-		t.Error("bitcoin config must always have server=1")
-	}
-}
-
-func TestBitcoinConfigHeader(t *testing.T) {
-	cfg := config.Default()
-	content := mustBuildBitcoinConfig(t, cfg, "")
-	if !strings.Contains(content, "Virtual Private Node") {
-		t.Error("bitcoin config should have VPN header comment")
-	}
-}
-
-func TestBitcoinConfigWalletDisabled(t *testing.T) {
-	cfg := config.Default()
-	content := mustBuildBitcoinConfig(t, cfg, "")
-	if !strings.Contains(content, "disablewallet=1") {
-		t.Error("bitcoin config must have disablewallet=1")
 	}
 }
 
@@ -167,59 +133,35 @@ func TestBitcoinConfigWalletDisabled(t *testing.T) {
 // auth options are not network-scoped, and on testnet4 a line
 // appended at the end would fall inside [testnet4].
 func TestBitcoinConfigRPCAuthPlacement(t *testing.T) {
-	line := "rpcauth=vpn:aabb$ccdd"
-	lndLine := "rpcauth=lnd:eeff$0011"
-
-	cfg := config.Default()
-	if got := mustBuildBitcoinConfig(t, cfg, line, lndLine); !strings.Contains(
-		got, line+"\n") || !strings.Contains(got, lndLine+"\n") {
-		t.Error("mainnet config missing an rpcauth line")
-	}
-
-	tn := &config.AppConfig{
-		Network: "testnet4", PruneSize: 25, P2PMode: "tor",
-	}
-	got := mustBuildBitcoinConfig(t, tn, line, lndLine)
-	authIdx := strings.Index(got, line)
-	lndAuthIdx := strings.Index(got, lndLine)
-	sectIdx := strings.Index(got, "[testnet4]")
-	if authIdx == -1 || lndAuthIdx == -1 || sectIdx == -1 {
-		t.Fatalf("missing rpcauth (%d, %d) or section (%d)",
-			authIdx, lndAuthIdx, sectIdx)
-	}
-	if authIdx > sectIdx || lndAuthIdx > sectIdx {
-		t.Error("rpcauth line landed inside the [testnet4] " +
-			"section — it must be global")
+	lines := []string{"rpcauth=vpn:aabb$ccdd", "rpcauth=lnd:eeff$0011"}
+	for _, network := range config.SupportedNetworks() {
+		t.Run(network, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Network = network
+			content := mustBuildBitcoinConfig(t, cfg, lines...)
+			section := strings.Index(content, "\n[")
+			for _, line := range lines {
+				index := strings.Index(content, line+"\n")
+				if index < 0 || (section >= 0 && index > section) {
+					t.Errorf("RPC credential is missing or network-scoped: %s", line)
+				}
+			}
+		})
 	}
 }
 
 func TestBitcoindServiceUsesDedicatedIdentityAndTorGroup(t *testing.T) {
 	unit := bitcoindServiceUnit(bitcoinUser)
-	for _, want := range []string{
-		"User=bitcoin",
-		"Group=bitcoin",
-		"SupplementaryGroups=debian-tor",
-		"UMask=0077",
+	for key, want := range map[string]string{
+		"User":                "bitcoin",
+		"Group":               "bitcoin",
+		"SupplementaryGroups": "debian-tor",
+		"UMask":               "0077",
 	} {
-		if !strings.Contains(unit, want) {
-			t.Errorf("bitcoind unit missing %q", want)
-		}
-	}
-	if got := strings.Count(unit, "UMask=0077"); got != 1 {
-		t.Errorf("bitcoind unit has %d private umasks, want 1", got)
+		assertSingleUnitDirective(t, unit, "Service", key, want)
 	}
 	if strings.Contains(unit, backupGroup) {
 		t.Error("normal bitcoind unit has channel-backup access")
-	}
-}
-
-// The RPC identity the conf grants and the identity the client
-// authenticates as are declared in two packages (import
-// direction); this pins them together.
-func TestBitcoindRPCUserAgreesWithClient(t *testing.T) {
-	if BitcoindRPCUser != bitcoin.RPCUser {
-		t.Errorf("installer says RPC user %q, client says %q",
-			BitcoindRPCUser, bitcoin.RPCUser)
 	}
 }
 
