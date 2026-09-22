@@ -67,17 +67,27 @@ func channelScreen(t *testing.T) (*ChannelOpenScreen, *screenChannelClient) {
 	s.customHost = "peer.onion:9735"
 	s.customAlias = "reviewed peer"
 	s.peerConfirmed = true
-	s.refreshCoins()
-	s.HandleMsg(coUtxoListMsg{refresh: s.refresh, utxos: c.coins})
+	publishChannelCoins(s, c.coins, nil)
+	t.Cleanup(s.cancelCoinRefresh)
+	t.Cleanup(s.ctx.OnChain.reader.Close)
 	s.toggleUtxoSelection(0)
 	s.returnFromCoinControl(true)
 	s.feeInput.SetSats(9)
 	return s, c
 }
 
+// Intent tests inject observations; the read lifecycle is exercised separately.
+func publishChannelCoins(s *ChannelOpenScreen, coins []lndrpc.UTXO, err error) {
+	s.refreshCoins()
+	s.HandleMsg(channelCoinsMsg{refresh: s.refresh, snapshot: app.OnChainSnapshot{
+		Utxos:      app.Observation[[]lndrpc.UTXO]{Value: coins, ObservedAt: time.Now(), Err: err},
+		OnChainTxs: freshStatus(s.txs),
+	}})
+}
+
 func confirmChannel(t *testing.T, s *ChannelOpenScreen) tea.Cmd {
 	t.Helper()
-	s.submitOpenChannel()
+	s.prepareChannelOpenConfirmation()
 	if s.step != coStepConfirm {
 		t.Fatalf("preparation failed: %s", s.error)
 	}
@@ -93,17 +103,17 @@ func TestChannelSelectionRefreshAndReview(t *testing.T) {
 	s, c := channelScreen(t)
 	original := c.coins[0]
 	other := lndrpc.UTXO{Txid: strings.Repeat("b", 64), AmountSats: 50000}
-	s.submitOpenChannel()
-	s.HandleMsg(coUtxoListMsg{refresh: s.refresh, utxos: []lndrpc.UTXO{other, original}})
+	s.prepareChannelOpenConfirmation()
+	publishChannelCoins(s, []lndrpc.UTXO{other, original}, nil)
 	if !s.selection.Contains(original) || s.selection.Contains(other) {
 		t.Fatal("insert/reorder substituted the selected coin")
 	}
-	s.HandleMsg(coUtxoListMsg{refresh: s.refresh, utxos: nil})
+	publishChannelCoins(s, nil, nil)
 	s.confirmBtnIdx = 1
 	if _, cmd := s.HandleKey("enter", tea.KeyPressMsg{}); cmd != nil || s.selection.Len() != 1 || len(c.sent) != 0 {
 		t.Fatal("missing coin became automatic selection")
 	}
-	s.HandleMsg(coUtxoListMsg{refresh: s.refresh, utxos: []lndrpc.UTXO{other, original}})
+	publishChannelCoins(s, []lndrpc.UTXO{other, original}, nil)
 	s.selection.Toggle(other)
 	if _, cmd := s.HandleKey("enter", tea.KeyPressMsg{}); cmd != nil || s.step != coStepInput {
 		t.Fatal("changed selection bypassed renewed review")
@@ -114,7 +124,7 @@ func TestChannelSelectionRefreshAndReview(t *testing.T) {
 	}
 	s.peerConfirmed = true
 	s.amountConfirmed = true
-	s.submitOpenChannel()
+	s.prepareChannelOpenConfirmation()
 	if s.step == coStepConfirm {
 		t.Fatal("empty selection accepted")
 	}
@@ -130,7 +140,7 @@ func TestChannelConfirmationOwnsIntentAndUnknownTotals(t *testing.T) {
 		} else {
 			s.feeInput.Clear()
 		}
-		s.submitOpenChannel()
+		s.prepareChannelOpenConfirmation()
 		before := s.View(67, 30)
 		want := s.attempt.prepared.Request()
 		for _, text := range []string{"Total fee and change: unavailable", "no other coins are allowed", "Unconfirmed inputs: allowed"} {
@@ -170,18 +180,20 @@ func TestChannelConfirmationOwnsIntentAndUnknownTotals(t *testing.T) {
 
 func TestChannelRefreshAndResultOwnership(t *testing.T) {
 	s, _ := channelScreen(t)
-	oldRefresh := s.refresh
 	s.refreshCoins()
-	s.HandleMsg(coUtxoListMsg{refresh: oldRefresh, err: errors.New("old error")})
+	oldRefresh := s.refresh
+	s.cancelCoinRefresh()
+	s.refreshCoins()
+	s.HandleMsg(channelCoinsMsg{refresh: oldRefresh, snapshot: app.OnChainSnapshot{}.Unavailable(errors.New("old error"))})
 	if s.utxoErr != nil {
 		t.Fatal("older refresh replaced current state")
 	}
-	s.HandleMsg(coUtxoListMsg{refresh: s.refresh, err: errors.New("current error")})
-	s.submitOpenChannel()
+	publishChannelCoins(s, nil, errors.New("current error"))
+	s.prepareChannelOpenConfirmation()
 	if s.step == coStepConfirm {
 		t.Fatal("failed current fetch allowed preparation")
 	}
-	s.HandleMsg(coUtxoListMsg{refresh: s.refresh, utxos: s.utxos})
+	publishChannelCoins(s, s.utxos, nil)
 	cmd := confirmChannel(t, s)
 	msg := cmd()
 	current, _ := channelScreen(t)
@@ -212,8 +224,10 @@ func TestChannelRefreshAndResultOwnership(t *testing.T) {
 	if _, duplicate := m.Update(result); duplicate != nil {
 		t.Fatal("duplicate completion repeated refresh")
 	}
-	current.HandleMsg(coUtxoListMsg{refresh: oldRefresh, err: errors.New("late failure")})
-	current.HandleMsg(coTxListMsg{refresh: oldRefresh, txs: []lndrpc.OnChainTx{{Txid: "stale"}}})
+	current.HandleMsg(channelCoinsMsg{refresh: oldRefresh, snapshot: app.OnChainSnapshot{
+		Utxos:      app.Observation[[]lndrpc.UTXO]{Err: errors.New("late failure")},
+		OnChainTxs: freshStatus([]lndrpc.OnChainTx{{Txid: "stale"}}),
+	}})
 	if strings.Contains(current.View(67, 30), "Failed") || current.result.State != app.ChannelBroadcast || len(current.txs) != 0 {
 		t.Fatal("late reads overwrote completion")
 	}

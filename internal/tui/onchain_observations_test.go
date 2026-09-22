@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -23,6 +24,12 @@ func (r *onChainTestReader) Collect(source app.OnChainSource) app.OnChainSnapsho
 	r.calls++
 	r.source = source
 	return r.next
+}
+func (r *onChainTestReader) ReadUnspent(_ context.Context, source app.OnChainSource, _, _ int32) app.Observation[[]lndrpc.UTXO] {
+	return r.Collect(source).Utxos
+}
+func (r *onChainTestReader) ReadTransactions(_ context.Context, source app.OnChainSource) app.Observation[[]lndrpc.OnChainTx] {
+	return r.Collect(source).OnChainTxs
 }
 func (*onChainTestReader) Close() {}
 

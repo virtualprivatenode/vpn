@@ -44,7 +44,7 @@ func (s *ChannelOpenScreen) handleConfirmKey(
 			s.backToInput()
 			return s, nil
 		case 1: // Confirm
-			if s.attempt == nil || !s.ctx.walletExists() {
+			if s.attempt == nil || !s.ctx.walletExists() || !s.requireCurrentCoinScope() {
 				return s, nil
 			}
 			if !slices.Equal(s.selection.Outpoints(), s.attempt.prepared.Request().Outpoints) {
@@ -60,7 +60,7 @@ func (s *ChannelOpenScreen) handleConfirmKey(
 				s.error = err.Error()
 				return s, nil
 			}
-			s.refresh = nil
+			s.cancelCoinRefresh()
 			s.error = ""
 			s.step = coStepOpening
 			return s, openChannelCmd(s.client, s.attempt)

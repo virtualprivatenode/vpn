@@ -87,7 +87,7 @@ func TestExistingWalletFormsBlockSubmissionAndRecover(t *testing.T) {
 	})
 	t.Run("open channel", func(t *testing.T) {
 		s, client := channelScreen(t)
-		s.submitOpenChannel()
+		s.prepareChannelOpenConfirmation()
 		s.confirmBtnIdx = 1
 		want := s.attempt.prepared.Request()
 		exerciseUnavailableWalletAction(t, s.ctx, s, tabOpenChannel, secChannels, func() {
