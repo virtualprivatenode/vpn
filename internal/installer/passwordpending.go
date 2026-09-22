@@ -39,7 +39,7 @@ node TUI also clears it.
 // swallowed: this marker is what guarantees the credential can
 // still reach the operator if the run dies before the print.
 func markPasswordPending() error {
-	return system.SudoWriteFile(
+	return system.WriteFileRoot(
 		paths.PasswordPendingMarker,
 		[]byte(passwordPendingNote), 0600)
 }

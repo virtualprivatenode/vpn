@@ -193,10 +193,10 @@ func WriteLNDConfigWithRPCPassword(
 	if err != nil {
 		return err
 	}
-	if err := system.SudoWriteFile(paths.LNDConf, []byte(content), 0640); err != nil {
+	if err := system.WriteFileRoot(paths.LNDConf, []byte(content), 0640); err != nil {
 		return err
 	}
-	return system.SudoRun("chown", "root:lnd", paths.LNDConf)
+	return system.RunRoot("chown", "root:lnd", paths.LNDConf)
 }
 
 // readRequiredLNDRESTOnion enforces the dependency between Tor's

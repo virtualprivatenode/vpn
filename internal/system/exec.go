@@ -23,17 +23,9 @@ func Run(name string, args ...string) error {
 	return nil
 }
 
-// requireRoot guards every privileged wrapper below. These
-// wrappers run commands DIRECTLY, with the privilege the process
-// already has — there is no sudo on this box to borrow (the
-// admin user has no sudo rights at all). Two process shapes are
-// allowed to call them: `sudo vpn install` (root by dispatch)
-// and `vpn helperd` (root via its systemd unit). Any other
-// caller is a programming error: an unprivileged code path that
-// should have gone through the helper client instead. Failing
-// loudly here — instead of quietly prefixing sudo and hoping —
-// is deliberate: it makes "no generic root escape from the TUI"
-// a property the binary enforces, not a convention.
+// requireRoot checks the process's effective UID; it never elevates privileges.
+// Root installer, helper and credential-staging commands can use these wrappers.
+// Unprivileged callers must use the helper's fixed operations for root work.
 func requireRoot(name string) error {
 	if os.Geteuid() == 0 {
 		return nil
@@ -44,18 +36,15 @@ func requireRoot(name string) error {
 			"directly — this is a bug worth reporting", name)
 }
 
-// SudoRun executes a command that needs root. The name is
-// historical (kept so 100+ call sites read unchanged): it no
-// longer ever invokes sudo — it requires the process itself to
-// be root and refuses otherwise.
-func SudoRun(name string, args ...string) error {
+// RunRoot requires the process to be root, then executes the command directly.
+func RunRoot(name string, args ...string) error {
 	if err := requireRoot(name); err != nil {
 		return err
 	}
 	return Run(name, args...)
 }
 
-// RunOutput executes a command and returns stdout as a string.
+// RunOutput returns trimmed stdout on success and discards output on error.
 func RunOutput(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Stderr = nil
@@ -66,17 +55,20 @@ func RunOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunOutput executes a root-requiring command and returns
-// stdout.
-func SudoRunOutput(name string, args ...string) (string, error) {
+// RunRootOutput requires root and returns trimmed stdout on success.
+// Output is discarded on error.
+func RunRootOutput(name string, args ...string) (string, error) {
 	if err := requireRoot(name); err != nil {
 		return "", err
 	}
 	return RunOutput(name, args...)
 }
 
-// RunContext executes a command with a timeout.
-func RunContext(timeout time.Duration, name string, args ...string) (string, error) {
+// RunOutputWithTimeout returns trimmed stdout on success using its own timeout;
+// it does not accept a caller context. Output is discarded on error.
+// Expiry interrupts the command, but descendant-held output pipes can delay
+// return because no WaitDelay is set.
+func RunOutputWithTimeout(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -88,13 +80,13 @@ func RunContext(timeout time.Duration, name string, args ...string) (string, err
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunContext executes a root-requiring command with a
-// timeout.
-func SudoRunContext(timeout time.Duration, name string, args ...string) (string, error) {
+// RunRootOutputWithTimeout requires root and uses RunOutputWithTimeout's
+// output and timeout behavior, including its output-pipe wait limitation.
+func RunRootOutputWithTimeout(timeout time.Duration, name string, args ...string) (string, error) {
 	if err := requireRoot(name); err != nil {
 		return "", err
 	}
-	return RunContext(timeout, name, args...)
+	return RunOutputWithTimeout(timeout, name, args...)
 }
 
 // RunCombinedOutput executes a command and returns combined stdout+stderr.
@@ -108,9 +100,9 @@ func RunCombinedOutput(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// SudoRunCombinedOutput executes a root-requiring command and
-// returns combined stdout+stderr.
-func SudoRunCombinedOutput(name string, args ...string) (string, error) {
+// RunRootCombinedOutput requires root and returns combined stdout and stderr,
+// trimmed on success and untrimmed on command failure.
+func RunRootCombinedOutput(name string, args ...string) (string, error) {
 	if err := requireRoot(name); err != nil {
 		return "", err
 	}
@@ -125,22 +117,21 @@ func RunSilent(name string, args ...string) error {
 	return cmd.Run()
 }
 
-// SudoRunSilent executes a root-requiring command and discards
-// all output.
-func SudoRunSilent(name string, args ...string) error {
+// RunRootSilent requires root and executes a command, discarding all output.
+func RunRootSilent(name string, args ...string) error {
 	if err := requireRoot(name); err != nil {
 		return err
 	}
 	return RunSilent(name, args...)
 }
 
-// SudoWriteFile atomically writes content to a root-owned path
-// (directly as root, via sudo otherwise):
-// stages in a dest-dir temp (install -m), then rename(2) onto the path, so the
-// canonical path only ever holds the final mode and a crash never leaves it
-// partial or world-readable. os.CreateTemp's O_EXCL guards the staging file
-// against symlink attacks. Write failures are logged centrally for support.
-func SudoWriteFile(path string, content []byte, perm os.FileMode) error {
+// WriteFileRoot creates a private, exclusive input temporary file, then requires
+// root to install its content and mode at a fixed .<base>.tmp destination and
+// move that file onto path. Callers must ensure the destination is suitable.
+// The destination staging name is not exclusive, close errors are ignored and
+// files are not fsynced; this is not a general crash-safe replacement primitive.
+// Install and move failures are logged centrally.
+func WriteFileRoot(path string, content []byte, perm os.FileMode) error {
 	tmpFile, err := os.CreateTemp("", "vpn-write-")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -155,31 +146,29 @@ func SudoWriteFile(path string, content []byte, perm os.FileMode) error {
 	tmpFile.Close()
 
 	tmpDest := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
-	if err := SudoRun("install", "-m", fmt.Sprintf("%04o", perm),
+	if err := RunRoot("install", "-m", fmt.Sprintf("%04o", perm),
 		tmpPath, tmpDest); err != nil {
-		SudoRunSilent("rm", "-f", tmpDest)
+		RunRootSilent("rm", "-f", tmpDest)
 		logger.System("write %s: install: %v", path, err)
 		return err
 	}
-	if err := SudoRun("mv", tmpDest, path); err != nil {
-		SudoRunSilent("rm", "-f", tmpDest)
+	if err := RunRoot("mv", tmpDest, path); err != nil {
+		RunRootSilent("rm", "-f", tmpDest)
 		logger.System("write %s: mv: %v", path, err)
 		return err
 	}
 	return nil
 }
 
-// Download fetches a URL to a local path.
-// Uses torsocks if available, but does not require it.
-// Used only for downloads before Tor is installed (apt keys, etc.).
+// Download fetches a URL to a local path using torsocks if available.
+// It does not require Tor.
 func Download(url, dest string) error {
 	return doDownload(url, dest, false)
 }
 
-// DownloadRequireTor fetches a URL and fails if torsocks is not available.
-// Retries up to 3 times to handle intermittent Tor DNS resolution failures
-// (each attempt carries its own tool-level bounds too — see doDownload —
-// so the total is bounded either way).
+// DownloadRequireTor fetches a URL and fails if torsocks is unavailable.
+// It makes up to three attempts, with two-second gaps. Tool-specific limits
+// apply within each attempt; the wget path has no overall deadline.
 func DownloadRequireTor(url, dest string) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -194,25 +183,11 @@ func DownloadRequireTor(url, dest string) error {
 	return lastErr
 }
 
-// doDownload runs one fetch with explicit time and retry bounds.
-// The bounds exist for the helper's sake: verb-reachable
-// downloads (self-update, the Syncthing install) run
-// synchronously inside the serialized root helper, and the
-// helper's per-operation deadline bounds only its socket I/O —
-// a subprocess must bound itself. Left at their defaults the
-// tools do not: wget retries up to 20 times with a 900 second
-// read timeout, and curl has no overall cap at all once
-// connected.
-//
-//   - wget: --timeout applies per phase (DNS, connect, read),
-//     so a black-holed transfer dies within a minute instead of
-//     hanging; --tries bounds attempts while still absorbing
-//     transient failures — a single Tor exit-side resolution
-//     failure is common enough that a single-shot fetch
-//     abandons runs a retry would have saved.
-//   - curl (fallback): --connect-timeout bounds setup and
-//     --max-time caps the whole transfer, sized generously for
-//     a large release download over a slow Tor circuit.
+// doDownload runs one fetch using wget when available, otherwise curl.
+// Wget has 60-second DNS, connect and read-idle timeouts and three tries;
+// these do not bound the whole transfer. Curl has a 60-second connect timeout
+// and an 1800-second transfer limit. Helper socket deadlines do not bound
+// this synchronous subprocess work.
 func doDownload(url, dest string, requireTor bool) error {
 	wrapper := torWrapper()
 	if requireTor && wrapper == "" {
@@ -244,13 +219,10 @@ func torWrapper() string {
 	return ""
 }
 
-// SudoReadFile reads a root-readable file. It preserves
-// os.IsNotExist in the error for callers that treat a missing
-// file as empty. Like every wrapper above, it requires the
-// process to already be root: the unprivileged read path for
-// privileged facts is the staging board (/var/lib/vpn/state),
-// not a privileged copy staged on demand.
-func SudoReadFile(path string) ([]byte, error) {
+// ReadFileRoot requires the process to be root and returns os.ReadFile's result,
+// preserving errors for os.IsNotExist checks. Ordinary unprivileged TUI reads use
+// staged files; separate helper operations can refresh privileged evidence.
+func ReadFileRoot(path string) ([]byte, error) {
 	if os.Geteuid() == 0 {
 		return os.ReadFile(path)
 	}

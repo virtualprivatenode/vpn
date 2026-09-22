@@ -21,13 +21,13 @@ func createBitcoinDirs(username string) error {
 		{paths.BitcoinDataDir, username + ":" + username, 0750},
 	}
 	for _, d := range dirs {
-		if err := system.SudoRun("mkdir", "-p", d.path); err != nil {
+		if err := system.RunRoot("mkdir", "-p", d.path); err != nil {
 			return fmt.Errorf("mkdir %s: %w", d.path, err)
 		}
-		if err := system.SudoRun("chown", d.owner, d.path); err != nil {
+		if err := system.RunRoot("chown", d.owner, d.path); err != nil {
 			return err
 		}
-		if err := system.SudoRun("chmod",
+		if err := system.RunRoot("chmod",
 			fmt.Sprintf("%o", d.mode), d.path); err != nil {
 			return fmt.Errorf("chmod %s: %w", d.path, err)
 		}
@@ -62,7 +62,7 @@ WantedBy=multi-user.target
 
 // WriteBitcoindService installs the unit for the dedicated Bitcoin identity.
 func WriteBitcoindService() error {
-	return system.SudoWriteFile(paths.BitcoindService,
+	return system.WriteFileRoot(paths.BitcoindService,
 		[]byte(bitcoindServiceUnit(bitcoinUser)), 0644)
 }
 
@@ -70,13 +70,13 @@ func WriteBitcoindService() error {
 // identity. Restart applies the unit and configuration written by this lifecycle
 // even when Core is already running during an interrupted-install resume.
 func EnableAndRestartBitcoind(cfg *config.AppConfig) error {
-	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+	if err := system.RunRoot("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable", "bitcoind"); err != nil {
+	if err := system.RunRoot("systemctl", "enable", "bitcoind"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "restart", "bitcoind"); err != nil {
+	if err := system.RunRoot("systemctl", "restart", "bitcoind"); err != nil {
 		return err
 	}
 	profile, err := cfg.NetworkConfig()

@@ -36,7 +36,7 @@ func paymentScreen(client *screenPaymentClient) *SendScreen {
 func submitInvoice(t *testing.T, s *SendScreen, invoice string) tea.Cmd {
 	t.Helper()
 	s.sendInput.SetValue(invoice)
-	_, decode := s.submitSendPayment()
+	_, decode := s.preparePaymentConfirmation()
 	if decode == nil {
 		t.Fatalf("invoice rejected before decode: %s", s.inputError)
 	}

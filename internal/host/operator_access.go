@@ -25,7 +25,7 @@ func CreateOperatorAccess(keys []sshkeys.Key) error {
 			return fmt.Errorf("invalid confirmed SSH key: %w", err)
 		}
 	}
-	if err := ensureOperatorAccount(user.Lookup, system.SudoRun); err != nil {
+	if err := ensureOperatorAccount(user.Lookup, system.RunRoot); err != nil {
 		return err
 	}
 
@@ -41,7 +41,7 @@ func CreateOperatorAccess(keys []sshkeys.Key) error {
 	}
 
 	sshDir := paths.AdminHome + "/.ssh"
-	if err := system.SudoRun("mkdir", "-p", sshDir); err != nil {
+	if err := system.RunRoot("mkdir", "-p", sshDir); err != nil {
 		return fmt.Errorf("mkdir %s: %w", sshDir, err)
 	}
 	var b strings.Builder
@@ -49,13 +49,13 @@ func CreateOperatorAccess(keys []sshkeys.Key) error {
 		b.WriteString(key.RawLine)
 		b.WriteString("\n")
 	}
-	if err := system.SudoWriteFile(paths.AuthorizedKeysFile, []byte(b.String()), 0600); err != nil {
+	if err := system.WriteFileRoot(paths.AuthorizedKeysFile, []byte(b.String()), 0600); err != nil {
 		return fmt.Errorf("write authorized_keys: %w", err)
 	}
-	if err := system.SudoRun("chown", "-R", paths.AdminUser+":"+paths.AdminUser, sshDir); err != nil {
+	if err := system.RunRoot("chown", "-R", paths.AdminUser+":"+paths.AdminUser, sshDir); err != nil {
 		return err
 	}
-	if err := system.SudoRun("chmod", "700", sshDir); err != nil {
+	if err := system.RunRoot("chmod", "700", sshDir); err != nil {
 		return err
 	}
 	logger.Install("admin access: %d key(s) written for %s", len(keys), paths.AdminUser)
@@ -90,17 +90,17 @@ fi
 # Source .bashrc after the TUI exits (cli wrappers live there)
 [ -f ~/.bashrc ] && source ~/.bashrc
 `
-	if err := system.SudoWriteFile(paths.AdminBashProfile, []byte(profile), 0644); err != nil {
+	if err := system.WriteFileRoot(paths.AdminBashProfile, []byte(profile), 0644); err != nil {
 		return fmt.Errorf("write .bash_profile: %w", err)
 	}
-	return system.SudoRun("chown", paths.AdminUser+":"+paths.AdminUser, paths.AdminBashProfile)
+	return system.RunRoot("chown", paths.AdminUser+":"+paths.AdminUser, paths.AdminBashProfile)
 }
 
 // SetOperatorLogOwnership gives the operator its application log. System
 // configuration and its parent remain root-owned and are never made writable.
 func SetOperatorLogOwnership() error {
 	owner := paths.AdminUser + ":" + paths.AdminUser
-	if err := system.SudoRun("chown", owner, paths.LogFile); err != nil {
+	if err := system.RunRoot("chown", owner, paths.LogFile); err != nil {
 		return fmt.Errorf("chown %s to %s: %w", paths.LogFile, owner, err)
 	}
 	return nil

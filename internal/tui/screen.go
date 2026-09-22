@@ -57,7 +57,7 @@ type ScreenContext struct {
 	ServiceControls     serviceControls
 	PackageUpdates      packageUpdates
 	Reboots             reboots
-	SSHVerification     sshVerificationReader
+	SSHVerification     sshLoginVerifier
 	ConnectionInfo      connectionInfoReader
 	Fees                feeReader
 	Syncthing           *app.Syncthing

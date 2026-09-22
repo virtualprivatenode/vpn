@@ -26,7 +26,7 @@ func (f *sshAuthFake) PasswordAuth() (bool, error) {
 	}
 	return f.enabled, f.err
 }
-func (f *sshAuthFake) SetPasswordAuth(disabled bool) error { return f.err }
+func (f *sshAuthFake) SetPasswordAuthDisabled(disabled bool) error { return f.err }
 func accessFixture(t *testing.T) (*SSHAccess, string, string) {
 	t.Helper()
 	key := func(seed byte) string {

@@ -27,8 +27,8 @@ import (
 //
 // The helper serializes execution: while it runs one operation,
 // a second connection waits its turn in the kernel's queue.
-// Deadlines are enforced on the root side per operation; the
-// client just reads until the connection ends.
+// Root-side deadlines bound socket I/O, not synchronous handler completion.
+// Caller cancellation stops local I/O; accepted mutations can continue.
 
 const dialTimeout = 5 * time.Second
 

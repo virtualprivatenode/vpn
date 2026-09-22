@@ -502,8 +502,9 @@ func (c *Client) ConnectPeer(pubkey, host string) error {
 	return nil
 }
 
-// WaitForPeer polls ListPeers until the given pubkey appears or
-// timeout is reached. Returns nil if peer connected, error if timeout.
+// WaitForPeer polls ListPeers until the pubkey appears. The timeout limits
+// starting new polls, not lock waits or an in-flight RPC. The last poll can
+// succeed after the interval, so this is not a total wall-clock bound.
 func (c *Client) WaitForPeer(pubkey string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -693,9 +694,8 @@ const (
 	rpcErrCredential
 )
 
-// classifyRPCError sorts an RPC error into the classes above.
-// Matching on error text is unavoidable — grpc flattens error
-// chains into strings. Pure — unit-tested.
+// classifyRPCError uses text heuristics to choose the current reconnect policy.
+// This is a local policy choice; gRPC also exposes typed status codes.
 func classifyRPCError(errStr string) rpcErrClass {
 	if strings.Contains(errStr, "DeadlineExceeded") ||
 		strings.Contains(errStr, "context deadline") {

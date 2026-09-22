@@ -2,15 +2,13 @@
 
 // Package lndrpc provides a gRPC client for LND.
 //
-// The client reads the TLS certificate and admin macaroon from
-// the staging board — root-staged copies the admin user reads
-// directly, no privileged operation on the read path — and
-// holds the macaroon in memory for the duration of the process.
-// The macaroon is injected into every gRPC call as metadata.
+// Ordinary credential reads use root-staged files readable by the admin user.
+// Initialization and reconnect repair may ask the helper to refresh those files.
+// The client holds the macaroon in memory and injects it into authenticated RPCs;
+// reconnect can replace the loaded credentials.
 //
-// Connection uses TLS to the loopback address. The macaroon
-// never crosses the network. When the TUI process exits, the
-// macaroon is gone from memory.
+// Connections use TLS to the loopback address. Close shuts down the current
+// transport; it does not provide secure credential erasure.
 //
 // Read queries and fund-moving RPCs share this one client;
 // every fund-moving call sits behind an explicit confirmation
@@ -208,7 +206,8 @@ func (c *Client) ReconnectContext(ctx context.Context) {
 	}
 }
 
-// Close shuts down the gRPC connection.
+// Close shuts down the current gRPC transport. It does not cancel or retire
+// queued background reconnects, which may establish a later connection.
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

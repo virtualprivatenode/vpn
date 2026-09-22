@@ -76,7 +76,7 @@ func extractAndInstallSyncthing(version, workDir string) error {
 	src := filepath.Join(workDir,
 		fmt.Sprintf("syncthing-linux-amd64-v%s", version),
 		"syncthing")
-	return system.SudoRun("install", "-m", "0755",
+	return system.RunRoot("install", "-m", "0755",
 		"-o", "root", "-g", "root",
 		src, "/usr/local/bin/")
 }

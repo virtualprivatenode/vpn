@@ -35,7 +35,7 @@ func ApplySSHHardening(passwordAuth string) error {
 	}
 	return applySSHHardening(passwordAuth, sshdOps{
 		read:  func() ([]byte, error) { return os.ReadFile(paths.SSHDDropIn) },
-		write: func(b []byte) error { return system.SudoWriteFile(paths.SSHDDropIn, b, 0644) },
+		write: func(b []byte) error { return system.WriteFileRoot(paths.SSHDDropIn, b, 0644) },
 		remove: func() error {
 			err := os.Remove(paths.SSHDDropIn)
 			if os.IsNotExist(err) {
@@ -43,7 +43,7 @@ func ApplySSHHardening(passwordAuth string) error {
 			}
 			return err
 		},
-		validate: func() (string, error) { return system.SudoRunCombinedOutput("sshd", "-t") },
+		validate: func() (string, error) { return system.RunRootCombinedOutput("sshd", "-t") },
 		restart:  restartSSHD,
 	})
 }
@@ -133,7 +133,7 @@ func EffectiveSSHPasswordAuth() (bool, error) {
 	if os.Geteuid() != 0 {
 		return false, errors.New("SSH configuration requires the root helper")
 	}
-	out, err := system.SudoRunOutput("sshd", "-T", "-C", "user="+paths.AdminUser+",host=localhost,addr=127.0.0.1")
+	out, err := system.RunRootOutput("sshd", "-T", "-C", "user="+paths.AdminUser+",host=localhost,addr=127.0.0.1")
 	if err != nil {
 		return false, fmt.Errorf("query effective sshd config: %w", err)
 	}
@@ -160,8 +160,8 @@ func parsePasswordAuth(output string) (bool, error) {
 }
 
 func restartSSHD() error {
-	if err := system.SudoRun("systemctl", "restart", "sshd"); err == nil {
+	if err := system.RunRoot("systemctl", "restart", "sshd"); err == nil {
 		return nil
 	}
-	return system.SudoRun("systemctl", "restart", "ssh")
+	return system.RunRoot("systemctl", "restart", "ssh")
 }

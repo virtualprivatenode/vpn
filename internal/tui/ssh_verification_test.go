@@ -12,18 +12,18 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/app"
 )
 
-type verificationReaderStub struct {
+type loginVerifierStub struct {
 	calls int
 	next  app.SSHVerification
 }
 
-func (r *verificationReaderStub) Read() app.SSHVerification { r.calls++; return r.next }
-func (*verificationReaderStub) Close()                      {}
+func (r *loginVerifierStub) Verify() app.SSHVerification { r.calls++; return r.next }
+func (*loginVerifierStub) Close()                        {}
 
 func TestSSHVerificationTimerOrderingAndMountedView(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m, _ := statusModelFixture(t)
-		reader := &verificationReaderStub{next: app.SSHVerification{Pending: true, Address: "203.0.113.7"}}
+		reader := &loginVerifierStub{next: app.SSHVerification{Pending: true, Address: "203.0.113.7"}}
 		m.screenCtx.SSHVerification = reader
 		m.nav.SetActive(secSystem)
 		m.width, m.height = 110, 42

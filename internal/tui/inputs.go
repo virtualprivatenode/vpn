@@ -7,7 +7,9 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 )
 
-// ── Validators ───────────────────────────────────────────
+// ── Character filters ────────────────────────────────────
+// These accept incomplete input while typing. They do not establish semantic
+// validity; operation boundaries must validate the completed values.
 
 func isBolt11Char(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') ||
@@ -15,7 +17,7 @@ func isBolt11Char(ch rune) bool {
 		(ch >= 'A' && ch <= 'Z')
 }
 
-func validateBolt11(s string) error {
+func validateBolt11Chars(s string) error {
 	for _, ch := range s {
 		if !isBolt11Char(ch) {
 			return errInvalidChar{}
@@ -24,7 +26,7 @@ func validateBolt11(s string) error {
 	return nil
 }
 
-func validateHex(s string) error {
+func validateHexChars(s string) error {
 	for _, ch := range s {
 		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
 			return errInvalidChar{}
@@ -42,7 +44,7 @@ func validateHostChars(s string) error {
 	return nil
 }
 
-func validateSyncthingID(s string) error {
+func validateSyncthingIDChars(s string) error {
 	for _, ch := range s {
 		upper := ch
 		if ch >= 'a' && ch <= 'z' {
@@ -86,7 +88,7 @@ func newSendPayReqInput(network string) textinput.Model {
 	}
 	ti.CharLimit = 1500
 	ti.SetWidth(58)
-	ti.Validate = validateBolt11
+	ti.Validate = validateBolt11Chars
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()
@@ -109,7 +111,7 @@ func newChanPubkeyInput() textinput.Model {
 	ti.Placeholder = "pubkey (66 hex chars)"
 	ti.CharLimit = 66
 	ti.SetWidth(66)
-	ti.Validate = validateHex
+	ti.Validate = validateHexChars
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()
@@ -132,7 +134,7 @@ func newSyncthingIDInput() textinput.Model {
 	ti.Placeholder = "XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX"
 	ti.CharLimit = 63
 	ti.SetWidth(63)
-	ti.Validate = validateSyncthingID
+	ti.Validate = validateSyncthingIDChars
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()
@@ -147,7 +149,7 @@ func newOnChainAddrInput(network string) textinput.Model {
 	}
 	ti.CharLimit = 90
 	ti.SetWidth(62)
-	ti.Validate = validateOnChainAddr
+	ti.Validate = validateOnChainAddrChars
 	ti.Prompt = "  "
 	applyInputStyles(&ti)
 	ti.Focus()
@@ -197,7 +199,7 @@ func newUserPasswordInput() textinput.Model {
 	return ti
 }
 
-func validateOnChainAddr(s string) error {
+func validateOnChainAddrChars(s string) error {
 	for _, ch := range s {
 		if !((ch >= 'a' && ch <= 'z') ||
 			(ch >= 'A' && ch <= 'Z') ||

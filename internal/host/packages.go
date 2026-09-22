@@ -14,7 +14,7 @@ import (
 // chooses when to run it; runtime package updates first refresh package lists.
 // Both root entry points set noninteractive apt and needrestart environments.
 func UpgradePackages() error {
-	return upgradePackages(system.SudoRun)
+	return upgradePackages(system.RunRoot)
 }
 
 func upgradePackages(run func(string, ...string) error) error {
@@ -31,7 +31,7 @@ func UpdatePackages(progress func(int)) error {
 	if os.Geteuid() != 0 {
 		return errors.New("package updates require the root helper")
 	}
-	return updatePackages(system.SudoRun, system.RunContext, progress)
+	return updatePackages(system.RunRoot, system.RunOutputWithTimeout, progress)
 }
 
 func updatePackages(run func(string, ...string) error, output func(time.Duration, string, ...string) (string, error), progress func(int)) error {

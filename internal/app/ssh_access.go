@@ -15,7 +15,7 @@ type SSHKey = sshkeys.Key
 // SSHAuth is the narrow privileged boundary. Key files are edited as the operator.
 type SSHAuth interface {
 	PasswordAuth() (bool, error)
-	SetPasswordAuth(disabled bool) error
+	SetPasswordAuthDisabled(disabled bool) error
 }
 
 type SSHAccess struct {
@@ -34,7 +34,7 @@ func (helperSSHAuth) PasswordAuth() (bool, error) {
 	err := helper.Call(helper.VerbReadSSHAuth, nil, &result)
 	return result.PasswordAuthEnabled, err
 }
-func (helperSSHAuth) SetPasswordAuth(disabled bool) error {
+func (helperSSHAuth) SetPasswordAuthDisabled(disabled bool) error {
 	return helper.Call(helper.VerbRebuildSSHConfig, helper.RebuildSSHConfigParams{PasswordAuthDisabled: disabled}, nil)
 }
 
@@ -111,8 +111,8 @@ func keyWriteError(changed bool, err error) error {
 }
 
 func (s *SSHAccess) PasswordAuth() (bool, error) { return s.Auth.PasswordAuth() }
-func (s *SSHAccess) SetPasswordAuth(disabled bool) error {
-	if err := s.Auth.SetPasswordAuth(disabled); err != nil {
+func (s *SSHAccess) SetPasswordAuthDisabled(disabled bool) error {
+	if err := s.Auth.SetPasswordAuthDisabled(disabled); err != nil {
 		return fmt.Errorf("SSH password authentication was not confirmed; keep this session open and check the current setting before retrying: %w", err)
 	}
 	return nil

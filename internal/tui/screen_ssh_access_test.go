@@ -19,7 +19,7 @@ type screenSSHAuth struct {
 }
 
 func (f *screenSSHAuth) PasswordAuth() (bool, error) { return f.enabled, f.err }
-func (f *screenSSHAuth) SetPasswordAuth(disabled bool) error {
+func (f *screenSSHAuth) SetPasswordAuthDisabled(disabled bool) error {
 	f.desired = append(f.desired, disabled)
 	return f.err
 }
@@ -35,38 +35,51 @@ const screenKeyB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgIC
 
 func TestSSHPasswordConfirmationFreezesIntentAndRejectsOldResults(t *testing.T) {
 	theme.Init(true)
-	ctx, auth := sshScreenContext(t)
-	s := NewSSHPasswordAuthScreen(ctx)
-	s.viewBtnIdx = 1
-	s.HandleKey("enter", tea.KeyPressMsg{})
-	before := s.View(67, 30)
-	if s.step != sshPwAuthStepConfirm || !strings.Contains(before, "Disable password auth?") {
-		t.Fatal("missing disable review")
-	}
-	ctx.State.SSHPasswordAuthDisabled = true
-	if s.View(67, 30) != before {
-		t.Fatal("late observation changed confirmed intent")
-	}
-	s.confirmIdx = 1
-	_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
-	if cmd == nil || !sshAccessBusy(s) {
-		t.Fatal("not submitted")
-	}
-	if _, again := s.HandleKey("enter", tea.KeyPressMsg{}); again != nil {
-		t.Fatal("double submit")
-	}
-	s.HandleMsg(sshPwAuthDoneMsg{owner: s, attempt: s.attempt - 1})
-	if !sshAccessBusy(s) {
-		t.Fatal("old result completed operation")
-	}
-	result := cmd()
-	s.HandleMsg(result)
-	if len(auth.desired) != 1 || !auth.desired[0] || s.step != sshPwAuthStepResult || !ctx.State.SSHPasswordAuthKnown || !ctx.State.SSHPasswordAuthDisabled {
-		t.Fatal("request/result did not match confirmed intent")
-	}
-	s.HandleMsg(sshPwAuthDoneMsg{owner: s, attempt: s.attempt, err: errors.New("late duplicate")})
-	if s.resultErr != "" {
-		t.Fatal("duplicate completion changed result")
+	for _, tc := range []struct {
+		name                          string
+		initialDisabled, wantDisabled bool
+		heading                       string
+	}{
+		{"disable", false, true, "Disable password auth?"},
+		{"enable", true, false, "Enable password auth?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, auth := sshScreenContext(t)
+			ctx.State.SSHPasswordAuthDisabled = tc.initialDisabled
+			auth.enabled = !tc.initialDisabled
+			s := NewSSHPasswordAuthScreen(ctx)
+			s.viewBtnIdx = 1
+			s.HandleKey("enter", tea.KeyPressMsg{})
+			before := s.View(67, 30)
+			if s.step != sshPwAuthStepConfirm || !strings.Contains(before, tc.heading) {
+				t.Fatal("missing intended review")
+			}
+			ctx.State.SSHPasswordAuthDisabled = tc.wantDisabled
+			if s.View(67, 30) != before {
+				t.Fatal("late observation changed confirmed intent")
+			}
+			s.confirmIdx = 1
+			_, cmd := s.HandleKey("enter", tea.KeyPressMsg{})
+			if cmd == nil || !sshAccessBusy(s) {
+				t.Fatal("not submitted")
+			}
+			if _, again := s.HandleKey("enter", tea.KeyPressMsg{}); again != nil {
+				t.Fatal("double submit")
+			}
+			s.HandleMsg(sshPwAuthDoneMsg{owner: s, attempt: s.attempt - 1})
+			if !sshAccessBusy(s) {
+				t.Fatal("old result completed operation")
+			}
+			result := cmd()
+			s.HandleMsg(result)
+			if len(auth.desired) != 1 || auth.desired[0] != tc.wantDisabled || s.step != sshPwAuthStepResult || !ctx.State.SSHPasswordAuthKnown || ctx.State.SSHPasswordAuthDisabled != tc.wantDisabled {
+				t.Fatal("request/result did not match confirmed intent")
+			}
+			s.HandleMsg(sshPwAuthDoneMsg{owner: s, attempt: s.attempt, err: errors.New("late duplicate")})
+			if s.resultErr != "" {
+				t.Fatal("duplicate completion changed result")
+			}
+		})
 	}
 }
 

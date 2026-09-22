@@ -46,7 +46,7 @@ func InstallLNDBinaries(version, workDir string) error {
 		fmt.Sprintf("lnd-linux-amd64-v%s", version))
 	for _, bin := range []string{"lnd", "lncli"} {
 		src := filepath.Join(extractDir, bin)
-		if err := system.SudoRun("install", "-m", "0755",
+		if err := system.RunRoot("install", "-m", "0755",
 			"-o", "root", "-g", "root",
 			src, "/usr/local/bin/"); err != nil {
 			return err

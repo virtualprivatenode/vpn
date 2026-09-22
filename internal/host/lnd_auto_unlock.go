@@ -942,13 +942,13 @@ func productionAutoUnlockOps() (autoUnlockOps, error) {
 		removeVerifyDrop: fs.removeVerifyDrop,
 		validateUnit:     validateInstalledLNDUnit,
 		daemonReload: func() error {
-			return system.SudoRun("systemctl", "daemon-reload")
+			return system.RunRoot("systemctl", "daemon-reload")
 		},
 		startLND: func() error {
-			return system.SudoRun("systemctl", "start", "lnd.service")
+			return system.RunRoot("systemctl", "start", "lnd.service")
 		},
 		stopLND: func() error {
-			return system.SudoRun("systemctl", "stop", "lnd.service")
+			return system.RunRoot("systemctl", "stop", "lnd.service")
 		},
 		unitStatus:  readLNDUnitStatus,
 		processArgs: readProcessArgs,
@@ -1228,7 +1228,7 @@ func validateOptionalDropInDir() error {
 }
 
 func validateInstalledLNDUnit() error {
-	out, err := system.SudoRunCombinedOutput(
+	out, err := system.RunRootCombinedOutput(
 		"systemd-analyze", "verify", paths.LNDService)
 	if err != nil {
 		return fmt.Errorf("systemd rejected LND unit: %s: %w",
@@ -1247,7 +1247,7 @@ func readLNDUnitStatus() (lndUnitStatus, error) {
 	for _, property := range properties {
 		args = append(args, "--property="+property)
 	}
-	out, err := system.SudoRunOutput("systemctl", args...)
+	out, err := system.RunRootOutput("systemctl", args...)
 	if err != nil {
 		return lndUnitStatus{}, err
 	}

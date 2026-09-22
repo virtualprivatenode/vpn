@@ -18,9 +18,9 @@ type SSHVerification struct {
 	Err     error
 }
 
-// SSHVerificationReader owns bounded helper waits and joins them on terminal
-// exit. Cancellation abandons the local wait, not accepted root work.
-type SSHVerificationReader struct {
+// SSHLoginVerifier asks the helper to verify first-login evidence and may clear
+// the pending marker. Close cancels and joins local waits, not accepted root work.
+type SSHLoginVerifier struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	mu      sync.Mutex
@@ -29,9 +29,9 @@ type SSHVerificationReader struct {
 	address func(context.Context) (string, error)
 }
 
-func NewSSHVerificationReader() *SSHVerificationReader {
+func NewSSHLoginVerifier() *SSHLoginVerifier {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &SSHVerificationReader{ctx: ctx, cancel: cancel, address: system.ReadPublicIPv4,
+	return &SSHLoginVerifier{ctx: ctx, cancel: cancel, address: system.ReadPublicIPv4,
 		call: func(ctx context.Context, verb string, params, result any) error {
 			session, err := helper.StartContext(ctx, verb, params)
 			if err != nil {
@@ -42,14 +42,16 @@ func NewSSHVerificationReader() *SSHVerificationReader {
 	}
 }
 
-func (r *SSHVerificationReader) Close() {
+func (r *SSHLoginVerifier) Close() {
 	r.mu.Lock()
 	r.cancel()
 	r.mu.Unlock()
 	r.calls.Wait()
 }
 
-func (r *SSHVerificationReader) Read() SSHVerification {
+// Verify may clear the root-owned pending marker when sshd evidence verifies
+// the login. An already-clear marker also succeeds. Address is only a hint.
+func (r *SSHLoginVerifier) Verify() SSHVerification {
 	r.mu.Lock()
 	if err := r.ctx.Err(); err != nil {
 		r.mu.Unlock()
