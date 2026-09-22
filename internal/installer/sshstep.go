@@ -21,7 +21,6 @@ package installer
 
 import (
 	"github.com/virtualprivatenode/vpn/internal/host"
-
 	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
@@ -29,7 +28,7 @@ import (
 func installSSHHardening() error {
 	// 1. Observe — seconds before the write, same process.
 	passwordAuth := ""
-	obs, err := ObserveSSHState()
+	obs, err := host.ObserveInitialSSHState()
 	if err != nil {
 		logger.Install(
 			"WARNING: sshd observation failed at the SSH step "+

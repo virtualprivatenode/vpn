@@ -26,7 +26,7 @@ package installer
 //   - the sudoers scan reads /etc/sudoers.d directly — root needs
 //     no `sudo find` workaround, and the failed-as-skipped
 //     plumbing that coupled it to the deleted sudo check is gone;
-//   - NEW: read-only sshd port/auth observation (observe.go),
+//   - Read-only initial SSH port/auth observation in host:
 //     REFUSE on failure — the firewall rules and the drop-in seed
 //     derive from it, and there is deliberately no guessing path.
 
@@ -41,6 +41,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/system"
@@ -69,7 +70,7 @@ const (
 // observation for the wizard copy, the firewall rules, and the
 // config seed — observed once, consumed everywhere (the SSH
 // hardening step re-observes seconds before its own write).
-func RunPreflight() (SSHObservation, error) {
+func RunPreflight() (host.SSHObservation, error) {
 	results, obs := runPreflightChecks()
 
 	failed := 0
@@ -105,7 +106,7 @@ func RunPreflight() (SSHObservation, error) {
 // runPreflightChecks executes the checks in order. All checks run
 // unconditionally — root dispatch removed the sudo dependency that
 // used to force failed-as-skipped coupling between checks.
-func runPreflightChecks() ([]PreflightResult, SSHObservation) {
+func runPreflightChecks() ([]PreflightResult, host.SSHObservation) {
 	results := []PreflightResult{
 		{checkNameDebian, checkDebian13()},
 		{checkNameArch, checkDebianArchitecture()},
@@ -113,7 +114,7 @@ func runPreflightChecks() ([]PreflightResult, SSHObservation) {
 		{checkNameDpkg, checkDpkgAudit()},
 		{checkNameUfw, checkUfwInstallable()},
 	}
-	obs, obsErr := ObserveSSHState()
+	obs, obsErr := host.ObserveInitialSSHState()
 	results = append(results,
 		PreflightResult{checkNameSSHState, obsErr})
 	return results, obs

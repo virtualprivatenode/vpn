@@ -85,24 +85,6 @@ func TestDedupeKeys(t *testing.T) {
 	}
 }
 
-// ── SortKeySources ───────────────────────────────────────
-
-func TestSortKeySourcesRootFirst(t *testing.T) {
-	in := []KeySource{
-		{User: "debian"}, {User: "admin"}, {User: "root"},
-	}
-	out := SortKeySources(in)
-	if out[0].User != "root" || out[1].User != "admin" ||
-		out[2].User != "debian" {
-		t.Errorf("order: got %v", []string{
-			out[0].User, out[1].User, out[2].User})
-	}
-	// Input untouched.
-	if in[0].User != "debian" {
-		t.Error("input mutated")
-	}
-}
-
 // ── generateAdminPassword ────────────────────────────────
 
 func TestGenerateAdminPassword(t *testing.T) {

@@ -1,6 +1,4 @@
-// internal/installer/observe_test.go
-
-package installer
+package host
 
 import (
 	"strings"
@@ -46,7 +44,7 @@ func TestParseSSHObservationNonstandardPort(t *testing.T) {
 }
 
 // A ListenAddress with an explicit port makes sshd listen there
-// even when it differs from the Port directive — the union is
+// even when it differs from the Port directive: the union is
 // what the firewall must allow (the lockout direction).
 func TestParseSSHObservationPortUnion(t *testing.T) {
 	out := "port 22\n" +
@@ -63,13 +61,13 @@ func TestParseSSHObservationPortUnion(t *testing.T) {
 }
 
 func TestParseSSHObservationMultiplePortLines(t *testing.T) {
-	out := "port 22\nport 2222\npasswordauthentication yes\n"
+	out := "port 2222\nport 22022\npasswordauthentication yes\n"
 	obs, err := parseSSHObservation(out)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(obs.Ports) != 2 {
-		t.Errorf("ports: got %v, want two ports", obs.Ports)
+	if len(obs.Ports) != 2 || obs.Ports[0] != 2222 || obs.Ports[1] != 22022 {
+		t.Errorf("ports: got %v, want [2222 22022]", obs.Ports)
 	}
 }
 

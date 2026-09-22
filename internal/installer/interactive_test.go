@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
@@ -23,7 +24,7 @@ func interactiveFixture(t *testing.T, steps []InstallStep, complete func() error
 	if err != nil {
 		t.Fatal(err)
 	}
-	dec := &InstallDecisions{Obs: SSHObservation{PasswordAuth: true}}
+	dec := &InstallDecisions{Obs: host.SSHObservation{PasswordAuth: true}}
 	s := newInstallSession(runner, dec, func(int) error { return errors.New("unexpected cache write") }, complete)
 	pw, err := loginpassword.New("exact-test-password")
 	if err != nil {
@@ -307,8 +308,8 @@ func TestRootRunInstallExitRetainsRunLock(t *testing.T) {
 	if err := ledger.save(f.fs.ledger); err != nil {
 		t.Fatal(err)
 	}
-	installStartupFixture(t, f, func() (SSHObservation, error) {
-		return SSHObservation{PasswordAuth: true}, nil
+	installStartupFixture(t, f, func() (host.SSHObservation, error) {
+		return host.SSHObservation{PasswordAuth: true}, nil
 	})
 	deps := newInstallStartupDependencies()
 	password, err := loginpassword.New("exact-test-password")

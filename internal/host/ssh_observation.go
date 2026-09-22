@@ -1,38 +1,7 @@
-// internal/installer/observe.go
+package host
 
-package installer
-
-// Read-only sshd observation for the install path (ruling
-// xvi(b)). One privileged query answers the two questions the
-// installer must not guess at:
-//
-//   - which port(s) sshd actually listens on — the firewall
-//     allow-rules derive from this. Guessing 22 was the one
-//     real lockout hazard in the old script order: enabling
-//     deny-all with only 22 open while sshd listens elsewhere
-//     is a DELAYED silent lockout (the current connection
-//     survives; the next one is refused).
-//   - whether password authentication is effectively enabled —
-//     the fresh preflight decision input and the explicit
-//     PasswordAuthentication directive in the install drop-in
-//     (ruling xvi(a): explicit-from-observed).
-//
-// The observation runs in preflight and REFUSES the install on
-// failure — a running-sshd box always parses, so failure means
-// a broken environment, and there is deliberately no guessing
-// path (xvi(b)). The SSH hardening step re-observes seconds
-// before its write; only THAT later observation may degrade
-// (to directive omission, xvi(a)) because by then refusing
-// would strand a half-installed box.
-//
-// The query simulates a connection as root — the admin user
-// does not exist yet at observation time (the identity step
-// creates it later in this same install), and the question
-// asked here is the box-global one ("is password auth on,
-// today, before we changed anything"), not the per-user
-// question host.EffectiveSSHPasswordAuth answers after
-// install. Same [LIVE]-verified `sshd -T -C` invocation shape
-// as commit 2 (openssh-server 1:10.0p1-7+deb13u4).
+// Initial SSH observation uses root's connection context before the operator
+// exists. Runtime operator password-auth observation remains a separate query.
 
 import (
 	"errors"
@@ -44,8 +13,7 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
-// SSHObservation is the read-only snapshot of the running
-// sshd's effective configuration taken before any mutation.
+// SSHObservation is an effective configuration snapshot for initial SSH setup.
 type SSHObservation struct {
 	// Ports are the listening ports, deduplicated, sorted.
 	Ports []int
@@ -54,11 +22,10 @@ type SSHObservation struct {
 	PasswordAuth bool
 }
 
-// ObserveSSHState queries the running sshd's effective
-// configuration. Callers on the preflight path treat an error
-// as refuse-to-install; the SSH step treats it as
-// omit-directive-and-warn (ruling xvi(a)/(b) asymmetry).
-func ObserveSSHState() (SSHObservation, error) {
+// ObserveInitialSSHState queries effective SSH configuration for initial setup.
+// Preflight and firewall callers refuse on error. Installer's later SSH step
+// preserves its separate policy to warn and omit the password-auth directive.
+func ObserveInitialSSHState() (SSHObservation, error) {
 	out, err := system.SudoRunOutput("sshd", "-T",
 		"-C", "user=root,host=localhost,addr=127.0.0.1")
 	if err != nil {
@@ -70,13 +37,13 @@ func ObserveSSHState() (SSHObservation, error) {
 
 // parseSSHObservation extracts ports and password-auth state
 // from sshd -T output (one "keyword value..." pair per line,
-// keywords lowercased by sshd). Pure — unit-tested.
+// keywords lowercased by sshd).
 //
 // Ports are the UNION of every `port` line and every
 // `listenaddress host:port` line: a ListenAddress with an
 // explicit port makes sshd listen there even when it differs
 // from the Port directive. The union direction is fail-safe
-// for a firewall allow-list — allowing a port sshd does not
+// for a firewall allow-list: allowing a port sshd does not
 // listen on wastes a rule; missing one it does listen on is
 // the lockout.
 func parseSSHObservation(sshdOutput string) (SSHObservation, error) {
@@ -128,7 +95,6 @@ func parseSSHObservation(sshdOutput string) (SSHObservation, error) {
 // portFromListenAddress extracts the port from a
 // ListenAddress value as printed by sshd -T: "0.0.0.0:22",
 // "[::]:22", or an address with no port (no port to extract).
-// Pure — unit-tested.
 func portFromListenAddress(addr string) (int, bool) {
 	i := strings.LastIndex(addr, ":")
 	if i < 0 || i == len(addr)-1 {

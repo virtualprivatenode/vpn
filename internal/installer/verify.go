@@ -12,7 +12,6 @@ package installer
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/virtualprivatenode/vpn/internal/artifact"
@@ -33,15 +32,6 @@ import (
 // keys.openpgp.org. Cross-check: docs/verifying.md publishes the
 // same fingerprint used for manual release verification.
 const vpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
-
-// ── GPG setup ────────────────────────────────────────────
-
-func ensureGPG() error {
-	if _, err := exec.LookPath("gpg"); err == nil {
-		return nil
-	}
-	return system.SudoRun("apt-get", "install", "-y", "-qq", "gnupg")
-}
 
 // ── Self-update verification ────────────────────────────
 

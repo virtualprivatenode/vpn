@@ -3,7 +3,7 @@
 // Install-path Tor hard-gate (IA-2-K). Runs as its own install step
 // between "Installing Tor" and "Configuring apt for Tor", so it must
 // succeed before ANY Tor-dependent network operation: apt over the
-// socks5h proxy (ensureGPG onward) and every DownloadRequireTor site.
+// socks5h proxy (host.EnsureGPG onward) and every DownloadRequireTor site.
 //
 // Two layers:
 //

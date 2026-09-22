@@ -2,44 +2,21 @@
 
 package installer
 
-// The identity/access install step (ruling vii + the xvi
-// refinements). Replaces the retired bootstrap script's silent
-// key-guess cascade ($SUDO_USER → logname → who → /root) with an
-// interactive step: enumerate EVERY candidate authorized_keys
-// source on the box, show what was found — fingerprints and
-// comments, with provider decoy lines recognized and excluded
-// rather than copied verbatim — and let the operator confirm the
-// copy or paste a key instead. Keys that already logged into this
-// box are stronger evidence than a fresh paste, so confirmation
-// is by fingerprint, never by re-pasting (ruling xvi).
-//
-// The login password is PROMPTED and non-skippable: with password
-// auth off it is the console-recovery credential, not a network
-// credential — post-commit-7 the admin user is the box's only
-// interactive identity, and no password + broken SSH would leave
-// rescue mode as the only way in. Random generation survives only
-// as the --unattended fallback (the image path; the first-boot
-// wizard replaces it).
-//
-// This file owns enumeration (pure parts unit-tested) and the
-// step's apply function; the wizard screens that collect the
-// operator's decisions live in internal/tui/install.
+// Installer owns initial key-source inventory, confirmed decisions and generated
+// password delivery. Host owns account, authorized_keys and login-shell writes.
 
 import (
 	"crypto/rand"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/sshkeys"
-	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 // KeySource is one authorized_keys file found on the box.
@@ -186,146 +163,26 @@ type InstallDecisions struct {
 	DbCacheMB int
 	// Obs is the preflight sshd observation (wizard copy +
 	// config seed; the SSH step re-observes before writing).
-	Obs SSHObservation
+	Obs host.SSHObservation
 }
 
-// applyIdentityAccess is the identity.access step: create the
-// admin user, write the confirmed keys, set the login
-// password, and configure the SSH-login auto-launch.
-// Idempotent — safe to re-run after an interrupt (adduser is
-// guarded, writes overwrite, chpasswd resets to the same
-// password).
-//
-// What this step deliberately does NOT do: grant sudo. The
-// admin user has no sudo rights at all — privileged operations
-// go through the root helper's socket, and any sudoers rule
-// from an earlier build of this software is REMOVED here.
-// The journal-read group and the helper's units are set up by
-// their own steps (helper.enable, journal.access).
+// applyIdentityAccess coordinates access provisioning and password delivery.
+// Record successful password application before the marker and shell setup so
+// a later failure cannot obscure the credential that was already applied.
 func applyIdentityAccess(dec *InstallDecisions) error {
-	for _, key := range dec.Keys {
-		if _, err := sshkeys.Parse(key.RawLine); err != nil {
-			return fmt.Errorf("invalid confirmed SSH key: %w", err)
-		}
+	if err := host.CreateOperatorAccess(dec.Keys); err != nil {
+		return err
 	}
-	if _, err := user.Lookup(paths.AdminUser); err != nil {
-		if err := system.SudoRun("adduser",
-			"--disabled-password",
-			"--gecos", "Virtual Private Node",
-			paths.AdminUser); err != nil {
-			return fmt.Errorf("create admin user: %w", err)
-		}
-	}
-
-	// Remove any NOPASSWD grant an earlier build wrote. (No
-	// released binary shipped one under this user's name, but
-	// the removal is one idempotent call and makes the zero-
-	// sudo end state unconditional.)
-	if err := os.Remove(paths.AdminSudoers); err != nil &&
-		!os.IsNotExist(err) {
-		return fmt.Errorf(
-			"remove old sudoers rule %s: %w",
-			paths.AdminSudoers, err)
-	}
-
-	if len(dec.Keys) > 0 {
-		sshDir := paths.AdminHome + "/.ssh"
-		if err := system.SudoRun(
-			"mkdir", "-p", sshDir); err != nil {
-			return fmt.Errorf("mkdir %s: %w", sshDir, err)
-		}
-		var b strings.Builder
-		for _, k := range dec.Keys {
-			b.WriteString(k.RawLine)
-			b.WriteString("\n")
-		}
-		if err := system.SudoWriteFile(paths.AuthorizedKeysFile,
-			[]byte(b.String()), 0600); err != nil {
-			return fmt.Errorf("write authorized_keys: %w", err)
-		}
-		owner := paths.AdminUser + ":" + paths.AdminUser
-		if err := system.SudoRun(
-			"chown", "-R", owner, sshDir); err != nil {
-			return err
-		}
-		if err := system.SudoRun(
-			"chmod", "700", sshDir); err != nil {
-			return err
-		}
-		logger.Install("admin access: %d key(s) written for %s",
-			len(dec.Keys), paths.AdminUser)
-	} else {
-		logger.Install(
-			"admin access: no SSH keys configured (password login)")
-	}
-
 	if err := host.SetLoginPassword(dec.Password); err != nil {
 		return fmt.Errorf("set admin password: %w", err)
 	}
 	dec.PasswordApplied = true
-
 	if dec.GeneratedPassword != "" {
-		// Unattended path: the password just applied is machine
-		// generated and will not be printed until the end of the
-		// run. Record that gap durably — if this run dies before
-		// the print, the resuming pass must know a credential is
-		// still owed (see passwordpending.go).
 		if err := markPasswordPending(); err != nil {
-			return fmt.Errorf(
-				"record password-pending marker: %w", err)
+			return fmt.Errorf("record password-pending marker: %w", err)
 		}
 	}
-
-	return writeAdminAutoLaunch()
-}
-
-// writeAdminAutoLaunch installs the .bash_profile that opens the
-// TUI on SSH login — the retired bootstrap's auto-launch,
-// verbatim in behavior: only on SSH sessions with a tty, and
-// .bashrc (where shellenv puts the cli wrappers) is sourced
-// after.
-func writeAdminAutoLaunch() error {
-	profile := `# Virtual Private Node — auto-launch
-if [ -n "$SSH_CONNECTION" ] && [ -t 0 ]; then
-    ` + paths.BinaryPath + `
-fi
-
-# Source .bashrc after the TUI exits (cli wrappers live there)
-[ -f ~/.bashrc ] && source ~/.bashrc
-`
-	if err := system.SudoWriteFile(paths.AdminBashProfile,
-		[]byte(profile), 0644); err != nil {
-		return fmt.Errorf("write .bash_profile: %w", err)
-	}
-	return system.SudoRun("chown",
-		paths.AdminUser+":"+paths.AdminUser,
-		paths.AdminBashProfile)
-}
-
-// installSelfBinary is the binary.install step: place the running
-// executable at paths.BinaryPath if it is not already running
-// from there — the auto-launch profile and the handoff both
-// depend on that path existing. A source build run as
-// `sudo ./vpn install` gets installed; a binary already at the
-// canonical path no-ops.
-func installSelfBinary() error {
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate own binary: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(self); err == nil {
-		self = resolved
-	}
-	if self == paths.BinaryPath {
-		return nil
-	}
-	if err := system.SudoRun("install", "-m", "755",
-		self, paths.BinaryPath); err != nil {
-		return fmt.Errorf("install binary: %w", err)
-	}
-	logger.Install("binary installed to %s (from %s)",
-		paths.BinaryPath, self)
-	return nil
+	return host.ConfigureOperatorAutoLaunch()
 }
 
 // generateAdminPassword returns a random alphanumeric password
@@ -354,7 +211,7 @@ func generateAdminPassword() string {
 }
 
 // SortKeySources orders sources root-first then by user name for
-// stable display. Pure — unit-tested.
+// stable display.
 func SortKeySources(sources []KeySource) []KeySource {
 	out := make([]KeySource, len(sources))
 	copy(out, sources)

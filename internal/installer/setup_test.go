@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/virtualprivatenode/vpn/internal/config"
-	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/host"
 )
 
 type protectedTreeEntry struct {
@@ -80,7 +80,7 @@ func snapshotProtectedTree(t *testing.T, root string) []byte {
 
 func installStartupFixture(
 	t *testing.T, f *lifecycleFixture,
-	preflight func() (SSHObservation, error),
+	preflight func() (host.SSHObservation, error),
 ) (*int, *int) {
 	t.Helper()
 	preflightCalls := 0
@@ -91,7 +91,7 @@ func installStartupFixture(
 	deps.installLock = filepath.Join(deps.runtimeDir, "install.lock")
 	deps.fs = f.fs
 	deps.lookup = f.lookup
-	deps.runPreflight = func() (SSHObservation, error) {
+	deps.runPreflight = func() (host.SSHObservation, error) {
 		preflightCalls++
 		return preflight()
 	}
@@ -165,8 +165,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (SSHObservation, error) {
-				return SSHObservation{}, errors.New("unexpected preflight")
+			t, f, func() (host.SSHObservation, error) {
+				return host.SSHObservation{}, errors.New("unexpected preflight")
 			})
 
 		output, err := captureRunInstallOutput(t, func() error {
@@ -225,8 +225,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 			root := filepath.Dir(f.fs.varLibVPN)
 			before := snapshotProtectedTree(t, root)
 			preflightCalls, initializeCalls := installStartupFixture(
-				t, f, func() (SSHObservation, error) {
-					return SSHObservation{}, errors.New("unexpected preflight")
+				t, f, func() (host.SSHObservation, error) {
+					return host.SSHObservation{}, errors.New("unexpected preflight")
 				})
 
 			if err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t)); err == nil {
@@ -248,8 +248,8 @@ func TestRootRunInstallEarlyExitsDoNotMutateProtectedState(t *testing.T) {
 		root := filepath.Dir(f.fs.varLibVPN)
 		before := snapshotProtectedTree(t, root)
 		preflightCalls, initializeCalls := installStartupFixture(
-			t, f, func() (SSHObservation, error) {
-				return SSHObservation{}, checkArchitecture("arm64")
+			t, f, func() (host.SSHObservation, error) {
+				return host.SSHObservation{}, checkArchitecture("arm64")
 			})
 
 		err := RunInstall(InstallOptions{}, unexpectedInstallFrontend(t))
@@ -283,70 +283,6 @@ func TestBaseInstallStepsMatchLedgerSchema(t *testing.T) {
 			t.Fatalf("bake step %d=%q schema=%q", i+1,
 				bake[i].Key, bakeInstallStepKeys[i])
 		}
-	}
-}
-
-func TestSetAndGetVersion(t *testing.T) {
-	original := appVersion
-	defer func() { appVersion = original }()
-
-	SetVersion("1.2.3")
-	if GetVersion() != "1.2.3" {
-		t.Errorf("GetVersion: got %q, want %q", GetVersion(), "1.2.3")
-	}
-}
-
-func TestReadVersionCacheEmpty(t *testing.T) {
-	// On a dev machine, cache file shouldn't exist at the production path
-	cached := readVersionCache()
-	// Just verify it doesn't panic — it may or may not have a value
-	_ = cached
-}
-
-func TestWriteAndReadVersionCache(t *testing.T) {
-	// Save original values
-	origDir := paths.VersionCacheDir
-	origFile := paths.VersionCacheFile
-
-	// We can't override const values, so we test the logic directly
-	tmpDir := t.TempDir()
-	tmpFile := tmpDir + "/latest-version"
-
-	// Write directly
-	os.MkdirAll(tmpDir, 0750)
-	os.WriteFile(tmpFile, []byte("1.2.3"), 0600)
-
-	data, err := os.ReadFile(tmpFile)
-	if err != nil {
-		t.Fatalf("read cache: %v", err)
-	}
-	if string(data) != "1.2.3" {
-		t.Errorf("cached version: got %q, want 1.2.3", string(data))
-	}
-
-	// Verify path constants are set
-	if origDir == "" {
-		t.Error("VersionCacheDir is empty")
-	}
-	if origFile == "" {
-		t.Error("VersionCacheFile is empty")
-	}
-}
-
-func TestVersionCacheDirConsistency(t *testing.T) {
-	if !strings.HasSuffix(paths.VersionCacheDir, ".cache/vpn") {
-		t.Errorf("VersionCacheDir unexpected suffix: %s",
-			paths.VersionCacheDir)
-	}
-}
-
-func TestVersionCacheFileConsistency(t *testing.T) {
-	if !strings.HasPrefix(paths.VersionCacheFile, paths.VersionCacheDir) {
-		t.Error("VersionCacheFile should be inside VersionCacheDir")
-	}
-	if !strings.HasSuffix(paths.VersionCacheFile, "latest-version") {
-		t.Errorf("VersionCacheFile unexpected suffix: %s",
-			paths.VersionCacheFile)
 	}
 }
 
