@@ -14,13 +14,14 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/p2p"
 	"github.com/virtualprivatenode/vpn/internal/paths"
+	"github.com/virtualprivatenode/vpn/internal/release"
 	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/system"
+	"github.com/virtualprivatenode/vpn/internal/update"
 )
 
 // ── The verb menu ────────────────────────────────────────
@@ -90,6 +91,7 @@ var (
 	restageFacts               = restage
 	controlNodeService         = host.ControlService
 	updatePackages             = host.UpdatePackages
+	updateSelf                 = update.Self
 	requestReboot              = host.RequestReboot
 )
 
@@ -336,19 +338,6 @@ func verbRebuildSSHConfig(_ *verbCtx, params json.RawMessage) (any, error) {
 
 // ── Streaming verbs ──────────────────────────────────────
 
-// runSteps executes installer steps sequentially, emitting one
-// progress event per completed step. The client renders these
-// in the same step widget the installer uses.
-func runSteps(ctx *verbCtx, steps []installer.InstallStep) error {
-	for i := range steps {
-		if err := steps[i].Fn(); err != nil {
-			return fmt.Errorf("%s: %v", steps[i].Name, err)
-		}
-		ctx.emitStep(i)
-	}
-	return nil
-}
-
 func verbPackageUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
 	if err := rejectParams(params); err != nil {
 		return nil, err
@@ -361,13 +350,9 @@ func verbSelfUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
 	if err := decode(params, &p); err != nil {
 		return nil, err
 	}
-	// Same-major gate, enforced HERE and not only in the
-	// client's rendering: a gate that lives only in UI copy is
-	// copy. A major release carries changes that need the
-	// operator to read its release notes first. (The strict
-	// version-shape validation lives inside SameMajor — the
-	// one choke point before the version reaches a URL.)
-	same, err := helper.SameMajor(ctx.version, p.Version)
+	// Enforce the existing version policy independently of TUI admission.
+	// SameMajor validates both strings before the target reaches a release URL.
+	same, err := release.SameMajor(ctx.version, p.Version)
 	if err != nil {
 		return nil, err
 	}
@@ -377,16 +362,13 @@ func verbSelfUpdate(ctx *verbCtx, params json.RawMessage) (any, error) {
 				"through self-update; see its release notes",
 			p.Version)
 	}
-	// Download, GPG-verify, checksum-verify, and install — all
-	// on this side of the boundary. Nothing the unprivileged
-	// user staged is trusted anywhere in this path.
-	if err := runSteps(ctx,
-		installer.SelfUpdateSteps(p.Version)); err != nil {
+	// The root operation owns downloads and verification. It never consumes
+	// an artifact staged by the unprivileged caller.
+	if err := updateSelf(p.Version, ctx.emitStep); err != nil {
 		return nil, err
 	}
-	// Exit after answering: the next activation of the helper
-	// runs the NEW binary, so helper and TUI can never disagree
-	// about versions for longer than one connection.
+	// Exit after answering so the next helper activation runs the new binary.
+	// Existing TUI processes continue running their original executable.
 	ctx.exitAfterEnd = true
 	return nil, nil
 }

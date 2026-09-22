@@ -1,5 +1,3 @@
-// internal/installer/verify.go
-
 // Trust model
 //
 // The legacy VPN self-update workflow pins its release signing key here.
@@ -7,7 +5,7 @@
 // artifact.VerifySignature owns isolated GPG verification; each caller
 // rejects bad signatures and insufficient trusted signers.
 
-package installer
+package release
 
 import (
 	"fmt"
@@ -35,7 +33,9 @@ const vpnReleaseFP = "AFA0EBACDC9A4C4AA7B0154AC97CE10F170BA5FE"
 
 // ── Self-update verification ────────────────────────────
 
-func verifySelfUpdate(workDir string) error {
+// VerifySignature requires the pinned VPN signer and rejects bad signatures.
+// The caller owns the private workspace containing the downloaded manifest.
+func VerifySignature(workDir string) error {
 	logger.Verify("--- Self-update signature verification ---")
 
 	sumsFile := filepath.Join(workDir, "SHA256SUMS")
@@ -77,7 +77,7 @@ func verifySelfUpdate(workDir string) error {
 	if hasBadSig {
 		logger.Verify("FAIL: bad signature detected")
 		return fmt.Errorf(
-			"bad signature detected — verification aborted")
+			"bad signature detected: verification aborted")
 	}
 
 	if distinct < 1 {

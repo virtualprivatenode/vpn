@@ -11,9 +11,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/bitcoin"
-	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/release"
 	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
@@ -340,7 +339,7 @@ func (s *SystemHomeScreen) View(
 	headerLines = append(headerLines, "")
 
 	verText := "Virtual Private Node v" +
-		installer.GetVersion()
+		s.ctx.Version
 	headerLines = append(headerLines,
 		centerPad(theme.Action.Render(verText), w))
 
@@ -783,7 +782,7 @@ func (s *SystemHomeScreen) hasUpdate() bool {
 // action does not exist for it (and the root helper refuses it
 // independently — this check is rendering, not the gate).
 func (s *SystemHomeScreen) updateInstallable() bool {
-	same, err := helper.SameMajor(
+	same, err := release.SameMajor(
 		s.ctx.Version, s.ctx.LatestVersion)
 	return err == nil && same
 }

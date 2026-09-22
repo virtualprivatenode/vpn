@@ -41,7 +41,7 @@ func InstallBasePackages() error {
 		return err
 	}
 	return system.SudoRun("apt-get", "install", "-y", "-qq",
-		"sudo", "gnupg", "tor", "torsocks", "wget", "ufw")
+		"sudo", "gnupg", "tor", "torsocks", "wget", "curl", "ufw")
 }
 
 // PrepareBaseHost repairs unresolved local hostname lookup when possible and
