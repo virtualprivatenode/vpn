@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
-	"github.com/virtualprivatenode/vpn/internal/installer"
+	"github.com/virtualprivatenode/vpn/internal/release"
 )
 
 // ── Polling & version ────────────────────────────────────
@@ -22,7 +22,7 @@ func tickEveryCmd(d time.Duration) tea.Cmd {
 func fetchLatestVersionCmd() tea.Cmd {
 	return func() tea.Msg {
 		return latestVersionMsg(
-			installer.CheckLatestVersion())
+			release.CheckLatestVersion())
 	}
 }
 

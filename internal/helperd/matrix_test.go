@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/installer"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
@@ -193,40 +192,4 @@ func TestLiveReadFactsServedByMenuVerbs(t *testing.T) {
 				"is not on the menu", fact, verb)
 		}
 	}
-}
-
-// ── Step-name alignment ──────────────────────────────────
-//
-// Streaming verbs report progress by INDEX; the client renders
-// NAMES from the shared lists in the helper package. These
-// tests are what make drift between the two impossible to ship.
-
-func stepNames(steps []installer.InstallStep) []string {
-	out := make([]string, len(steps))
-	for i, s := range steps {
-		out[i] = s.Name
-	}
-	return out
-}
-
-func assertNamesEqual(t *testing.T, verb string,
-	server, shared []string) {
-	t.Helper()
-	if len(server) != len(shared) {
-		t.Fatalf("%s: server has %d steps, shared list %d",
-			verb, len(server), len(shared))
-	}
-	for i := range server {
-		if server[i] != shared[i] {
-			t.Errorf("%s step %d: server %q, shared %q",
-				verb, i, server[i], shared[i])
-		}
-	}
-}
-
-func TestSelfUpdateStepNamesAligned(t *testing.T) {
-	v := "0.7.1"
-	assertNamesEqual(t, helper.VerbSelfUpdate,
-		stepNames(installer.SelfUpdateSteps(v)),
-		helper.SelfUpdateStepNames(v))
 }

@@ -3,7 +3,7 @@
 vpn-test*
 
 # Build
-release/
+/release/
 
 # Go
 /vendor/

@@ -9,23 +9,16 @@
 //     ok/error terminator (wire.go);
 //   - the client the TUI uses to request privileged operations
 //     over the helper's unix socket (client.go);
-//   - the staging-board reader and writer: the root-written
+//   - the staging-board reader: the root-written
 //     files under /var/lib/vpn/state that carry deliberately staged
 //     credentials and fixed facts to the
 //     admin user without any privileged code running on the
 //     read path (board.go).
 //
-// The package deliberately does NOT import the installer: the
-// installer imports this package to write board files, and the
-// helper daemon (internal/helperd) imports both.
+// Privileged operations live behind helperd; this package owns their IPC contract.
 package helper
 
-import (
-	"encoding/json"
-	"fmt"
-	"regexp"
-	"strings"
-)
+import "encoding/json"
 
 // RebootResult confirms systemd accepted the request, not that the host rebooted.
 type RebootResult struct {
@@ -205,41 +198,12 @@ type VerifyAdminLoginResult struct {
 	Verified bool `json:"verified"`
 }
 
-// ── Version gate (shared by both sides) ──────────────────
-
-// releaseVersion is the accepted shape for a release version.
-// Anchored and strict: this is the single choke point between
-// "string from the network" and "string in a release URL".
-var releaseVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
-
-// SameMajor reports whether two release versions share a major
-// version. It errors when either does not parse — callers
-// refuse rather than guess. Both the TUI (which renders a
-// cross-major release as "see the release notes", with no
-// update action) and the helper (which refuses to install one)
-// use this same function, so the two halves of the gate cannot
-// drift.
-func SameMajor(current, target string) (bool, error) {
-	if !releaseVersion.MatchString(current) {
-		return false, fmt.Errorf(
-			"running version %q is not a release build — "+
-				"self-update requires one", current)
-	}
-	if !releaseVersion.MatchString(target) {
-		return false, fmt.Errorf(
-			"%q is not a valid release version", target)
-	}
-	return strings.SplitN(current, ".", 2)[0] ==
-		strings.SplitN(target, ".", 2)[0], nil
-}
-
 // ── Streaming step lists ─────────────────────────────────
 //
 // A streaming verb's step names are fixed per verb and known to
 // both sides: the client renders the full list up front, the
-// server reports completion by index. A unit test in the helper
-// daemon asserts each server-side step list matches these — the
-// two can never silently drift past a test run.
+// server reports completion by index. Operation tests check the stages
+// against these names.
 
 // SelfUpdateStepNames mirrors the server's self-update steps.
 func SelfUpdateStepNames(version string) []string {

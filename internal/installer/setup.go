@@ -2,14 +2,9 @@
 package installer
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/component"
 	"github.com/virtualprivatenode/vpn/internal/config"
@@ -17,7 +12,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/logger"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/paths"
-	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
 const (
@@ -704,144 +698,4 @@ func buildInstallSteps(
 				return host.SetupNodeCLI(cfg)
 			}},
 	}
-}
-
-// ── Self-update ──────────────────────────────────────────
-
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-}
-
-// SelfUpdateSteps returns the install steps for updating
-// the vpn binary to newVersion. Steps are idempotent —
-// no rollback needed on failure. No config save on
-// success (binary replaced, takes effect on next SSH login).
-func SelfUpdateSteps(newVersion string) []InstallStep {
-	baseURL := fmt.Sprintf(
-		"https://github.com/virtualprivatenode/vpn/releases/download/v%s",
-		newVersion)
-	tarball := fmt.Sprintf("vpn-%s-amd64.tar.gz",
-		newVersion)
-
-	var workDir string
-
-	return []InstallStep{
-		{Name: "Downloading v" + newVersion,
-			Fn: func() error {
-				var err error
-				workDir, err = os.MkdirTemp("",
-					"vpn-update-")
-				if err != nil {
-					return fmt.Errorf(
-						"create work dir: %w", err)
-				}
-				if err := system.DownloadRequireTor(
-					baseURL+"/"+tarball,
-					filepath.Join(workDir, tarball)); err != nil {
-					return err
-				}
-				if err := system.DownloadRequireTor(
-					baseURL+"/SHA256SUMS",
-					filepath.Join(workDir,
-						"SHA256SUMS")); err != nil {
-					return err
-				}
-				return system.DownloadRequireTor(
-					baseURL+"/SHA256SUMS.asc",
-					filepath.Join(workDir,
-						"SHA256SUMS.asc"))
-			}},
-		{Name: "Verifying signature",
-			Fn: func() error {
-				return verifySelfUpdate(workDir)
-			}},
-		{Name: "Verifying checksum",
-			Fn: func() error {
-				cmd := exec.Command("sha256sum",
-					"--ignore-missing", "--check",
-					"SHA256SUMS")
-				cmd.Dir = workDir
-				output, err := cmd.CombinedOutput()
-				if err != nil {
-					return fmt.Errorf(
-						"checksum failed: %s",
-						string(output))
-				}
-				return nil
-			}},
-		{Name: "Installing new binary",
-			Fn: func() error {
-				if err := system.Run("tar", "-xzf",
-					filepath.Join(workDir, tarball),
-					"-C", workDir); err != nil {
-					return err
-				}
-				if err := system.SudoRun("install",
-					"-m", "755",
-					filepath.Join(workDir, "vpn"),
-					"/usr/local/bin/vpn"); err != nil {
-					return err
-				}
-				os.RemoveAll(workDir)
-				return nil
-			}},
-	}
-}
-
-const versionCacheMaxAge = 24 * time.Hour
-
-func CheckLatestVersion() string {
-	if cached := readVersionCache(); cached != "" {
-		return cached
-	}
-
-	if _, err := exec.LookPath("torsocks"); err != nil {
-		return ""
-	}
-	output, err := system.RunContext(10*time.Second,
-		"torsocks", "curl", "-sL",
-		"https://api.github.com/repos/virtualprivatenode/vpn/releases/latest")
-	if err != nil {
-		return ""
-	}
-
-	var release githubRelease
-	if err := json.Unmarshal([]byte(output), &release); err != nil {
-		return ""
-	}
-
-	version := strings.TrimPrefix(release.TagName, "v")
-	if version != "" {
-		writeVersionCache(version)
-	}
-	return version
-}
-
-func readVersionCache() string {
-	info, err := os.Stat(paths.VersionCacheFile)
-	if err != nil {
-		return ""
-	}
-	if time.Since(info.ModTime()) > versionCacheMaxAge {
-		return ""
-	}
-	data, err := os.ReadFile(paths.VersionCacheFile)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
-}
-
-func writeVersionCache(version string) {
-	existing := readVersionCache()
-	if existing == version {
-		return
-	}
-	os.MkdirAll(paths.VersionCacheDir, 0750)
-	os.WriteFile(paths.VersionCacheFile,
-		[]byte(version), 0600)
-}
-
-func GetVersion() string {
-	return appVersion
 }
