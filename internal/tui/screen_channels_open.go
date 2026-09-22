@@ -87,6 +87,7 @@ type ChannelOpenScreen struct {
 	txs         []lndrpc.OnChainTx
 	selection   app.CoinSelection
 	refresh     *channelOpenRefresh
+	coinScope   walletObservationScope
 	utxoErr     error
 	utxoCursor  int
 	utxoFetched bool
@@ -174,10 +175,8 @@ func (s *ChannelOpenScreen) HandleMsg(
 		return s.handlePaste(msg)
 	case channelOpenResultMsg:
 		return s.handleOpenResult(msg)
-	case coUtxoListMsg:
-		return s.handleUtxoList(msg)
-	case coTxListMsg:
-		return s.handleTxList(msg)
+	case channelCoinsMsg:
+		return s.handleCoinRefresh(msg)
 	case feeSuggestionsMsg:
 		return s.handleFeeSuggestions(msg)
 	}
@@ -499,7 +498,7 @@ func (s *ChannelOpenScreen) handleButtonKey(
 			s.clearForm()
 			return s, s.refreshCoins()
 		case 1: // Open Channel
-			return s.submitOpenChannel()
+			return s.prepareChannelOpenConfirmation()
 		}
 		return s, nil
 	case "backspace":
@@ -693,7 +692,7 @@ func (s *ChannelOpenScreen) clearForm() {
 	s.selection.Clear()
 	s.utxoErr = nil
 	s.attempt = nil
-	s.refresh = nil
+	s.cancelCoinRefresh()
 	s.utxoCursor = 0
 	s.utxoFetched = false
 	s.txs = nil
@@ -702,9 +701,12 @@ func (s *ChannelOpenScreen) clearForm() {
 	s.error = ""
 }
 
-func (s *ChannelOpenScreen) submitOpenChannel() (
+func (s *ChannelOpenScreen) prepareChannelOpenConfirmation() (
 	Screen, tea.Cmd,
 ) {
+	if !s.requireCurrentCoinScope() {
+		return s, nil
+	}
 	if !s.ctx.walletExists() {
 		return s, nil
 	}

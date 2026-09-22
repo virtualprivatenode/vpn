@@ -486,10 +486,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case channelOpenResultMsg:
 		return m.dispatchToTab(tabOpenChannel, msg)
-	case coUtxoListMsg:
-		return m.dispatchToTab(tabOpenChannel, msg)
-	case coTxListMsg:
-		return m.dispatchToTab(tabOpenChannel, msg)
+	case channelCoinsMsg:
+		for _, tab := range m.tabs {
+			if msg.refresh != nil && tab.Screen == msg.refresh.screen {
+				_, cmd := msg.refresh.screen.HandleMsg(msg)
+				return m, cmd
+			}
+		}
+		return m, nil
 	case newAddressMsg:
 		for _, tab := range m.tabs {
 			if msg.owner != nil && tab.Screen == msg.owner {
@@ -925,6 +929,7 @@ func (m Model) closeScreenTab(screen Screen) (tea.Model, tea.Cmd) {
 		} else {
 			m.releaseWalletCreation(tab.Screen)
 			cancelScreenFees(tab.Screen)
+			cancelChannelCoinRead(tab.Screen)
 			cancelP2PAddressRead(tab.Screen)
 			m.tabs = append(m.tabs[:i], m.tabs[i+1:]...)
 			m.sectionFocus[tab.Section] = 0
@@ -975,6 +980,7 @@ func (m Model) closeTab(
 		if shouldRemove(t) {
 			m.releaseWalletCreation(t.Screen)
 			cancelScreenFees(t.Screen)
+			cancelChannelCoinRead(t.Screen)
 			cancelP2PAddressRead(t.Screen)
 			continue
 		}
@@ -1098,6 +1104,7 @@ func (m *Model) setTabScreen(
 			m.tabs[i].Section == target.Section {
 			if m.tabs[i].Screen != s {
 				cancelScreenFees(m.tabs[i].Screen)
+				cancelChannelCoinRead(m.tabs[i].Screen)
 				cancelP2PAddressRead(m.tabs[i].Screen)
 			}
 			m.tabs[i].Screen = s

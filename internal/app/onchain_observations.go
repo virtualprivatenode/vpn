@@ -55,20 +55,76 @@ func (r *OnChainReader) Close() {
 	r.calls.Wait()
 }
 
-func (r *OnChainReader) Collect(source OnChainSource) OnChainSnapshot {
+func (r *OnChainReader) begin(caller context.Context) (context.Context, func(), error) {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return OnChainSnapshot{}.Unavailable(context.Canceled)
+		return nil, nil, context.Canceled
 	}
 	r.calls.Add(1)
 	r.mu.Unlock()
-	defer r.calls.Done()
+	ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
+	stop := context.AfterFunc(caller, cancel)
+	done := func() {
+		stop()
+		cancel()
+		r.calls.Done()
+	}
+	if err := caller.Err(); err != nil {
+		done()
+		return nil, nil, err
+	}
+	return ctx, done, nil
+}
+
+// ReadUnspent and ReadTransactions share the terminal owner while allowing forms
+// to publish each observation as soon as it completes. Each caller can cancel
+// its own reads without canceling another form or the On-Chain view.
+func (r *OnChainReader) ReadUnspent(caller context.Context, source OnChainSource, minConfs, maxConfs int32) Observation[[]lndrpc.UTXO] {
+	ctx, done, err := r.begin(caller)
+	if err != nil {
+		return Observation[[]lndrpc.UTXO]{Err: err}
+	}
+	defer done()
+	if source == nil {
+		return Observation[[]lndrpc.UTXO]{Err: errors.New("lnd not connected")}
+	}
+	coins, err := source.ListUnspentContext(ctx, minConfs, maxConfs)
+	if caller.Err() != nil {
+		err = caller.Err()
+	} else if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return observe(coins, err)
+}
+
+func (r *OnChainReader) ReadTransactions(caller context.Context, source OnChainSource) Observation[[]lndrpc.OnChainTx] {
+	ctx, done, err := r.begin(caller)
+	if err != nil {
+		return Observation[[]lndrpc.OnChainTx]{Err: err}
+	}
+	defer done()
+	if source == nil {
+		return Observation[[]lndrpc.OnChainTx]{Err: errors.New("lnd not connected")}
+	}
+	txs, err := source.GetTransactionsContext(ctx)
+	if caller.Err() != nil {
+		err = caller.Err()
+	} else if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return observe(txs, err)
+}
+
+func (r *OnChainReader) Collect(source OnChainSource) OnChainSnapshot {
+	ctx, done, err := r.begin(context.Background())
+	if err != nil {
+		return OnChainSnapshot{}.Unavailable(err)
+	}
+	defer done()
 	if source == nil {
 		return OnChainSnapshot{}.Unavailable(errors.New("lnd not connected"))
 	}
-	ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
-	defer cancel()
 	var result OnChainSnapshot
 	var reads sync.WaitGroup
 	reads.Go(func() {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
@@ -9,71 +10,129 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/virtualprivatenode/vpn/internal/lndrpc"
+	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/theme"
 )
 
-// Each refresh belongs to one screen and supersedes its previous requests.
-// A completed or submitted attempt no longer accepts these presentation reads.
-type channelOpenRefresh struct{ screen *ChannelOpenScreen }
-
-type coUtxoListMsg struct {
-	refresh *channelOpenRefresh
-	utxos   []lndrpc.UTXO
-	err     error
-}
-type coTxListMsg struct {
-	refresh *channelOpenRefresh
-	txs     []lndrpc.OnChainTx
-	err     error
+type channelOpenRefresh struct {
+	screen    *ChannelOpenScreen
+	scope     walletObservationScope
+	cancel    context.CancelFunc
+	coinsDone bool
+	txsDone   bool
 }
 
+type channelCoinsMsg struct {
+	refresh  *channelOpenRefresh
+	snapshot app.OnChainSnapshot
+}
+
+// One form admits at most one same-scope collection. The shared app reader owns
+// cancellation and joining; this screen owns selection and result publication.
 func (s *ChannelOpenScreen) refreshCoins() tea.Cmd {
-	s.refresh = &channelOpenRefresh{screen: s}
-	return tea.Batch(fetchChannelUtxosCmd(s.ctx.LndClient, s.refresh), fetchChannelTxsCmd(s.ctx.LndClient, s.refresh))
+	if s.step >= coStepOpening {
+		return nil
+	}
+	scope := s.ctx.walletObservationScope()
+	if s.refresh != nil && s.refresh.scope == scope {
+		return nil
+	}
+	s.cancelCoinRefresh()
+	if s.coinScope != scope {
+		if s.coinScope.client != scope.client {
+			s.client = nil
+			if scope.client != nil {
+				s.client = scope.client
+			}
+		}
+		s.utxos, s.txs = nil, nil
+		s.utxoFetched, s.amountConfirmed = false, false
+		s.utxoErr = nil
+		s.selection.Clear()
+		if s.step == coStepConfirm {
+			s.backToInput()
+		}
+		s.coinScope = scope
+	}
+	if s.ctx.OnChain == nil {
+		s.ctx.OnChain = &OnChainContext{}
+	}
+	if s.ctx.OnChain.reader == nil {
+		s.ctx.OnChain.reader = app.NewOnChainReader()
+	}
+	reader := s.ctx.OnChain.reader
+	ctx, cancel := context.WithCancel(context.Background())
+	request := &channelOpenRefresh{screen: s, scope: scope, cancel: cancel}
+	s.refresh = request
+	var source app.OnChainSource
+	if scope.client != nil {
+		source = scope.client
+	}
+	return tea.Batch(func() tea.Msg {
+		return channelCoinsMsg{refresh: request, snapshot: app.OnChainSnapshot{
+			Utxos: reader.ReadUnspent(ctx, source, 0, math.MaxInt32),
+		}}
+	}, func() tea.Msg {
+		return channelCoinsMsg{refresh: request, snapshot: app.OnChainSnapshot{
+			OnChainTxs: reader.ReadTransactions(ctx, source),
+		}}
+	})
 }
 
-func fetchChannelUtxosCmd(client *lndrpc.Client, refresh *channelOpenRefresh) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return coUtxoListMsg{refresh: refresh, err: fmt.Errorf("LND not connected")}
-		}
-		utxos, err := client.ListUnspent(0, math.MaxInt32)
-		return coUtxoListMsg{refresh: refresh, utxos: utxos, err: err}
+func (s *ChannelOpenScreen) requireCurrentCoinScope() bool {
+	if s.coinScope != s.ctx.walletObservationScope() {
+		s.cancelCoinRefresh()
+		s.error = "Wallet changed. Reopen this form and review again"
+		return false
+	}
+	return true
+}
+
+func (s *ChannelOpenScreen) cancelCoinRefresh() {
+	if s.refresh != nil {
+		s.refresh.cancel()
+		s.refresh = nil
 	}
 }
 
-func fetchChannelTxsCmd(client *lndrpc.Client, refresh *channelOpenRefresh) tea.Cmd {
-	return func() tea.Msg {
-		if client == nil {
-			return coTxListMsg{refresh: refresh, err: fmt.Errorf("LND not connected")}
-		}
-		txs, err := client.GetTransactions()
-		return coTxListMsg{refresh: refresh, txs: txs, err: err}
+func cancelChannelCoinRead(screen Screen) {
+	if s, ok := screen.(*ChannelOpenScreen); ok {
+		s.cancelCoinRefresh()
 	}
 }
 
-func (s *ChannelOpenScreen) handleUtxoList(msg coUtxoListMsg) (Screen, tea.Cmd) {
-	if msg.refresh == nil || msg.refresh != s.refresh || s.step >= coStepOpening {
+func (s *ChannelOpenScreen) handleCoinRefresh(msg channelCoinsMsg) (Screen, tea.Cmd) {
+	if msg.refresh == nil || msg.refresh != s.refresh {
 		return s, nil
 	}
-	if s.utxoErr != nil && s.error == s.utxoErr.Error() {
-		s.error = ""
-	}
-	s.utxoErr = msg.err
-	if msg.err != nil {
-		s.error = msg.err.Error()
+	if s.step >= coStepOpening || msg.refresh.scope != s.ctx.walletObservationScope() {
+		s.cancelCoinRefresh()
 		return s, nil
 	}
-	s.utxos = msg.utxos
-	s.utxoFetched = true
-	s.utxoCursor = max(0, min(s.utxoCursor, len(s.utxos)-1))
-	return s, nil
-}
-
-func (s *ChannelOpenScreen) handleTxList(msg coTxListMsg) (Screen, tea.Cmd) {
-	if msg.refresh != nil && msg.refresh == s.refresh && s.step < coStepOpening && msg.err == nil {
-		s.txs = msg.txs
+	coins := msg.snapshot.Utxos
+	if !msg.refresh.coinsDone && (coins.Known() || coins.Err != nil) {
+		msg.refresh.coinsDone = true
+		if s.utxoErr != nil && s.error == s.utxoErr.Error() {
+			s.error = ""
+		}
+		s.utxoErr = coins.Err
+		if s.utxoErr != nil {
+			s.error = s.utxoErr.Error()
+		} else {
+			s.utxos = coins.Value
+			s.utxoFetched = true
+			s.utxoCursor = max(0, min(s.utxoCursor, len(s.utxos)-1))
+		}
+	}
+	txs := msg.snapshot.OnChainTxs
+	if !msg.refresh.txsDone && (txs.Known() || txs.Err != nil) {
+		msg.refresh.txsDone = true
+		if txs.Err == nil {
+			s.txs = txs.Value
+		}
+	}
+	if msg.refresh.coinsDone && msg.refresh.txsDone {
+		s.cancelCoinRefresh()
 	}
 	return s, nil
 }

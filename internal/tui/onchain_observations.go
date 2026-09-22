@@ -1,15 +1,19 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/virtualprivatenode/vpn/internal/app"
+	"github.com/virtualprivatenode/vpn/internal/lndrpc"
 )
 
 type onChainReader interface {
 	Collect(app.OnChainSource) app.OnChainSnapshot
+	ReadUnspent(context.Context, app.OnChainSource, int32, int32) app.Observation[[]lndrpc.UTXO]
+	ReadTransactions(context.Context, app.OnChainSource) app.Observation[[]lndrpc.OnChainTx]
 	Close()
 }
 
