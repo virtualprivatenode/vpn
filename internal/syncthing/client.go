@@ -122,8 +122,10 @@ func (c *Client) LocalID(ctx context.Context) (string, error) {
 }
 
 type Device struct {
-	Name     string
-	DeviceID string
+	Name         string
+	DeviceID     string
+	BackupKnown  bool
+	BackupShared bool
 }
 
 func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
@@ -131,11 +133,33 @@ func (c *Client) ListDevices(ctx context.Context) ([]Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.Request(ctx, http.MethodGet, "/rest/config/devices", "")
+	// Read devices and folder membership together. Never infer backup sharing
+	// merely from the existence of a remote device.
+	var cfg struct {
+		Devices json.RawMessage `json:"devices"`
+		Folders []BackupFolder  `json:"folders"`
+	}
+	if err := c.read(ctx, "/rest/config", &cfg); err != nil {
+		return nil, err
+	}
+	devices, err := parseDevices(cfg.Devices, local)
 	if err != nil {
 		return nil, err
 	}
-	return parseDevices([]byte(raw), local)
+	known := cfg.Folders != nil
+	var backup BackupFolder
+	for _, folder := range cfg.Folders {
+		if folder.ID == "lnd-backup" {
+			backup = folder
+			known = folder.validate(local) == nil
+			break
+		}
+	}
+	for i := range devices {
+		devices[i].BackupKnown = known
+		devices[i].BackupShared = known && backup.HasDevice(devices[i].DeviceID)
+	}
+	return devices, nil
 }
 
 func parseDevices(
@@ -148,6 +172,9 @@ func parseDevices(
 	}
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil, fmt.Errorf("decode Syncthing devices: %w", err)
+	}
+	if entries == nil {
+		return nil, errors.New("syncthing device configuration unavailable")
 	}
 	devices := make([]Device, 0, len(entries))
 	for _, entry := range entries {

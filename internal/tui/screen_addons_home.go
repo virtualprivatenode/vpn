@@ -16,8 +16,8 @@ import (
 // install flow if LND is ready. Bottom half reserved for
 // a future add-on.
 //
-// No async data — reads ctx.Cfg pointer directly for
-// installed/enabled state.
+// Desired enablement comes from configuration; device counts come from the
+// same live observations as the Syncthing detail screens.
 
 type AddonsHomeScreen struct {
 	ctx    *ScreenContext
@@ -88,6 +88,9 @@ func (s *AddonsHomeScreen) handleEnter() (
 func (s *AddonsHomeScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
+	if _, ok := msg.(tabActivatedMsg); ok && s.ctx.Cfg.SyncthingEnabled {
+		return s, requestSyncthingDevicesCmd(s.ctx)
+	}
 	return s, nil
 }
 
@@ -145,7 +148,7 @@ func (s *AddonsHomeScreen) View(
 			" " + theme.Good.Render("Enabled")
 		if s.ctx.State.SyncthingDevicesKnown {
 			syncStat2 = theme.Dim.Render(fmt.Sprintf(
-				"%d paired",
+				"%d configured devices",
 				len(s.ctx.State.SyncthingDevices)))
 		} else {
 			syncStat2 = theme.Warn.Render("Device list unavailable")

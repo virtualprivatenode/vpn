@@ -373,6 +373,7 @@ func observeRuntimeState(cfg *config.AppConfig) *RuntimeState {
 		state.SyncthingDevices, state.SyncthingDevicesErr = runtime.ListDevices()
 		runtime.Close()
 		state.SyncthingDevicesKnown = state.SyncthingDevicesErr == nil
+		state.SyncthingDevicesChecked = time.Now()
 	}
 	return state
 }

@@ -12,7 +12,7 @@ const syncthingConfigSchema = "52"
 // syncthingConfigTemplate is the COMPLETE authored config.xml,
 // written over the `syncthing generate` output before first
 // daemon start. Source of truth: verbatim `syncthing generate`
-// output of the pinned v2.1.1 GitHub binary (captured June 9
+// output of the pinned v2.1.5 GitHub binary (captured September 23
 // 2026), with these deliberate deltas ONLY:
 //
 //	Privacy (finding H field set: each verified by the
@@ -99,7 +99,6 @@ const syncthingConfigTemplate = `<configuration version="52">
         <autoUpgradeIntervalH>0</autoUpgradeIntervalH>
         <upgradeToPreReleases>false</upgradeToPreReleases>
         <keepTemporariesH>24</keepTemporariesH>
-        <cacheIgnoredFiles>false</cacheIgnoredFiles>
         <progressUpdateIntervalS>5</progressUpdateIntervalS>
         <limitBandwidthInLan>false</limitBandwidthInLan>
         <minHomeDiskFree unit="%">1</minHomeDiskFree>

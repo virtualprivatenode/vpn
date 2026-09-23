@@ -56,7 +56,7 @@ func NewSyncthing() *Syncthing {
 	return &Syncthing{ctx: ctx, cancel: cancel, lock: syncthing.WithMutationLock, client: func() (SyncthingClient, error) {
 		key, err := helper.ReadBoardString(paths.StateSyncthingAPIKey)
 		if err != nil {
-			return nil, errors.New("Syncthing credentials unavailable; administrator inspection is required")
+			return nil, errors.New("Syncthing credentials unavailable; maintenance inspection is required")
 		}
 		return syncthing.NewClient(key), nil
 	}}
@@ -159,8 +159,17 @@ func (s *Syncthing) Pair(input string) SyncthingResult {
 		if err = c.ShareBackup(ctx, folder, id); err != nil {
 			return fmt.Errorf("device is configured; backup sharing was not confirmed: %w", err)
 		}
-		result.Outcome = SyncthingComplete
-		return nil
+		devices, err = c.ListDevices(ctx)
+		if err != nil {
+			return fmt.Errorf("pairing was accepted, but its current state could not be confirmed: %w", err)
+		}
+		for _, device := range devices {
+			if device.DeviceID == id && device.BackupKnown && device.BackupShared {
+				result.Outcome = SyncthingComplete
+				return nil
+			}
+		}
+		return errors.New("backup sharing is not confirmed in the current configuration; inspect before retrying")
 	})
 	return result
 }
@@ -211,6 +220,22 @@ func (s *Syncthing) Remove(input string) SyncthingResult {
 		result.Outcome = SyncthingUnknown
 		if err = c.RemoveDevice(ctx, id); err != nil {
 			return fmt.Errorf("device removal was not confirmed; inspect the current device list before retrying: %w", err)
+		}
+		devices, err = c.ListDevices(ctx)
+		if err != nil {
+			return fmt.Errorf("removal was accepted, but its current state could not be confirmed: %w", err)
+		}
+		for _, device := range devices {
+			if device.DeviceID == id {
+				return errors.New("device is still configured; removal is not confirmed")
+			}
+		}
+		folder, err := c.BackupFolder(ctx, local)
+		if err != nil {
+			return fmt.Errorf("device is absent, but backup share removal could not be confirmed: %w", err)
+		}
+		if folder.HasDevice(id) {
+			return errors.New("device is absent, but its backup share remains; removal is not confirmed")
 		}
 		result.Outcome = SyncthingComplete
 		return nil

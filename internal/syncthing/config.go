@@ -79,18 +79,22 @@ func (c *Client) BackupFolder(ctx context.Context, localID string) (BackupFolder
 	if err := c.read(ctx, "/rest/config/folders/lnd-backup", &f); err != nil {
 		return f, err
 	}
+	return f, f.validate(localID)
+}
+
+func (f BackupFolder) validate(localID string) error {
 	if f.ID != "lnd-backup" || filepath.Clean(f.Path) != paths.LNDBackupExport || f.Type != "sendonly" || f.Marker != paths.ExportReadyMarkerName || !f.HasDevice(localID) {
-		return f, errors.New("backup folder boundary differs from the expected send-only export; administrator inspection is required")
+		return errors.New("backup folder boundary differs from the expected send-only export; maintenance inspection is required")
 	}
 	for _, raw := range f.Devices {
 		var d struct {
 			ID string `json:"deviceID"`
 		}
 		if json.Unmarshal(raw, &d) != nil || d.ID == "" {
-			return f, errors.New("invalid backup folder device entry")
+			return errors.New("invalid backup folder device entry")
 		}
 	}
-	return f, nil
+	return nil
 }
 func (c *Client) ShareBackup(ctx context.Context, f BackupFolder, id string) error {
 	if f.HasDevice(id) {
