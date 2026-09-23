@@ -521,7 +521,7 @@ func (s *SyncthingPairScreen) viewPostPair(
 	if vpsDeviceID != "" {
 		lines = append(lines,
 			" "+theme.Dim.Render(
-				"Your device was added to the node."))
+				"Backup sharing was confirmed on this node."))
 		lines = append(lines,
 			" "+theme.Dim.Render(
 				"Now add this node to your local"+

@@ -200,8 +200,8 @@ func TestIdentityUsesStatusAndDaemonParser(t *testing.T) {
 		switch r.URL.Path {
 		case "/rest/system/status":
 			fmt.Fprint(w, `{"myID":"LOCAL"}`)
-		case "/rest/config/devices":
-			fmt.Fprint(w, `[{"deviceID":"AAA","name":"first"},{"deviceID":"LOCAL"}]`)
+		case "/rest/config":
+			fmt.Fprint(w, `{"devices":[{"deviceID":"AAA","name":"first"},{"deviceID":"LOCAL"}],"folders":[]}`)
 		case "/rest/svc/deviceid":
 			if r.URL.Query().Get("id") == "invalid" {
 				fmt.Fprint(w, `{"error":"bad checksum"}`)
@@ -223,5 +223,53 @@ func TestIdentityUsesStatusAndDaemonParser(t *testing.T) {
 	}
 	if _, err := c.CanonicalID(context.Background(), "invalid"); err == nil {
 		t.Fatal("daemon checksum rejection ignored")
+	}
+}
+
+func TestDeviceObservationDistinguishesBackupMembershipAndBoundaryDrift(t *testing.T) {
+	folder := BackupFolder{ID: "lnd-backup", Path: paths.LNDBackupExport, Type: "sendonly", Marker: paths.ExportReadyMarkerName,
+		Devices: []json.RawMessage{json.RawMessage(`{"deviceID":"LOCAL"}`), json.RawMessage(`{"deviceID":"A"}`)}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Error("observation mutated configuration")
+		}
+		switch r.URL.Path {
+		case "/rest/system/status":
+			fmt.Fprint(w, `{"myID":"LOCAL"}`)
+		case "/rest/config":
+			json.NewEncoder(w).Encode(map[string]any{
+				"devices": []map[string]string{{"deviceID": "B", "name": "unshared"}, {"deviceID": "LOCAL"}, {"deviceID": "A", "name": "shared"}},
+				"folders": []BackupFolder{folder},
+			})
+		default:
+			t.Errorf("devices and membership must come from one config read: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := newClient(srv.URL, "key")
+	devices, err := c.ListDevices(t.Context())
+	if err != nil || len(devices) != 2 {
+		t.Fatalf("read failed: %v %v", devices, err)
+	}
+	for _, d := range devices {
+		if !d.BackupKnown || d.BackupShared != (d.DeviceID == "A") {
+			t.Fatalf("device existence confused with sharing: %+v", d)
+		}
+	}
+	folder.Path = "/var/lib/lnd"
+	devices, err = c.ListDevices(t.Context())
+	if err != nil || len(devices) != 2 {
+		t.Fatalf("folder drift hid configured devices: %v", err)
+	}
+	for _, d := range devices {
+		if d.BackupKnown || d.BackupShared {
+			t.Fatal("unsafe folder reported as configured backup sharing")
+		}
+	}
+	for _, raw := range []string{"null", ""} {
+		if _, err := parseDevices([]byte(raw), "LOCAL"); err == nil {
+			t.Fatal("unknown list became zero devices")
+		}
 	}
 }

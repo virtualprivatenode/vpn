@@ -42,8 +42,11 @@ func (f *syncFake) ListDevices(ctx context.Context) ([]syncthing.Device, error) 
 		<-f.release
 		return nil, ctx.Err()
 	}
+	if f.fail == "verification read" && len(f.writes) > 0 {
+		return nil, errors.New("verification read failed")
+	}
 	if f.existing {
-		return []syncthing.Device{{DeviceID: "REMOTE"}}, f.err("list")
+		return []syncthing.Device{{DeviceID: "REMOTE", BackupKnown: true, BackupShared: f.shared}}, f.err("list")
 	}
 	return nil, f.err("list")
 }
@@ -61,14 +64,20 @@ func (f *syncFake) BackupFolder(context.Context, string) (syncthing.BackupFolder
 }
 func (f *syncFake) AddDevice(context.Context, string) error {
 	f.writes = append(f.writes, "add")
+	f.existing = true
 	return f.err("add")
 }
 func (f *syncFake) ShareBackup(context.Context, syncthing.BackupFolder, string) error {
 	f.writes = append(f.writes, "share")
+	if f.fail != "share absent" {
+		f.shared = true
+	}
 	return f.err("share")
 }
 func (f *syncFake) RemoveDevice(context.Context, string) error {
 	f.writes = append(f.writes, "remove")
+	f.existing = f.fail == "device remains"
+	f.shared = f.fail == "share remains"
 	return f.err("remove")
 }
 func syncService(t *testing.T, f *syncFake) *Syncthing {
@@ -87,6 +96,8 @@ func TestSyncthingPairOutcomesAndPreservation(t *testing.T) {
 		want                   SyncthingOutcome
 		writes                 string
 	}{
+		{name: "verification read", fail: "verification read", want: SyncthingUnknown, writes: "add,share"},
+		{name: "share absent", fail: "share absent", want: SyncthingUnknown, writes: "add,share"},
 		{name: "new pair", want: SyncthingComplete, writes: "add,share"},
 		{name: "finish existing device", existing: true, want: SyncthingComplete, writes: "share"},
 		{name: "duplicate", existing: true, shared: true, want: SyncthingNotChanged},
@@ -119,6 +130,9 @@ func TestSyncthingRemovalAndContention(t *testing.T) {
 		want           SyncthingOutcome
 		writes         string
 	}{
+		{name: "verification read", existing: true, fail: "verification read", want: SyncthingUnknown, writes: "remove"},
+		{name: "device remains", existing: true, fail: "device remains", want: SyncthingUnknown, writes: "remove"},
+		{name: "share remains", existing: true, fail: "share remains", want: SyncthingUnknown, writes: "remove"},
 		{name: "remove", existing: true, want: SyncthingComplete, writes: "remove"},
 		{name: "missing", want: SyncthingNotChanged},
 		{name: "self", self: true, want: SyncthingNotChanged},

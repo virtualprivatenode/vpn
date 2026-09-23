@@ -4,6 +4,7 @@ package tui
 import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"time"
 
 	"github.com/virtualprivatenode/vpn/internal/app"
 	"github.com/virtualprivatenode/vpn/internal/autounlock"
@@ -62,6 +63,9 @@ type ScreenContext struct {
 	Fees                feeReader
 	Syncthing           *app.Syncthing
 	syncthingRevision   uint64
+	syncthingActive     uint64
+	syncthingPending    bool
+	syncthingPolling    bool
 	WalletCreation      *app.WalletCreation
 	walletCreationOwner *WalletCreateScreen
 	WalletRuntime       walletRuntime
@@ -134,6 +138,7 @@ type RuntimeState struct {
 	SyncthingDevices        []syncthing.Device
 	SyncthingDevicesErr     error
 	SyncthingDevicesKnown   bool
+	SyncthingDevicesChecked time.Time
 }
 
 func (c *ScreenContext) invalidateWalletObservations() {

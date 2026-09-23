@@ -11,7 +11,7 @@ import (
 
 // ── SyncthingDeviceScreen ──────────────────────────────
 // Device detail with Cancel / Remove buttons, plus
-// confirm step. Snapshot data at construction time.
+// confirm step. Current details are resolved by stable device identity.
 
 type syncDeviceStep int
 
@@ -25,7 +25,7 @@ const (
 type SyncthingDeviceScreen struct {
 	ctx         *ScreenContext
 	step        syncDeviceStep
-	device      syncthing.Device // live-read snapshot
+	deviceID    string // reviewed identity; never select a replacement by row
 	attempt     uint64
 	viewBtnIdx  int // 0=Cancel, 1=Remove
 	confirmIdx  int // 0=Go Back, 1=Remove
@@ -37,15 +37,15 @@ func NewSyncthingDeviceScreen(
 	device syncthing.Device,
 ) *SyncthingDeviceScreen {
 	return &SyncthingDeviceScreen{
-		ctx:    ctx,
-		device: device,
+		ctx:      ctx,
+		deviceID: device.DeviceID,
 	}
 }
 
 // ── Screen interface ────────────────────────────────────
 
 func (s *SyncthingDeviceScreen) Init() tea.Cmd {
-	return nil
+	return requestSyncthingDevicesCmd(s.ctx)
 }
 
 func (s *SyncthingDeviceScreen) HandleKey(
@@ -86,6 +86,8 @@ func (s *SyncthingDeviceScreen) HandleMsg(
 	msg tea.Msg,
 ) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tabActivatedMsg:
+		return s, requestSyncthingDevicesCmd(s.ctx)
 	case syncthingRemovedMsg:
 		if msg.owner != s || msg.attempt != s.attempt || s.step != syncDeviceStepRemoving {
 			return s, nil
@@ -116,7 +118,7 @@ func (s *SyncthingDeviceScreen) View(
 			title, button = "Device Removed", "Done"
 		}
 		p.title(theme.Header, title)
-		p.monoWrap(s.device.DeviceID)
+		p.monoWrap(s.deviceID)
 		return p.renderWithBottomButtons([]string{button}, 0, s.ctx.ContentFocused && s.step == syncDeviceStepRemoved, h)
 	case syncDeviceStepDetail:
 		return s.viewDetail(w, h)
@@ -175,6 +177,10 @@ func (s *SyncthingDeviceScreen) handleDetailKey(
 		if s.viewBtnIdx == 0 {
 			return s, closeSyncthingCmd(s, s.attempt)
 		}
+		if _, ok := s.ctx.syncthingDevice(s.deviceID); !ok {
+			s.removeError = "Current device configuration is unavailable or the device is no longer configured."
+			return s, nil
+		}
 		s.step = syncDeviceStepConfirm
 		s.confirmIdx = 0
 		s.removeError = ""
@@ -186,12 +192,27 @@ func (s *SyncthingDeviceScreen) handleDetailKey(
 func (s *SyncthingDeviceScreen) viewDetail(
 	w, h int,
 ) string {
-	dev := s.device
+	dev, found := s.ctx.syncthingDevice(s.deviceID)
 	p := newPane(w)
-	p.title(theme.Header, dev.Name)
+	title := "Syncthing Device"
+	if found {
+		title = dev.Name
+	}
+	p.title(theme.Header, title)
 
 	p.labelLine("Device ID:")
 	p.monoWrap(dev.DeviceID)
+	if !s.ctx.State.SyncthingDevicesKnown {
+		p.warnWrapWords("Current configuration unavailable. Retrying automatically.")
+	} else if !found {
+		p.warnWrapWords("This device is no longer configured.")
+	} else {
+		p.labelLine("Backup sharing: " + backupSharingText(dev))
+		p.dim("Sharing configuration does not confirm backup delivery.")
+	}
+	if s.ctx.syncthingActive != 0 {
+		p.dim("Refreshing current configuration...")
+	}
 	if s.removeError != "" {
 		p.warnWrapWords(s.removeError)
 	}
@@ -236,6 +257,11 @@ func (s *SyncthingDeviceScreen) handleConfirmKey(
 			s.step = syncDeviceStepDetail
 			return s, nil
 		case 1: // Remove
+			if _, ok := s.ctx.syncthingDevice(s.deviceID); !ok {
+				s.removeError = "Current device configuration is unavailable or the device is no longer configured."
+				s.step = syncDeviceStepDetail
+				return s, nil
+			}
 			s.attempt++
 			s.step = syncDeviceStepRemoving
 			return s, removeSyncthingDeviceCmd(s)
@@ -248,9 +274,16 @@ func (s *SyncthingDeviceScreen) viewConfirm(
 	w, h int,
 ) string {
 	p := newPane(w)
-	p.title(theme.Warning,
-		"Remove "+s.device.Name+"?")
-	p.monoWrap(s.device.DeviceID)
+	dev, found := s.ctx.syncthingDevice(s.deviceID)
+	name := "device"
+	if found {
+		name = dev.Name
+	}
+	p.title(theme.Warning, "Remove "+name+"?")
+	if !found {
+		p.warnWrapWords("Current device configuration is unavailable or the device is no longer configured.")
+	}
+	p.monoWrap(s.deviceID)
 	p.line(" " + theme.Value.Render(
 		"• Stop syncing channel backups"+
 			" to this device"))

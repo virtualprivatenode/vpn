@@ -38,7 +38,7 @@ func NewSyncthingDetailScreen(
 // ── Screen interface ────────────────────────────────────
 
 func (s *SyncthingDetailScreen) Init() tea.Cmd {
-	return fetchSyncthingDevicesCmd(s.ctx)
+	return requestSyncthingDevicesCmd(s.ctx)
 }
 
 func (s *SyncthingDetailScreen) HandleKey(
@@ -182,7 +182,7 @@ func (s *SyncthingDetailScreen) HandleMsg(
 		}
 	}
 	if _, ok := msg.(tabActivatedMsg); ok {
-		return s, fetchSyncthingDevicesCmd(s.ctx)
+		return s, requestSyncthingDevicesCmd(s.ctx)
 	}
 	return s, nil
 }
@@ -217,9 +217,17 @@ func (s *SyncthingDetailScreen) View(
 	var midLines []string
 
 	pairedCount := len(devices)
-	midLines = append(midLines,
-		" "+theme.Label.Render(fmt.Sprintf(
-			"Paired Devices (%d)", pairedCount)))
+	label := "Configured Devices (unavailable)"
+	if s.ctx.State.SyncthingDevicesKnown {
+		label = fmt.Sprintf("Configured Devices (%d)", pairedCount)
+	}
+	midLines = append(midLines, " "+theme.Label.Render(label))
+	if s.ctx.syncthingActive != 0 {
+		midLines = append(midLines, " "+theme.Dim.Render("Refreshing current configuration..."))
+	}
+	if s.ctx.State.SyncthingDevicesKnown && !s.ctx.State.SyncthingDevicesChecked.IsZero() {
+		midLines = append(midLines, " "+theme.Dim.Render("Last checked "+s.ctx.State.SyncthingDevicesChecked.Format("15:04:05")))
+	}
 	midLines = append(midLines, "")
 
 	cursorLine := 0
@@ -230,24 +238,27 @@ func (s *SyncthingDetailScreen) View(
 				"Cannot read the current device list"))
 		midLines = append(midLines,
 			" "+theme.Dim.Render(
-				"Reopen this tab to refresh; inspect Syncthing if it persists."))
+				"Retrying automatically; inspect Syncthing if it persists."))
 	} else if pairedCount == 0 {
 		midLines = append(midLines,
 			" "+theme.Dim.Render(
-				"No devices paired yet"))
+				"No remote devices configured"))
 	} else {
 		hdrStyle := theme.TableHeader
 		sepStyle := theme.TableDim
 
-		nameW := 24
-		idW := w - nameW - 3
-		if idW < 24 {
-			idW = 24
+		nameW := min(24, max(6, w-35))
+		shareW := 16
+		idW := max(5, w-nameW-shareW-3)
+		idLabel := "Device ID"
+		if idW < len(idLabel) {
+			idLabel = "ID"
 		}
 
 		hdr := " " +
 			hdrStyle.Render(pad("Name", nameW)) +
-			hdrStyle.Render(pad("Device ID", idW))
+			hdrStyle.Render(pad(idLabel, idW)) + " " +
+			hdrStyle.Render(pad("Backup sharing", shareW))
 		midLines = append(midLines, hdr)
 		midLines = append(midLines,
 			" "+sepStyle.Render(
@@ -274,6 +285,7 @@ func (s *SyncthingDetailScreen) View(
 				devID = devID[:idW-4] + "..."
 			}
 			idStr := pad(devID, idW)
+			shareStr := " " + pad(backupSharingText(d), shareW)
 
 			isSelected := onList && s.cursor == i
 
@@ -284,12 +296,12 @@ func (s *SyncthingDetailScreen) View(
 				midLines = append(midLines,
 					marker+
 						selStyle.Render(nameStr)+
-						selStyle.Render(idStr))
+						selStyle.Render(idStr)+selStyle.Render(shareStr))
 			} else {
 				midLines = append(midLines,
 					marker+
 						theme.Value.Render(nameStr)+
-						theme.Dim.Render(idStr))
+						theme.Dim.Render(idStr)+theme.Value.Render(shareStr))
 			}
 		}
 	}

@@ -28,23 +28,20 @@ func fetchLatestVersionCmd() tea.Cmd {
 
 // ── Syncthing actions ────────────────────────────────────
 
-func fetchSyncthingDevicesCmd(owner *ScreenContext) tea.Cmd {
-	owner.syncthingRevision++
-	revision := owner.syncthingRevision
-	runtime := owner.syncthing()
-	return func() tea.Msg {
-		devices, err := runtime.ListDevices()
-		return syncthingDevicesMsg{owner: owner, revision: revision, devices: devices, err: err}
-	}
+func requestSyncthingDevicesCmd(owner *ScreenContext) tea.Cmd {
+	return func() tea.Msg { return refreshSyncthingMsg{owner: owner} }
 }
+
 func pairSyncthingDeviceCmd(owner *SyncthingPairScreen, deviceID string) tea.Cmd {
+	owner.ctx.invalidateSyncthing()
 	runtime, attempt := owner.ctx.syncthing(), owner.attempt
 	return func() tea.Msg {
 		return syncthingPairedMsg{owner: owner, attempt: attempt, result: runtime.Pair(deviceID)}
 	}
 }
 func removeSyncthingDeviceCmd(owner *SyncthingDeviceScreen) tea.Cmd {
-	runtime, attempt, id := owner.ctx.syncthing(), owner.attempt, owner.device.DeviceID
+	owner.ctx.invalidateSyncthing()
+	runtime, attempt, id := owner.ctx.syncthing(), owner.attempt, owner.deviceID
 	return func() tea.Msg { return syncthingRemovedMsg{owner: owner, attempt: attempt, result: runtime.Remove(id)} }
 }
 func closeSyncthingCmd(owner Screen, attempt uint64) tea.Cmd {

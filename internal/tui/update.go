@@ -230,7 +230,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.Kind == tabSyncthingDevice {
 			detail, ok := msg.Screen.(*SyncthingDeviceScreen)
-			if !ok || msg.Key == "" || detail.device.DeviceID != msg.Key || m.nav.ActiveSection() != secAddons {
+			if !ok || msg.Key == "" || detail.deviceID != msg.Key || m.nav.ActiveSection() != secAddons {
 				return m, nil
 			}
 			for i, tab := range m.effectiveTabs() {
@@ -449,14 +449,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncPairStepPairing {
 			return m, nil
 		}
+		m.screenCtx.invalidateSyncthing()
 		rm, cmd := m.routeSyncthingResult(msg.owner, msg)
-		return rm, tea.Batch(cmd, fetchSyncthingDevicesCmd(m.screenCtx))
+		return rm, tea.Batch(cmd, requestSyncthingDevicesCmd(m.screenCtx))
 	case syncthingRemovedMsg:
 		if msg.owner == nil || msg.owner.attempt != msg.attempt || msg.owner.step != syncDeviceStepRemoving {
 			return m, nil
 		}
+		m.screenCtx.invalidateSyncthing()
 		rm, cmd := m.routeSyncthingResult(msg.owner, msg)
-		return rm, tea.Batch(cmd, fetchSyncthingDevicesCmd(m.screenCtx))
+		return rm, tea.Batch(cmd, requestSyncthingDevicesCmd(m.screenCtx))
 	case syncthingCloseMsg:
 		switch owner := msg.owner.(type) {
 		case *SyncthingPairScreen:
@@ -471,19 +473,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.closeScreenTab(msg.owner)
-	case syncthingDevicesMsg:
-		if msg.owner != m.screenCtx || msg.revision != m.screenCtx.syncthingRevision {
+	case refreshSyncthingMsg:
+		if msg.owner != m.screenCtx {
 			return m, nil
 		}
-		for _, tab := range m.tabs {
-			if detail, ok := tab.Screen.(*SyncthingDetailScreen); ok {
-				detail.HandleMsg(msg)
-			}
+		return m, tea.Batch(m.admitSyncthing(), m.scheduleSyncthingPoll())
+	case syncthingPollMsg:
+		if msg.owner != m.screenCtx {
+			return m, nil
 		}
-		m.state.SyncthingDevices = msg.devices
-		m.state.SyncthingDevicesErr = msg.err
-		m.state.SyncthingDevicesKnown = msg.err == nil
-		return m, nil
+		m.screenCtx.syncthingPolling = false
+		if !m.hasSyncthingObservers() {
+			return m, nil
+		}
+		return m, tea.Batch(m.admitSyncthing(), m.scheduleSyncthingPoll())
+	case syncthingDevicesMsg:
+		return m, m.completeSyncthing(msg)
 	case channelOpenResultMsg:
 		return m.dispatchToTab(tabOpenChannel, msg)
 	case channelCoinsMsg:

@@ -60,10 +60,17 @@ In the Node dashboard:
 4. Paste your local Device ID
 5. Confirm with the Pair button
 
-The Node adds your device and shares the backup folder. Completion confirms the
-Node's configuration; the receiver still needs steps 6 and 7 below. Avoid editing
+The Node adds your device and shares the backup folder. Completion confirms a
+read-back of the Node's configuration; the receiver still needs steps 6 and 7 below. Avoid editing
 the Node's Syncthing configuration in its web UI while pairing or removing a
 device in the TUI.
+
+Open device lists and details refresh approximately every five seconds and after
+pairing or removal. They show configured devices and whether backup sharing is
+configured, not whether a remote device has received a backup. Failed reads show
+unavailable status and retry automatically. Browser changes appear after a
+successful refresh; the API cannot prevent simultaneous edits from overwriting
+one another.
 
 If pairing reports an incomplete or unconfirmed outcome, inspect the device and
 `lnd-backup` share in the Node's web UI before retrying. A device may have been
