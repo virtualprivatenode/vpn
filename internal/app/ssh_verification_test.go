@@ -29,7 +29,7 @@ func TestSSHVerificationReplyAuthorityAndAddressIndependence(t *testing.T) {
 		{name: "inconsistent", body: `{"pending":true,"verified":true}`, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := NewSSHVerificationReader()
+			r := NewSSHLoginVerifier()
 			defer r.Close()
 			calls, addresses := 0, 0
 			failure := errors.New("unavailable")
@@ -53,7 +53,7 @@ func TestSSHVerificationReplyAuthorityAndAddressIndependence(t *testing.T) {
 				}
 				return "203.0.113.7", nil
 			}
-			got := r.Read()
+			got := r.Verify()
 			if got.Pending != tc.wantPending || (got.Err != nil) != tc.wantError || got.Address != tc.wantAddress {
 				t.Fatalf("result=%+v", got)
 			}
@@ -71,7 +71,7 @@ func TestSSHVerificationDeadlineAndCloseJoin(t *testing.T) {
 	for _, phase := range []string{"deadline", "close helper", "close address"} {
 		t.Run(phase, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				r := NewSSHVerificationReader()
+				r := NewSSHLoginVerifier()
 				defer r.Close()
 				calls := 0
 				release := make(chan struct{})
@@ -97,7 +97,7 @@ func TestSSHVerificationDeadlineAndCloseJoin(t *testing.T) {
 				}
 				started := time.Now()
 				done := make(chan SSHVerification, 1)
-				go func() { done <- r.Read() }()
+				go func() { done <- r.Verify() }()
 				want := context.DeadlineExceeded
 				if phase != "deadline" {
 					want = context.Canceled
@@ -121,7 +121,7 @@ func TestSSHVerificationDeadlineAndCloseJoin(t *testing.T) {
 					t.Fatal("local deadline changed")
 				}
 				r.Close()
-				if got := r.Read(); !errors.Is(got.Err, context.Canceled) || calls != 1 {
+				if got := r.Verify(); !errors.Is(got.Err, context.Canceled) || calls != 1 {
 					t.Fatal("work admitted after close or hidden retry")
 				}
 			})

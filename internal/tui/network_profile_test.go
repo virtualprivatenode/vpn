@@ -17,7 +17,7 @@ func TestLightningInvoicePrefilterUsesInstalledProfile(t *testing.T) {
 		}
 		screen := NewSendScreen(&ScreenContext{Cfg: cfg, State: &RuntimeState{WalletKnown: true, WalletExists: true}})
 		screen.sendInput.SetValue(profile.InvoicePrefix + "1example")
-		_, cmd := screen.submitSendPayment()
+		_, cmd := screen.preparePaymentConfirmation()
 		if cmd == nil || screen.inputError != "" {
 			t.Errorf("%s invoice rejected before LND: %q", network, screen.inputError)
 		}
@@ -27,7 +27,7 @@ func TestLightningInvoicePrefilterUsesInstalledProfile(t *testing.T) {
 			foreign = "lntb1example"
 		}
 		screen.sendInput.SetValue(foreign)
-		_, cmd = screen.submitSendPayment()
+		_, cmd = screen.preparePaymentConfirmation()
 		if cmd != nil || !strings.Contains(screen.inputError, "not for") {
 			t.Errorf("%s foreign invoice result cmd=%v error=%q",
 				network, cmd != nil, screen.inputError)

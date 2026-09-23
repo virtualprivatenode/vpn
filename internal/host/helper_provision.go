@@ -84,18 +84,18 @@ ProtectHome=read-only
 // InstallHelperUnits writes both units, reloads systemd, and enables the socket.
 // It requires an active socket unit and a node at the configured path.
 func InstallHelperUnits() error {
-	if err := system.SudoWriteFile(paths.HelperSocketUnit,
+	if err := system.WriteFileRoot(paths.HelperSocketUnit,
 		[]byte(helperSocketUnit), 0644); err != nil {
 		return err
 	}
-	if err := system.SudoWriteFile(paths.HelperServiceUnit,
+	if err := system.WriteFileRoot(paths.HelperServiceUnit,
 		[]byte(helperServiceUnit), 0644); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+	if err := system.RunRoot("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable", "--now",
+	if err := system.RunRoot("systemctl", "enable", "--now",
 		paths.HelperSocketUnitName); err != nil {
 		return err
 	}
@@ -127,11 +127,11 @@ func SetupJournalAccess() error {
 		if err := os.MkdirAll("/var/log/journal", 0o755); err != nil {
 			return fmt.Errorf("create /var/log/journal: %w", err)
 		}
-		if err := system.SudoRun("systemd-tmpfiles", "--create",
+		if err := system.RunRoot("systemd-tmpfiles", "--create",
 			"--prefix", "/var/log/journal"); err != nil {
 			return err
 		}
-		if err := system.SudoRun("journalctl", "--flush"); err != nil {
+		if err := system.RunRoot("journalctl", "--flush"); err != nil {
 			return err
 		}
 		logger.Install("journald storage switched to persistent")
@@ -142,7 +142,7 @@ func SetupJournalAccess() error {
 	// banner needs. Read-only: members cannot write or rewrite
 	// journal files. -aG, never -G: a bare -G REPLACES the
 	// supplementary group set.
-	if err := system.SudoRun("usermod", "-aG",
+	if err := system.RunRoot("usermod", "-aG",
 		"systemd-journal", paths.AdminUser); err != nil {
 		return err
 	}

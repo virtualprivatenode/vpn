@@ -136,7 +136,7 @@ func syncthingInstallSteps(
 			run: writeSyncthingService},
 		{name: "Configuring Syncthing authentication",
 			run: func() error {
-				return configureSyncthingAuth(syncPassword)
+				return initializeSyncthingConfig(syncPassword)
 			}},
 		{name: "Adding Syncthing firewall rule",
 			run: AllowSyncthingFirewallRule},

@@ -27,7 +27,7 @@ func CreateSystemUser(username, home string) error {
 			return fmt.Errorf("look up system user %s: %w", username, err)
 		}
 	}
-	return system.SudoRun("adduser",
+	return system.RunRoot("adduser",
 		"--system", "--group",
 		"--home", home,
 		"--shell", "/usr/sbin/nologin",
@@ -43,7 +43,7 @@ func createSystemGroup(name string) error {
 			return fmt.Errorf("look up system group %s: %w", name, err)
 		}
 	}
-	return system.SudoRun("groupadd", "--system", name)
+	return system.RunRoot("groupadd", "--system", name)
 }
 
 // CreateBaseDaemonIdentities provisions the two base daemon identities and

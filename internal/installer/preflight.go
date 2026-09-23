@@ -339,7 +339,7 @@ func sudoersEnablesIOLogging(content string) (string, bool) {
 // midway through the engine's own apt operations. Read-only; no
 // lock taken.
 func checkDpkgAudit() error {
-	out, err := system.RunContext(60*time.Second, "dpkg", "--audit")
+	out, err := system.RunOutputWithTimeout(60*time.Second, "dpkg", "--audit")
 	return dpkgAuditVerdict(out, err)
 }
 

@@ -46,7 +46,7 @@ func (s *SSHPasswordAuthScreen) setCommand() tea.Cmd {
 	s.ctx.State.SSHPasswordAuthKnown = false
 	attempt, disabled, access := s.attempt, s.targetDisabled, s.ctx.sshAccess()
 	return func() tea.Msg {
-		return sshPwAuthDoneMsg{owner: s, attempt: attempt, disabled: disabled, err: access.SetPasswordAuth(disabled)}
+		return sshPwAuthDoneMsg{owner: s, attempt: attempt, disabled: disabled, err: access.SetPasswordAuthDisabled(disabled)}
 	}
 }
 

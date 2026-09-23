@@ -10,10 +10,10 @@ import (
 
 var (
 	readUFWStatusForFeature = func() (string, error) {
-		return system.SudoRunOutput(
+		return system.RunRootOutput(
 			"env", "LC_ALL=C", "ufw", "status")
 	}
-	runFirewallCommand = func(args []string) error { return system.SudoRun(args[0], args[1:]...) }
+	runFirewallCommand = func(args []string) error { return system.RunRoot(args[0], args[1:]...) }
 )
 
 // RequireActiveFirewall is the shared prerequisite for additive post-install

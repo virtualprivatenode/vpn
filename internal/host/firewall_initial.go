@@ -11,16 +11,16 @@ import (
 var (
 	observeSSHForFirewall = ObserveInitialSSHState
 	installUFWForFirewall = func() error {
-		return system.SudoRun("apt-get", "install", "-y", "-qq", "ufw")
+		return system.RunRoot("apt-get", "install", "-y", "-qq", "ufw")
 	}
 	readUFWDefaultForFirewall = func() (string, error) {
-		return system.SudoRunOutput("cat", paths.UFWDefault)
+		return system.RunRootOutput("cat", paths.UFWDefault)
 	}
 	writeUFWDefaultForFirewall = func(data []byte) error {
-		return system.SudoWriteFile(paths.UFWDefault, data, 0o644)
+		return system.WriteFileRoot(paths.UFWDefault, data, 0o644)
 	}
 	runInitialFirewallCommand = func(args []string) error {
-		return system.SudoRun(args[0], args[1:]...)
+		return system.RunRoot(args[0], args[1:]...)
 	}
 )
 

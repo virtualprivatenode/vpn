@@ -78,10 +78,10 @@ func WriteTorConfig(cfg *config.AppConfig) error {
 }
 
 func writeTorConfig(content []byte) error {
-	if err := system.SudoWriteFile(paths.Torrc, content, 0640); err != nil {
+	if err := system.WriteFileRoot(paths.Torrc, content, 0640); err != nil {
 		return err
 	}
-	return system.SudoRun("chown", "root:debian-tor", paths.Torrc)
+	return system.RunRoot("chown", "root:debian-tor", paths.Torrc)
 }
 
 func validateTorConfig(content []byte) error {
@@ -99,7 +99,7 @@ func validateTorConfig(content []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close Tor validation file: %w", err)
 	}
-	if err := system.SudoRun(
+	if err := system.RunRoot(
 		"tor",
 		"--defaults-torrc", "/usr/share/tor/tor-service-defaults-torrc",
 		"-f", tmpPath,
@@ -129,7 +129,7 @@ var (
 	validateTorConfigForAddon  = validateTorConfig
 	writeTorConfigForAddon     = writeTorConfig
 	runTorServiceAction        = func(action string) error {
-		return system.SudoRun("systemctl", action, "tor")
+		return system.RunRoot("systemctl", action, "tor")
 	}
 )
 

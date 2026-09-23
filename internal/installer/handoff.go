@@ -88,12 +88,12 @@ func grantTTY(username string) (string, func(), error) {
 	}
 	origUID, origGID := int(sys.Uid), int(sys.Gid)
 
-	if err := system.SudoRun("chown",
+	if err := system.RunRoot("chown",
 		username+":tty", tty); err != nil {
 		return "", nil, err
 	}
 	restore := func() {
-		if err := system.SudoRun("chown", fmt.Sprintf(
+		if err := system.RunRoot("chown", fmt.Sprintf(
 			"%d:%d", origUID, origGID), tty); err != nil {
 			logger.Install(
 				"handoff: restoring tty owner failed: %v", err)

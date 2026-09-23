@@ -132,7 +132,7 @@ func IsServiceActive(name string) bool {
 }
 
 func ServiceAction(name, action string) error {
-	return SudoRun("systemctl", action, name)
+	return RunRoot("systemctl", action, name)
 }
 
 func RebootRequired() bool {

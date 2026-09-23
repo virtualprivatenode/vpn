@@ -41,18 +41,18 @@ SyslogIdentifier=vpn-cert-stage
 // Idempotent for a recognized interrupted base install.
 func InstallLNDCertWatch() error {
 	pathUnit, serviceUnit := lndCertWatchUnits()
-	if err := system.SudoWriteFile(paths.LNDCertWatchPath,
+	if err := system.WriteFileRoot(paths.LNDCertWatchPath,
 		[]byte(pathUnit), 0644); err != nil {
 		return err
 	}
-	if err := system.SudoWriteFile(paths.LNDCertStageService,
+	if err := system.WriteFileRoot(paths.LNDCertStageService,
 		[]byte(serviceUnit), 0644); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+	if err := system.RunRoot("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable", "--now",
+	if err := system.RunRoot("systemctl", "enable", "--now",
 		paths.LNDCertWatchPathName); err != nil {
 		return err
 	}

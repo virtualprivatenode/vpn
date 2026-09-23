@@ -72,10 +72,10 @@ func WriteInitialNodeRPCConfig(cfg *config.AppConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := system.SudoWriteFile(paths.BitcoinConf, []byte(content), 0640); err != nil {
+	if err := system.WriteFileRoot(paths.BitcoinConf, []byte(content), 0640); err != nil {
 		return err
 	}
-	if err := system.SudoRun(
+	if err := system.RunRoot(
 		"chown", "root:"+bitcoinUser, paths.BitcoinConf); err != nil {
 		return err
 	}

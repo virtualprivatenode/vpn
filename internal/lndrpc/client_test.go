@@ -88,18 +88,12 @@ func TestNilClientSafety(t *testing.T) {
 // every context carries exactly one non-empty macaroon value.
 func TestMacaroonCtxConcurrentRewrite(t *testing.T) {
 	c := &Client{macaroonHex: "00"}
-	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
+			for range 500 {
 				md, ok := metadata.FromOutgoingContext(
 					c.macaroonCtx())
 				if !ok {
@@ -119,7 +113,6 @@ func TestMacaroonCtxConcurrentRewrite(t *testing.T) {
 		c.macaroonHex = fmt.Sprintf("%04x", i+1)
 		c.mu.Unlock()
 	}
-	close(stop)
 	wg.Wait()
 }
 

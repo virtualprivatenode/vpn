@@ -20,13 +20,13 @@ func createLNDDirs(username string) error {
 		{paths.LNDDataDir, username + ":" + username, 0750},
 	}
 	for _, d := range dirs {
-		if err := system.SudoRun("mkdir", "-p", d.path); err != nil {
+		if err := system.RunRoot("mkdir", "-p", d.path); err != nil {
 			return err
 		}
-		if err := system.SudoRun("chown", d.owner, d.path); err != nil {
+		if err := system.RunRoot("chown", d.owner, d.path); err != nil {
 			return err
 		}
-		if err := system.SudoRun("chmod", fmt.Sprintf("%o", d.mode), d.path); err != nil {
+		if err := system.RunRoot("chmod", fmt.Sprintf("%o", d.mode), d.path); err != nil {
 			return err
 		}
 	}
@@ -52,7 +52,7 @@ func WriteLNDServiceFromConfig(cfg *config.AppConfig) error {
 				"flag; re-enable auto-unlock from the node TUI",
 			paths.LNDWalletPassword)
 	}
-	return system.SudoWriteFile(paths.LNDService,
+	return system.WriteFileRoot(paths.LNDService,
 		[]byte(LNDServiceUnit(lndUser, withUnlock)), 0644)
 }
 
@@ -60,11 +60,11 @@ func WriteLNDServiceFromConfig(cfg *config.AppConfig) error {
 // Restart also applies changes when LND is running during an interrupted-install
 // resume. The caller separately verifies and stages the TLS certificate.
 func EnableAndRestartLND() error {
-	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+	if err := system.RunRoot("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable", "lnd"); err != nil {
+	if err := system.RunRoot("systemctl", "enable", "lnd"); err != nil {
 		return err
 	}
-	return system.SudoRun("systemctl", "restart", "lnd")
+	return system.RunRoot("systemctl", "restart", "lnd")
 }

@@ -240,7 +240,7 @@ func (s *SendScreen) handleInputKey(
 				s.focusZone = sendZoneInput
 				return s, nil
 			case 1: // Send
-				return s.submitSendPayment()
+				return s.preparePaymentConfirmation()
 			}
 			return s, nil
 		}
@@ -261,8 +261,9 @@ func (s *SendScreen) handleInputKey(
 	return s, nil
 }
 
-// submitSendPayment validates input before scheduling daemon work.
-func (s *SendScreen) submitSendPayment() (Screen, tea.Cmd) {
+// preparePaymentConfirmation parses input and schedules invoice decoding for
+// review. Only the later confirmation schedules payment submission.
+func (s *SendScreen) preparePaymentConfirmation() (Screen, tea.Cmd) {
 	if !s.ctx.walletExists() {
 		return s, nil
 	}

@@ -25,5 +25,5 @@ func InstallVPNUpdate(version, workDir string) error {
 	if err := system.Run("tar", "-xzf", filepath.Join(workDir, archive), "-C", workDir); err != nil {
 		return err
 	}
-	return system.SudoRun("install", "-m", "755", filepath.Join(workDir, "vpn"), paths.BinaryPath)
+	return system.RunRoot("install", "-m", "755", filepath.Join(workDir, "vpn"), paths.BinaryPath)
 }

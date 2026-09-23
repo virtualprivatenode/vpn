@@ -26,7 +26,7 @@ type SSHObservation struct {
 // Preflight and firewall callers refuse on error. Installer's later SSH step
 // preserves its separate policy to warn and omit the password-auth directive.
 func ObserveInitialSSHState() (SSHObservation, error) {
-	out, err := system.SudoRunOutput("sshd", "-T",
+	out, err := system.RunRootOutput("sshd", "-T",
 		"-C", "user=root,host=localhost,addr=127.0.0.1")
 	if err != nil {
 		return SSHObservation{}, fmt.Errorf(

@@ -97,13 +97,13 @@ func syncthingDirSpecs() []syncthingDirSpec {
 
 func createSyncthingDirs() error {
 	for _, d := range syncthingDirSpecs() {
-		if err := system.SudoRun("mkdir", "-p", d.path); err != nil {
+		if err := system.RunRoot("mkdir", "-p", d.path); err != nil {
 			return err
 		}
-		if err := system.SudoRun("chown", d.owner, d.path); err != nil {
+		if err := system.RunRoot("chown", d.owner, d.path); err != nil {
 			return err
 		}
-		if err := system.SudoRun("chmod",
+		if err := system.RunRoot("chmod",
 			fmt.Sprintf("%o", d.mode), d.path); err != nil {
 			return err
 		}
@@ -144,25 +144,16 @@ WantedBy=multi-user.target
 }
 
 func writeSyncthingService() error {
-	return system.SudoWriteFile(paths.SyncthingService,
+	return system.WriteFileRoot(paths.SyncthingService,
 		[]byte(syncthingServiceUnit()), 0644)
 }
 
-// configureSyncthingAuth provisions Syncthing's identity and
-// writes the complete authored config BEFORE first daemon start.
-//
-// Finding H history: the previous implementation round-tripped
-// the generated config through Go structs carrying `,innerxml`,
-// which re-emitted captured raw XML alongside the typed fields;
-// duplicate <gui>/<options> blocks whose last-wins resolution
-// kept the generate defaults, silently leaving discovery and
-// relays ENABLED on every install. Struct round-trips are
-// unsalvageable here (dedup either duplicates or drops unmodeled
-// elements); the fix is to author the entire file from a
-// template tied to the pinned Syncthing version, then verify it
-// before the daemon ever starts.
-func configureSyncthingAuth(password string) error {
-	system.SudoRunSilent("chown",
+// initializeSyncthingConfig provisions identity and writes the complete initial
+// configuration before first daemon start. It renders the pinned-version
+// template with the generated identity and GUI password hash, then verifies it.
+// This is initial provisioning, not a password-only update.
+func initializeSyncthingConfig(password string) error {
+	system.RunRootSilent("chown",
 		syncthingUser+":"+syncthingUser, paths.SyncthingDir)
 
 	// 1. Crypto identity only: TLS cert/key + device ID. The
@@ -173,7 +164,7 @@ func configureSyncthingAuth(password string) error {
 	//    that generates the identity. runuser (util-linux)
 	//    drops from root to the service user; this box has no
 	//    sudo rules to borrow.
-	if err := system.SudoRun("runuser", "-u", syncthingUser, "--",
+	if err := system.RunRoot("runuser", "-u", syncthingUser, "--",
 		"/usr/local/bin/syncthing",
 		"generate", "--home="+paths.SyncthingDir); err != nil {
 		return fmt.Errorf("syncthing generate: %w", err)
@@ -182,7 +173,7 @@ func configureSyncthingAuth(password string) error {
 	// 2. Extract device ID, device name, and API key from the
 	//    generated config. Read by exact path: `generate` can
 	//    leave its own .syncthing.tmp.* scratch alongside.
-	output, err := system.SudoRunOutput("cat",
+	output, err := system.RunRootOutput("cat",
 		paths.SyncthingConfigXML)
 	if err != nil {
 		return fmt.Errorf("read generated config: %w", err)
@@ -222,11 +213,11 @@ func configureSyncthingAuth(password string) error {
 	rendered := renderSyncthingConfig(
 		gen.Devices[0].ID, gen.Devices[0].Name,
 		gen.GUI.APIKey, string(hash))
-	if err := system.SudoWriteFile(paths.SyncthingConfigXML,
+	if err := system.WriteFileRoot(paths.SyncthingConfigXML,
 		[]byte(rendered), 0640); err != nil {
 		return err
 	}
-	if err := system.SudoRun("chown",
+	if err := system.RunRoot("chown",
 		syncthingUser+":"+syncthingUser,
 		paths.SyncthingConfigXML); err != nil {
 		return err
@@ -259,7 +250,7 @@ func verifySyncthingConfig() error {
 	//     no $HOME. runuser sets $HOME from the passwd entry, so
 	//     the probe works in any environment that can run the
 	//     daemon itself.
-	verOut, err := system.RunContext(10*time.Second,
+	verOut, err := system.RunOutputWithTimeout(10*time.Second,
 		"runuser", "-u", syncthingUser, "--",
 		"/usr/local/bin/syncthing", "--version")
 	if err != nil {
@@ -273,7 +264,7 @@ func verifySyncthingConfig() error {
 	}
 
 	// (b) written config
-	content, err := system.SudoRunOutput("cat",
+	content, err := system.RunRootOutput("cat",
 		paths.SyncthingConfigXML)
 	if err != nil {
 		return fmt.Errorf("re-read config: %w", err)
@@ -334,24 +325,24 @@ func setupChannelBackupWatcher(cfg *config.AppConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := system.SudoWriteFile(paths.BackupWatchPath,
+	if err := system.WriteFileRoot(paths.BackupWatchPath,
 		[]byte(pathUnit), 0644); err != nil {
 		return err
 	}
 
-	if err := system.SudoWriteFile(paths.BackupExportService,
+	if err := system.WriteFileRoot(paths.BackupExportService,
 		[]byte(exportService), 0644); err != nil {
 		return err
 	}
 
-	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+	if err := system.RunRoot("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable",
+	if err := system.RunRoot("systemctl", "enable",
 		"lnd-backup-watch.path"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "start",
+	if err := system.RunRoot("systemctl", "start",
 		"lnd-backup-watch.path"); err != nil {
 		return err
 	}
@@ -360,7 +351,7 @@ func setupChannelBackupWatcher(cfg *config.AppConfig) error {
 	// least-privilege unit that handles future changes. A node
 	// without a wallet/channel backup yet is a normal no-op.
 	if _, err := os.Stat(paths.ChannelBackup(profile.LNDNetwork)); err == nil {
-		if err := system.SudoRun("systemctl", "start",
+		if err := system.RunRoot("systemctl", "start",
 			"lnd-backup-export.service"); err != nil {
 			return err
 		}
@@ -410,7 +401,7 @@ ExecStart=%s publish-lnd-backup %s
 	return pathUnit, exportService, nil
 }
 
-var syncthingServiceCommand = system.SudoRun
+var syncthingServiceCommand = system.RunRoot
 
 // stopSyncthingFailSafe attempts both stop and disable so an unverified daemon
 // cannot silently return on reboot. Failures remain explicit; retained residue
@@ -429,13 +420,13 @@ func failSyncthingPrivacy(cause error) error {
 }
 
 func startSyncthing() error {
-	if err := system.SudoRun("systemctl", "daemon-reload"); err != nil {
+	if err := system.RunRoot("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable", "syncthing"); err != nil {
+	if err := system.RunRoot("systemctl", "enable", "syncthing"); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "start", "syncthing"); err != nil {
+	if err := system.RunRoot("systemctl", "start", "syncthing"); err != nil {
 		return failSyncthingPrivacy(err)
 	}
 
@@ -457,12 +448,13 @@ func startSyncthing() error {
 	}
 
 	// Verify the running daemon accepted the authored privacy settings.
-	return confirmSyncthingPrivacy()
+	return verifySyncthingPrivacyOrStop()
 }
 
-// confirmSyncthingPrivacy verifies effective network, reporting and GUI settings
-// after startup. Missing or mismatched values trigger stop and disable.
-func confirmSyncthingPrivacy() error {
+// verifySyncthingPrivacyOrStop checks effective network, reporting and GUI
+// settings after startup. Any error attempts to stop and disable the service;
+// failures of those protective actions are included in the returned error.
+func verifySyncthingPrivacyOrStop() error {
 	apiKey, err := SyncthingAPIKey()
 	if err == nil {
 		err = syncthing.NewClient(apiKey).ConfirmPrivacy(context.Background())

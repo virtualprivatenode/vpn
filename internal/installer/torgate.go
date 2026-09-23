@@ -166,7 +166,7 @@ func queryTorBootstrapProgress() (int, error) {
 	// granted only inside the bitcoind and lnd units through
 	// SupplementaryGroups=debian-tor. Read it directly through the
 	// root-requiring wrapper here.
-	cookie, err := system.SudoReadFile(torCookiePath)
+	cookie, err := system.ReadFileRoot(torCookiePath)
 	if err != nil {
 		return 0, fmt.Errorf("read control cookie: %w", err)
 	}
@@ -268,7 +268,7 @@ func torProbeVerdict(output string, err error) torProbeResult {
 // endpoint warns and proceeds.
 func runTorExitProbe() error {
 	for attempt := 0; attempt < torProbeAttempts; attempt++ {
-		output, err := system.RunContext(15*time.Second,
+		output, err := system.RunOutputWithTimeout(15*time.Second,
 			"torsocks", "curl", "-s", "--max-time", "10",
 			torProbeURL)
 		switch torProbeVerdict(output, err) {

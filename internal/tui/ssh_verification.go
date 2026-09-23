@@ -6,8 +6,8 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/logger"
 )
 
-type sshVerificationReader interface {
-	Read() app.SSHVerification
+type sshLoginVerifier interface {
+	Verify() app.SSHVerification
 	Close()
 }
 
@@ -28,13 +28,13 @@ func (m *Model) admitSSHVerification() tea.Cmd {
 		return nil
 	}
 	if m.screenCtx.SSHVerification == nil {
-		m.screenCtx.SSHVerification = app.NewSSHVerificationReader()
+		m.screenCtx.SSHVerification = app.NewSSHLoginVerifier()
 	}
 	reader := m.screenCtx.SSHVerification
 	request := &sshVerificationRequest{owner: m.screenCtx}
 	m.verificationActive = request
 	return func() tea.Msg {
-		return sshVerificationResultMsg{request: request, result: reader.Read()}
+		return sshVerificationResultMsg{request: request, result: reader.Verify()}
 	}
 }
 

@@ -48,7 +48,7 @@ func InstallBitcoinCoreBinaries(version, workDir string) error {
 	}
 	for _, entry := range entries {
 		src := filepath.Join(extractDir, entry.Name())
-		if err := system.SudoRun("install", "-m", "0755",
+		if err := system.RunRoot("install", "-m", "0755",
 			"-o", "root", "-g", "root",
 			src, "/usr/local/bin/"); err != nil {
 			return err

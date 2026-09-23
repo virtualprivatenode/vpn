@@ -18,6 +18,9 @@ type githubRelease struct {
 
 const versionCacheMaxAge = 24 * time.Hour
 
+// CheckLatestVersion returns a cached version for up to 24 hours or fetches it
+// over Tor and may update the cache. Empty means unavailable; a returned version
+// does not establish update eligibility or that it is newer than this binary.
 func CheckLatestVersion() string {
 	if cached := readVersionCache(); cached != "" {
 		return cached
@@ -26,7 +29,7 @@ func CheckLatestVersion() string {
 	if _, err := exec.LookPath("torsocks"); err != nil {
 		return ""
 	}
-	output, err := system.RunContext(10*time.Second,
+	output, err := system.RunOutputWithTimeout(10*time.Second,
 		"torsocks", "curl", "-sL",
 		"https://api.github.com/repos/virtualprivatenode/vpn/releases/latest")
 	if err != nil {

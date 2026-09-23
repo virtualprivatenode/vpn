@@ -25,7 +25,7 @@ func InstallInitialBinary() error {
 	if self == paths.BinaryPath {
 		return nil
 	}
-	if err := system.SudoRun("install", "-m", "755",
+	if err := system.RunRoot("install", "-m", "755",
 		self, paths.BinaryPath); err != nil {
 		return fmt.Errorf("install binary: %w", err)
 	}
@@ -37,10 +37,10 @@ func InstallInitialBinary() error {
 // InstallBasePackages prepares the packages needed before Tor routing is
 // configured. Installer keeps this initial clearnet phase before its Tor gate.
 func InstallBasePackages() error {
-	if err := system.SudoRun("apt-get", "update", "-qq"); err != nil {
+	if err := system.RunRoot("apt-get", "update", "-qq"); err != nil {
 		return err
 	}
-	return system.SudoRun("apt-get", "install", "-y", "-qq",
+	return system.RunRoot("apt-get", "install", "-y", "-qq",
 		"sudo", "gnupg", "tor", "torsocks", "wget", "curl", "ufw")
 }
 
@@ -57,7 +57,7 @@ func PrepareBaseHost() error {
 					content += "\n"
 				}
 				content += "127.0.0.1 " + name + "\n"
-				if err := system.SudoWriteFile("/etc/hosts",
+				if err := system.WriteFileRoot("/etc/hosts",
 					[]byte(content), 0644); err != nil {
 					return fmt.Errorf(
 						"fix hostname resolution: %w", err)
@@ -67,7 +67,7 @@ func PrepareBaseHost() error {
 		}
 	}
 	// NTP remains best effort; inability to enable it is logged.
-	if err := system.SudoRunSilent(
+	if err := system.RunRootSilent(
 		"timedatectl", "set-ntp", "true"); err != nil {
 		logger.Install(
 			"WARNING: could not enable NTP sync (%v)", err)
@@ -82,16 +82,16 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 `
-	if err := system.SudoWriteFile(
+	if err := system.WriteFileRoot(
 		paths.DisableIPv6Conf, []byte(content), 0644); err != nil {
 		return err
 	}
-	return system.SudoRunSilent("sysctl", "--system")
+	return system.RunRootSilent("sysctl", "--system")
 }
 
 // InstallUnattendedUpgrades installs Debian's security-update tooling.
 func InstallUnattendedUpgrades() error {
-	return system.SudoRun("apt-get", "install", "-y", "-qq",
+	return system.RunRoot("apt-get", "install", "-y", "-qq",
 		"unattended-upgrades", "apt-listchanges")
 }
 
@@ -102,7 +102,7 @@ func ConfigureUnattendedUpgrades() error {
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 `
-	if err := system.SudoWriteFile(paths.AutoUpgrades,
+	if err := system.WriteFileRoot(paths.AutoUpgrades,
 		[]byte(autoConf), 0644); err != nil {
 		return err
 	}
@@ -116,13 +116,13 @@ Unattended-Upgrade::Automatic-Reboot-Time "04:00";
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";
 `
-	return system.SudoWriteFile(paths.UnattendedUpgrades,
+	return system.WriteFileRoot(paths.UnattendedUpgrades,
 		[]byte(upgradeConf), 0644)
 }
 
 // InstallFail2ban installs the SSH intrusion-prevention service.
 func InstallFail2ban() error {
-	return system.SudoRun("apt-get", "install",
+	return system.RunRoot("apt-get", "install",
 		"-y", "-qq", "fail2ban")
 }
 
@@ -137,15 +137,15 @@ maxretry = 5
 findtime = 600
 bantime = 600
 `
-	if err := system.SudoWriteFile(paths.Fail2banJail,
+	if err := system.WriteFileRoot(paths.Fail2banJail,
 		[]byte(content), 0644); err != nil {
 		return err
 	}
-	if err := system.SudoRun("systemctl", "enable",
+	if err := system.RunRoot("systemctl", "enable",
 		"fail2ban"); err != nil {
 		return err
 	}
-	return system.SudoRun("systemctl", "restart", "fail2ban")
+	return system.RunRoot("systemctl", "restart", "fail2ban")
 }
 
 // ConfigureAptTor routes subsequent apt downloads through Tor and bounds
@@ -158,7 +158,7 @@ Acquire::http::Timeout "60";
 Acquire::https::Timeout "60";
 Acquire::Retries "3";
 `
-	return system.SudoWriteFile(paths.AptTorProxy,
+	return system.WriteFileRoot(paths.AptTorProxy,
 		[]byte(content), 0644)
 }
 
@@ -167,5 +167,5 @@ func EnsureGPG() error {
 	if _, err := exec.LookPath("gpg"); err == nil {
 		return nil
 	}
-	return system.SudoRun("apt-get", "install", "-y", "-qq", "gnupg")
+	return system.RunRoot("apt-get", "install", "-y", "-qq", "gnupg")
 }
