@@ -13,12 +13,12 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/paths"
 )
 
-// SetLoginPassword is shared by installation and the root helper. Its bound is
-// independent of the requesting TUI: disconnecting does not cancel an accepted
-// change. An interrupted process may already have changed the password.
+// SetLoginPassword provisions the initial password during root installation.
+// It has no helper endpoint. Runtime changes use passwd as the owner.
+// An interrupted process may already have changed the password.
 func SetLoginPassword(password loginpassword.Password) error {
 	if os.Geteuid() != 0 {
-		return errors.New("login password changes require the root helper")
+		return errors.New("initial password provisioning requires root")
 	}
 	return runLoginPassword(password, 45*time.Second, func(ctx context.Context) *exec.Cmd {
 		return exec.CommandContext(ctx, "/usr/sbin/chpasswd")
@@ -43,17 +43,4 @@ func runLoginPassword(password loginpassword.Password, timeout time.Duration, co
 		return fmt.Errorf("login password change was not confirmed: %w", err)
 	}
 	return nil
-}
-
-// ClearPasswordPendingMarker acknowledges an operator-chosen password. This is
-// best effort after a successful change; installer completion uses strict cleanup.
-func ClearPasswordPendingMarker() error {
-	if os.Geteuid() != 0 {
-		return errors.New("password delivery state requires the root helper")
-	}
-	err := os.Remove(paths.PasswordPendingMarker)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	return err
 }

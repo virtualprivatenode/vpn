@@ -13,22 +13,11 @@ package installer
 // untouched — no user created, no config written, no service
 // restarted.
 //
-// Re-homed under root dispatch (ruling xvi(c)):
-//   - the commit-4 `sudo -n` scaffolding check is DELETED — install
-//     no longer depends on any sudo rule (it IS root), and commit 7
-//     deletes NOPASSWD entirely;
-//   - the torsocks assertion RE-SEQUENCED out of preflight: the
-//     engine installs tor/torsocks itself now, so asserting it here
-//     would refuse every fresh box. The post-Tor-install,
-//     pre-first-download assertion lives in the torgate step
-//     (torgate.go LookPaths torsocks before gating; retires with
-//     the Go-native Tor client, standalone queue #6);
-//   - the sudoers scan reads /etc/sudoers.d directly — root needs
-//     no `sudo find` workaround, and the failed-as-skipped
-//     plumbing that coupled it to the deleted sudo check is gone;
-//   - Read-only initial SSH port/auth observation in host:
-//     REFUSE on failure — the firewall rules and the drop-in seed
-//     derive from it, and there is deliberately no guessing path.
+// Installation is already privileged, so preflight does not require a sudo
+// grant for the invoking account. The installer verifies the new owner's sudo
+// policy after applying its password and before disabling root SSH.
+// Tor availability is checked after package installation. Initial SSH policy
+// must be observable; later SSH and firewall steps verify their own inputs.
 
 import (
 	"context"
@@ -63,13 +52,9 @@ const (
 	checkNameSSHState  = "ssh daemon state is observable"
 )
 
-// RunPreflight runs every check, prints a full report to stderr on
-// any failure (and mirrors the failures to the log file, so the log
-// trail never just stops), and returns a summary error that aborts
-// the install before its first step. On success it returns the sshd
-// observation for the wizard copy, the firewall rules, and the
-// config seed — observed once, consumed everywhere (the SSH
-// hardening step re-observes seconds before its own write).
+// RunPreflight reports all failed checks before lifecycle initialization.
+// The returned SSH observation describes preflight time, not the effective
+// owner policy that installation will establish and verify later.
 func RunPreflight() (host.SSHObservation, error) {
 	results, obs := runPreflightChecks()
 
@@ -144,15 +129,12 @@ func checkDebianArchitecture() error {
 // operator about that are not grounds for refusal.
 func preflightWarnings() []string {
 	var ws []string
-	// A world-readable /etc/sudoers.d discloses the box's sudo
-	// POLICY to any local user (Debian 13 ships it 750). It
-	// holds no credentials, and this node grants no sudo rules
-	// anyway — a disclosure note, never a refusal.
+	// Directory readability exposes names, not the contents of protected rules.
+	// Preserve host-managed directory permissions and report the deviation.
 	if fi, err := os.Stat(paths.SudoersDir); err == nil &&
 		fi.Mode().Perm()&0o004 != 0 {
 		ws = append(ws, fmt.Sprintf(
-			"%s is world-readable (%o) — local users can read "+
-				"sudo policy; Debian ships it 0750",
+			"%s has mode %o; the certified Debian baseline uses 750. VPN leaves host-managed permissions unchanged.",
 			paths.SudoersDir, fi.Mode().Perm()))
 	}
 	return ws
@@ -212,13 +194,9 @@ func checkOSRelease(content string) error {
 // (documented, accepted): a nonstandard @includedir pointing
 // elsewhere is not followed.
 //
-// This app itself no longer runs anything through sudo (the
-// admin user has no sudo rights; privileged operations go
-// through the root helper), so nothing of OURS can be captured
-// by sudo I/O recording anymore. The check stays because a box
-// where someone silently records terminal input is a box this
-// installer should not set a node up on — the assertion is
-// about the environment's hygiene, cheap to keep.
+// Installation can run through sudo and handles account credentials. Retain
+// the existing refusal of observed terminal recording. Runtime node operations
+// use the helper; owners can also invoke sudo for general host maintenance.
 func checkSudoersIOLogging() error {
 	files := []string{paths.SudoersFile}
 	dropIns, err := listSudoersDropIns()
@@ -422,8 +400,7 @@ func ufwCandidateVerdict(output string) error {
 
 // ── Report formatting ────────────────────────────────────
 
-// FormatPreflightReport renders the full check list with every
-// failure's reason. Pure — unit-tested.
+// FormatPreflightReport renders the full check list with every failure's reason.
 func FormatPreflightReport(results []PreflightResult) string {
 	var b strings.Builder
 	b.WriteString("  Preflight — checking the environment " +

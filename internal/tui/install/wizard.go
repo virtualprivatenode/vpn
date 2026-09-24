@@ -284,13 +284,6 @@ func (m wizardModel) updateAccess(
 				chosen = append(chosen, k)
 			}
 		}
-		if len(chosen) == 0 && !m.info.PasswordAuth {
-			m.accErr = "Password login is disabled on this " +
-				"box. Select or paste at least one key, or " +
-				"the " + paths.AdminUser +
-				" user would have no way in over SSH."
-			return m, nil
-		}
 		m.input.Keys = chosen
 		m.enterPasswordScreen()
 		return m, nil
@@ -541,22 +534,11 @@ func (m *wizardModel) syncPwFocus() {
 func (m wizardModel) viewPassword(p *wizPane) {
 	p.header("Login password")
 	p.blank()
-	if m.info.PasswordAuth {
-		p.text("Set the login password for '" +
-			paths.AdminUser + "'. Password login over SSH is " +
-			"currently enabled on this box, so this password " +
-			"works over the network; once you have verified " +
-			"key login, you can disable password auth from " +
-			"System, SSH Keys.")
-	} else {
-		p.text("Set the recovery password for '" +
-			paths.AdminUser + "'. Password login over SSH is " +
-			"disabled on this box, so this password works " +
-			"ONLY at the machine's own login console: your " +
-			"provider's console page, or a keyboard on the " +
-			"box itself. It is the fallback when SSH is " +
-			"broken.")
-	}
+	p.text("Set the password for '" + paths.AdminUser + "'. " +
+		"Installation enables password SSH for this account. " +
+		"The same password authorizes sudo for server maintenance. " +
+		"SSH keys are optional. After testing key login, you can " +
+		"disable password SSH from System, SSH Keys.")
 	p.blank()
 	p.text("Use a password manager: generate it, store it " +
 		"there first. Minimum " +

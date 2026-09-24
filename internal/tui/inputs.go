@@ -188,17 +188,6 @@ func newSSHKeyInput() textinput.Model {
 	return ti
 }
 
-func newUserPasswordInput() textinput.Model {
-	ti := textinput.New()
-	ti.Placeholder = "(paste from password manager)"
-	ti.CharLimit = 256
-	ti.SetWidth(60)
-	ti.Prompt = "  "
-	ti.EchoMode = textinput.EchoPassword
-	applyInputStyles(&ti)
-	return ti
-}
-
 func validateOnChainAddrChars(s string) error {
 	for _, ch := range s {
 		if !((ch >= 'a' && ch <= 'z') ||

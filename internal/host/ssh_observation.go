@@ -23,8 +23,8 @@ type SSHObservation struct {
 }
 
 // ObserveInitialSSHState queries effective SSH configuration for initial setup.
-// Preflight and firewall callers refuse on error. Installer's later SSH step
-// preserves its separate policy to warn and omit the password-auth directive.
+// Preflight and firewall callers refuse on error. Owner password access is
+// established separately by the installer's SSH hardening step.
 func ObserveInitialSSHState() (SSHObservation, error) {
 	out, err := system.RunRootOutput("sshd", "-T",
 		"-C", "user=root,host=localhost,addr=127.0.0.1")

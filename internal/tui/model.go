@@ -342,9 +342,6 @@ func Show(
 		if m.screenCtx.AutoUnlock != nil {
 			m.screenCtx.AutoUnlock.Close()
 		}
-		if m.screenCtx.LoginPasswords != nil {
-			m.screenCtx.LoginPasswords.Close()
-		}
 		if m.screenCtx.WalletCreation != nil {
 			m.screenCtx.WalletCreation.Close()
 		}

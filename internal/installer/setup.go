@@ -52,15 +52,6 @@ type InstallOptions struct {
 	// without terminal ledger status, without handoff, without the
 	// verification banner — first-boot steps are still owed.
 	UntilBake bool
-	// AllowConsoleOnly permits an unattended install to
-	// complete with NO SSH way in: no enumerable keys AND
-	// password auth observed off means the printed password
-	// works only at the provider console. Without this flag
-	// such a run REFUSES — completing it would strand the box
-	// by automation. The flag names the consequence so the
-	// consent is auditable wherever the command line is
-	// recorded.
-	AllowConsoleOnly bool
 }
 
 // installStartupDependencies keeps the lifecycle authorization boundary
@@ -142,7 +133,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 
 	// Preflight is read-only and precedes every durable initialization.
-	obs, err := deps.runPreflight()
+	_, err = deps.runPreflight()
 	if err != nil {
 		return err
 	}
@@ -185,7 +176,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	cfg := config.Default()
 	cfg.Network = ledger.Context.Network
 	cfg.P2PMode = ledger.Context.InitialP2PMode
-	dec := &InstallDecisions{Obs: obs}
+	dec := &InstallDecisions{}
 	if ledger.Context.DbCacheMB != nil {
 		dec.DbCacheMB = *ledger.Context.DbCacheMB
 		cfg.DbCache = dec.DbCacheMB
@@ -221,8 +212,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	var res RunResult
 	openConsole := false
 	if opts.Unattended && lifecycle.Disposition != lifecycleCompletionPending {
-		if err := fillUnattendedDecisions(
-			dec, opts.AllowConsoleOnly); err != nil {
+		if err := fillUnattendedDecisions(dec); err != nil {
 			return err
 		}
 		if ledger.Context.DbCacheMB == nil {
@@ -334,15 +324,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	}
 
 	if opts.Unattended {
-		// The console-only end state (reachable only with
-		// --allow-console-only) has no working ssh line to
-		// print — say what IS true instead. Same condition the
-		// strand guard evaluated, minus the consent flag.
-		if strandsBox(len(dec.Keys), dec.Obs.PasswordAuth, false) {
-			printConsoleOnlyInstructions()
-		} else {
-			printConnectInstructions()
-		}
+		printConnectInstructions()
 		return nil
 	}
 	// The done screen offered a real choice (live-run fix):
@@ -379,6 +361,12 @@ func prepareInstallCompletion(
 ) error {
 	if !ledger.allBaseStepsDone() {
 		return errors.New("cannot finalize installation before every base step is recorded")
+	}
+	if err := host.VerifyOperatorSudo(); err != nil {
+		return err
+	}
+	if err := host.VerifyInitialOwnerSSH(); err != nil {
+		return err
 	}
 	logger.Install("all %d install steps complete", stepCount)
 	if ledger.Context.DbCacheMB == nil {
@@ -435,29 +423,9 @@ func printGeneratedPassword(password string) error {
 // (ruling vii: random survives ONLY here) and printed at the
 // end. dbcache takes the hardware recommendation.
 //
-// Zero-key strand guard: the interactive wizard refuses zero
-// selected keys when observed password auth is off; this is the
-// unattended equivalent. A box with no enumerable keys AND
-// password auth off would finish with no SSH way in at all —
-// the printed password works only at the provider console. That
-// outcome must be asked for by name (--allow-console-only),
-// never reached by default: a warning scrolling past in an
-// unattended run is not consent.
-func fillUnattendedDecisions(
-	dec *InstallDecisions, allowConsoleOnly bool,
-) error {
+// Initial installation establishes owner password SSH even without copied keys.
+func fillUnattendedDecisions(dec *InstallDecisions) error {
 	dec.Keys = DedupeKeys(EnumerateKeySources())
-	if strandsBox(len(dec.Keys), dec.Obs.PasswordAuth,
-		allowConsoleOnly) {
-		return errors.New(
-			"refusing: no SSH keys found anywhere on this box " +
-				"and password login is disabled in sshd — " +
-				"completing would leave no SSH way in (the " +
-				"generated password works only at a console). " +
-				"Add a key, enable password auth, or re-run " +
-				"with --allow-console-only if console-only " +
-				"access is really what you want")
-	}
 	if err := fillGeneratedPassword(dec); err != nil {
 		return err
 	}
@@ -474,15 +442,6 @@ func fillGeneratedPassword(dec *InstallDecisions) error {
 	dec.Password = pw
 	dec.GeneratedPassword = gen
 	return nil
-}
-
-// strandsBox is the zero-key strand condition: no keys to
-// write, password auth off, and no explicit console-only
-// consent. Pure — unit-tested.
-func strandsBox(
-	keyCount int, passwordAuth, allowConsoleOnly bool,
-) bool {
-	return keyCount == 0 && !passwordAuth && !allowConsoleOnly
 }
 
 // buildInstallSteps returns the initial-install step list. Every
@@ -527,7 +486,7 @@ func buildInstallSteps(
 			Name: "Configuring hostname and clock sync",
 			Fn:   host.PrepareBaseHost},
 		{Key: "identity.access", Phase: PhaseFirstBoot,
-			Name: "Creating the admin user (" +
+			Name: "Creating the owner account (" +
 				paths.AdminUser + ")",
 			Fn: func() error {
 				return applyIdentityAccess(dec)
@@ -671,15 +630,8 @@ func buildInstallSteps(
 			Fn: func() error {
 				return installSSHHardening()
 			}},
-		// The runtime privilege boundary. Three steps, all
-		// first-boot (they need the admin user and group to
-		// exist): journal read access for the admin user, the
-		// root helper's socket-activated units, and the staging
-		// board snapshot. After these — and with
-		// identity.access granting no sudo — the end state
-		// holds: the admin user has no root privilege at all,
-		// and every privileged operation it can request is one
-		// of the helper's fixed, typed, journal-audited verbs.
+		// The unprivileged TUI uses fixed helper operations. The owner can
+		// separately authenticate with sudo for general host maintenance.
 		{Key: "journal.access", Phase: PhaseFirstBoot,
 			Name: "Granting journal read access",
 			Fn:   host.SetupJournalAccess},

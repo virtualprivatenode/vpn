@@ -14,8 +14,8 @@ import (
 )
 
 // CreateOperatorAccess creates the operator account and installs confirmed keys
-// during an admitted base installation. It grants no sudo access. Password
-// application and delivery remain separate so installer can record partial work.
+// during an admitted base installation. Password and sudo provisioning remain
+// separate so installer can record successful password application first.
 func CreateOperatorAccess(keys []sshkeys.Key) error {
 	if os.Geteuid() != 0 {
 		return errors.New("initial operator access requires root")
@@ -29,12 +29,6 @@ func CreateOperatorAccess(keys []sshkeys.Key) error {
 		return err
 	}
 
-	// Preserve the installer's removal of this fixed sudoers path. Lifecycle
-	// admission refuses a pre-existing unmarked grant; this operation does not
-	// inventory or establish ownership of independent host sudo policy.
-	if err := os.Remove(paths.AdminSudoers); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove old sudoers rule %s: %w", paths.AdminSudoers, err)
-	}
 	if len(keys) == 0 {
 		logger.Install("admin access: no SSH keys configured (password login)")
 		return nil

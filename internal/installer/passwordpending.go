@@ -15,10 +15,10 @@ package installer
 // presence means "a generated admin password is applied on this
 // box but was never displayed". A completing unattended pass
 // that finds it re-applies its own freshly generated password
-// and prints that one instead. The operator setting a password
-// of their own from the node TUI clears it too — at that
-// point they hold a credential they chose. The file carries no
-// secret; plaintext passwords exist only in process memory.
+// and prints that one instead. Only installer completion clears
+// the marker after successful delivery. Native passwd changes
+// do not alter installation state. The file carries no secret;
+// plaintext passwords exist only in process memory.
 
 import (
 	"fmt"
@@ -28,10 +28,10 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
-const passwordPendingNote = `An unattended install applied a generated admin login password
-that has not been displayed yet. A completed unattended run
-resolves this automatically; setting a new password from the
-node TUI also clears it.
+const passwordPendingNote = `An unattended install applied a generated owner login password
+that has not been displayed yet. Resume the unattended installation
+to deliver a working password and clear this marker.
+Native password changes do not clear installation state.
 `
 
 // markPasswordPending records that a generated password was

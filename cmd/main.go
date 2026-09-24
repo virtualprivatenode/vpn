@@ -209,7 +209,7 @@ func parseArgs(
 			case "--until=bake":
 				opts.UntilBake = true
 			case "--allow-console-only":
-				opts.AllowConsoleOnly = true
+				return 0, opts, errors.New("--allow-console-only is no longer supported: installation enables password SSH for vpn")
 			default:
 				return 0, opts, fmt.Errorf(
 					"unknown install flag %q", a)
@@ -259,10 +259,6 @@ Usage:
       --signet       use default public signet (testing only)
       --unattended   no prompts (keys auto-copied from the box,
                      login password generated and printed once)
-      --allow-console-only
-                     let an unattended install finish even when
-                     it would leave no SSH way in (no keys found
-                     and password login disabled)
   vpn helperd        the node's root helper (started by systemd
                      through its socket, not by hand)
   vpn stage-lnd-cert refresh the node's staged copy of the

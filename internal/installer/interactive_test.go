@@ -24,7 +24,7 @@ func interactiveFixture(t *testing.T, steps []InstallStep, complete func() error
 	if err != nil {
 		t.Fatal(err)
 	}
-	dec := &InstallDecisions{Obs: host.SSHObservation{PasswordAuth: true}}
+	dec := &InstallDecisions{}
 	s := newInstallSession(runner, dec, func(int) error { return errors.New("unexpected cache write") }, complete)
 	pw, err := loginpassword.New("exact-test-password")
 	if err != nil {
@@ -175,18 +175,12 @@ func TestInteractiveInputValidationAndRetry(t *testing.T) {
 	calls, writes := 0, 0
 	s, input := interactiveFixture(t, []InstallStep{{Key: "binary.install", Name: "Binary", Fn: func() error { calls++; return nil }}}, func() error { return nil })
 	s.needHardware = true
-	s.dec.Obs.PasswordAuth = false
 	writeErr := errors.New("cache decision not saved")
 	s.persistDBCache = func(int) error { writes++; return writeErr }
-	key, err := sshkeys.Parse(testKeyA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	input.Keys = []sshkeys.Key{key}
+	input.Keys = nil // Password SSH makes initial keys optional.
 	input.DBCacheMB = 512
 	for _, invalid := range []InteractiveInput{
 		{Keys: input.Keys, DBCacheMB: 512},
-		{Password: input.Password, DBCacheMB: 512},
 		{Keys: []sshkeys.Key{{RawLine: "ssh-ed25519 YQ=="}}, Password: input.Password, DBCacheMB: 512},
 		{Keys: input.Keys, Password: input.Password, DBCacheMB: 999},
 	} {

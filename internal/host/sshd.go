@@ -4,7 +4,9 @@ package host
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/virtualprivatenode/vpn/internal/paths"
@@ -13,22 +15,22 @@ import (
 )
 
 func buildHardeningDropIn(passwordAuth string) string {
-	base := `# Virtual Private Node — SSH hardening
-# Managed by the vpn TUI. Do not edit by hand.
+	return `# Virtual Private Node SSH policy
+# Managed by VPN. Password authentication below applies only to the owner.
 PermitRootLogin no
-PubkeyAuthentication yes
-ChallengeResponseAuthentication no
-KbdInteractiveAuthentication no
-X11Forwarding no
+Match User root
+    PermitRootLogin no
+Match User vpn
+    PubkeyAuthentication yes
+    KbdInteractiveAuthentication no
+    X11Forwarding no
+    PasswordAuthentication ` + passwordAuth + `
+Match all
 `
-	if passwordAuth == "" {
-		return base
-	}
-	return base + "PasswordAuthentication " + passwordAuth + "\n"
 }
 
-// ApplySSHHardening preserves the installer's observed yes/no state. Empty omits
-// the directive when observation failed. Runtime changes use RebuildSSHHardeningConfig.
+// ApplySSHHardening validates syntax and effective policy before restarting.
+// Both the installer and runtime use the same owner-scoped configuration.
 func ApplySSHHardening(passwordAuth string) error {
 	if os.Geteuid() != 0 {
 		return errors.New("SSH configuration requires the root helper")
@@ -43,7 +45,7 @@ func ApplySSHHardening(passwordAuth string) error {
 			}
 			return err
 		},
-		validate: func() (string, error) { return system.RunRootCombinedOutput("sshd", "-t") },
+		validate: func() (string, error) { return validateSSHPolicy(passwordAuth) },
 		restart:  restartSSHD,
 	})
 }
@@ -59,7 +61,7 @@ type sshdOps struct {
 // Both installation and runtime changes validate before restarting and restore
 // the previous file on validation failure. Restart failure leaves state uncertain.
 func applySSHHardening(passwordAuth string, ops sshdOps) error {
-	if passwordAuth != "" && passwordAuth != "yes" && passwordAuth != "no" {
+	if passwordAuth != "yes" && passwordAuth != "no" {
 		return errors.New("invalid password authentication setting")
 	}
 	prev, err := ops.read()
@@ -85,8 +87,8 @@ func applySSHHardening(passwordAuth string, ops sshdOps) error {
 	return ops.restart()
 }
 
-// The helper checks fresh, structurally valid keys while holding the same lock
-// as application key edits. This cannot prove that a key actually permits login.
+// RebuildSSHHardeningConfig checks fresh, structurally valid keys while holding
+// the same lock as application edits. This cannot prove successful key login.
 func RebuildSSHHardeningConfig(disabled bool) error {
 	if os.Geteuid() != 0 {
 		return errors.New("SSH configuration requires the root helper")
@@ -164,4 +166,77 @@ func restartSSHD() error {
 		return nil
 	}
 	return system.RunRoot("systemctl", "restart", "ssh")
+}
+
+// Check localhost and, when inherited from SSH, the current remote connection.
+// These samples detect conflicting Match rules; only a new login proves access.
+func validateSSHPolicy(passwordAuth string) (string, error) {
+	out, err := system.RunRootCombinedOutput("sshd", "-t")
+	if err != nil {
+		return out, err
+	}
+	contexts := []string{"host=localhost,addr=127.0.0.1"}
+	if connection := os.Getenv("SSH_CONNECTION"); connection != "" {
+		fields := strings.Fields(connection)
+		if len(fields) != 4 {
+			return "invalid SSH_CONNECTION; cannot verify connection policy", errors.New("invalid SSH connection")
+		}
+		remote, e1 := netip.ParseAddr(fields[0])
+		local, e2 := netip.ParseAddr(fields[2])
+		port, e3 := strconv.Atoi(fields[3])
+		if e1 != nil || e2 != nil || e3 != nil || port < 1 || port > 65535 {
+			return "invalid SSH_CONNECTION; cannot verify connection policy", errors.New("invalid SSH connection")
+		}
+		contexts = append(contexts, "host="+remote.String()+",addr="+remote.String()+",laddr="+local.String()+",lport="+fields[3])
+	}
+	for _, connection := range contexts {
+		owner, err := system.RunRootOutput("sshd", "-T", "-C", "user="+paths.AdminUser+","+connection)
+		if err != nil {
+			return err.Error(), err
+		}
+		root, err := system.RunRootOutput("sshd", "-T", "-C", "user=root,"+connection)
+		if err != nil {
+			return err.Error(), err
+		}
+		if err := verifySSHPolicy(passwordAuth, owner, root); err != nil {
+			return err.Error(), err
+		}
+	}
+	return "", nil
+}
+
+func verifySSHPolicy(passwordAuth, owner, root string) error {
+	enabled, err := parsePasswordAuth(owner)
+	if err != nil {
+		return err
+	}
+	if enabled != (passwordAuth == "yes") {
+		return errors.New("effective owner password authentication conflicts with requested policy")
+	}
+	value := func(out, key string) string {
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 1 && fields[0] == key {
+				return strings.Join(fields[1:], " ")
+			}
+		}
+		return ""
+	}
+	if value(root, "permitrootlogin") != "no" {
+		return errors.New("effective SSH policy still permits root login")
+	}
+	if value(owner, "pubkeyauthentication") != "yes" || value(owner, "permittty") != "yes" || value(owner, "forcecommand") != "none" || value(owner, "chrootdirectory") != "none" {
+		return errors.New("effective SSH policy does not permit the ordinary owner console")
+	}
+	if enabled && value(owner, "authenticationmethods") != "any" {
+		return errors.New("effective SSH authentication methods do not permit password-only owner login")
+	}
+	return nil
+}
+
+// VerifyInitialOwnerSSH rechecks the installation postcondition on completion,
+// including resumes whose SSH step was already recorded. It never rewrites policy.
+func VerifyInitialOwnerSSH() error {
+	_, err := validateSSHPolicy("yes")
+	return err
 }

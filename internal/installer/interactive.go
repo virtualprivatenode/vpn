@@ -18,13 +18,13 @@ type InstallFrontend func(InstallView, *InstallSession) (openConsole bool, err e
 // InstallView contains observations and presentation data, never ledger access
 // or executable installation steps.
 type InstallView struct {
-	NeedIdentity, NeedHardware, PasswordAuth bool
-	Sources                                  []KeySource
-	Hardware, Minimum                        Hardware
-	DBCacheChoices                           []int
-	RecommendedDBCache                       int
-	Steps                                    []InstallStepView
-	Address                                  string
+	NeedIdentity, NeedHardware bool
+	Sources                    []KeySource
+	Hardware, Minimum          Hardware
+	DBCacheChoices             []int
+	RecommendedDBCache         int
+	Steps                      []InstallStepView
+	Address                    string
 }
 
 // InstallStepView describes a step without granting execution authority.
@@ -109,9 +109,6 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 			keys = append(keys, parsed)
 		}
 		keys = DedupeKeys([]KeySource{{Keys: keys}})
-		if len(keys) == 0 && !s.dec.Obs.PasswordAuth {
-			return errors.New("select at least one SSH key while password login is disabled")
-		}
 	}
 	if s.needHardware {
 		if !slices.Contains(dbCacheChoices, input.DBCacheMB) {
@@ -208,8 +205,7 @@ func installView(s *InstallSession) InstallView {
 	hw := DetectHardware()
 	view := InstallView{
 		NeedIdentity: s.needIdentity, NeedHardware: s.needHardware,
-		PasswordAuth: s.dec.Obs.PasswordAuth,
-		Sources:      SortKeySources(EnumerateKeySources()), Hardware: hw,
+		Sources: SortKeySources(EnumerateKeySources()), Hardware: hw,
 		Minimum:        Hardware{RAMMB: requiredRAMMB, DiskTotalGB: requiredDiskGB, Cores: requiredCores},
 		DBCacheChoices: slices.Clone(dbCacheChoices), RecommendedDBCache: RecommendDbCache(hw.RAMMB),
 		Address: system.PublicIPv4(),

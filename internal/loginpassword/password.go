@@ -1,4 +1,4 @@
-// Package loginpassword defines the shared operator login-password contract.
+// Package loginpassword defines the initial owner login-password contract.
 package loginpassword
 
 import (
@@ -27,7 +27,7 @@ func New(text string) (Password, error) {
 	return Password{text: text}, nil
 }
 
-// Text exposes the secret only for helper IPC and the password tool's stdin.
+// Text exposes the secret only for the installer's password tool stdin.
 // It must not be logged or placed in command arguments.
 func (p Password) Text() string   { return p.text }
 func (Password) String() string   { return "[redacted]" }

@@ -26,7 +26,7 @@ func (s *fakeSession) Stop()                                 { s.stops++ }
 func (s *fakeSession) Events() <-chan installer.InstallEvent { return s.events }
 func wizardFixture() (wizardModel, *fakeSession) {
 	session := &fakeSession{events: make(chan installer.InstallEvent, 10)}
-	info := installer.InstallView{NeedIdentity: true, PasswordAuth: true,
+	info := installer.InstallView{NeedIdentity: true,
 		DBCacheChoices: []int{512, 1024, 2048}, RecommendedDBCache: 1024,
 		Steps: []installer.InstallStepView{{Name: "First"}, {Name: "Second"}}}
 	return newWizardModel(info, session), session
@@ -253,5 +253,17 @@ func assertQuit(t *testing.T, cmd tea.Cmd) {
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Fatalf("exit command returned %T, want tea.QuitMsg", msg)
+	}
+}
+
+func TestWizardAllowsPasswordOnlyOwnerAccess(t *testing.T) {
+	m, session := wizardFixture()
+	m.phase = wzAccess
+	m.keys = nil
+	m.cursor = 0
+	m.btnIdx = 0
+	m, cmd := updateWizard(t, m, enter())
+	if m.phase != wzPassword || m.accErr != "" || cmd != nil || session.starts != 0 {
+		t.Fatal("password-only setup did not reach password choice")
 	}
 }
