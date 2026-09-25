@@ -27,6 +27,13 @@ func (t *passwordTerminal) SetStdout(w io.Writer) { t.cmd.Stdout = w }
 func (t *passwordTerminal) SetStderr(w io.Writer) { t.cmd.Stderr = w }
 func (t *passwordTerminal) Run() (err error) {
 	defer func() { t.execution.err = err }()
+	out := t.cmd.Stdout
+	if out == nil {
+		out = io.Discard
+	}
+	if _, err := fmt.Fprint(out, "To cancel at a password prompt: Ctrl+U, then Ctrl+D.\nCtrl+U clears your input; Ctrl+D ends input.\n\n"); err != nil {
+		return fmt.Errorf("show password instructions: %w", err)
+	}
 	if err := t.cmd.Start(); err != nil {
 		return fmt.Errorf("start passwd: %w", err)
 	}
