@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+
+	"golang.org/x/term"
 )
 
 type passwordExecution struct {
@@ -27,6 +29,20 @@ func (t *passwordTerminal) SetStdout(w io.Writer) { t.cmd.Stdout = w }
 func (t *passwordTerminal) SetStderr(w io.Writer) { t.cmd.Stderr = w }
 func (t *passwordTerminal) Run() (err error) {
 	defer func() { t.execution.err = err }()
+	if input, ok := t.cmd.Stdin.(interface{ Fd() uintptr }); ok {
+		fd := int(input.Fd())
+		state, stateErr := term.GetState(fd)
+		if stateErr != nil {
+			return fmt.Errorf("save password terminal state: %w", stateErr)
+		}
+		// passwd may exit without restoring echo. Restore before tea.Exec
+		// reacquires the terminal and saves its next restoration state.
+		defer func() {
+			if restoreErr := term.Restore(fd, state); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore password terminal state: %w", restoreErr))
+			}
+		}()
+	}
 	out := t.cmd.Stdout
 	if out == nil {
 		out = io.Discard
