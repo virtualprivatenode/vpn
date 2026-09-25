@@ -20,8 +20,9 @@ func HandoffToAdminConsole() {
 		printConnectInstructions()
 		return
 	}
+	// Set this after runuser clears the environment, only for the handoff TUI.
 	cmd := exec.Command("/usr/sbin/runuser", "--pty", "--login", paths.AdminUser,
-		"--command", paths.BinaryPath)
+		"--command", "VPN_TUI_NO_SUSPEND=1 "+paths.BinaryPath)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		logger.Install("handoff: owner console ended with error: %v", err)

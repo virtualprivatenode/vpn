@@ -159,7 +159,9 @@ SSH login, which may use a password; it does not verify a specific replacement
 key or sudo access. Root SSH is disabled, but the root account is retained.
 The installation handoff opens the TUI through a separate pseudo-terminal;
 it does not change the identity of the original SSH connection or prove a new
-vpn SSH login. Keep the provider console or rescue route available.
+vpn SSH login. Ctrl+Z is ignored during this handoff; Ctrl+C exits to the
+original shell. When launched from the `vpn` shell, the TUI supports Ctrl+Z
+to pause and `fg` to resume. Keep the provider console or rescue route available.
 
 During installation, password paste preserves spaces and accepts one trailing newline. Input that
 would be altered or exceed the field's 128-character limit is rejected and

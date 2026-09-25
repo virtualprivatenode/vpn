@@ -715,6 +715,9 @@ func (m Model) handleKey(
 	key := msg.String()
 
 	if key == "ctrl+z" {
+		if m.disableSuspend {
+			return m, nil
+		}
 		return m, tea.Suspend
 	}
 
