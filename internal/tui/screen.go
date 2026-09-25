@@ -10,7 +10,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/lndrpc"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 	"github.com/virtualprivatenode/vpn/internal/syncthing"
 )
@@ -54,7 +53,6 @@ type ScreenContext struct {
 	PaymentHistory      *paymentHistoryContext
 	OnChain             *OnChainContext
 	AutoUnlock          autoUnlockChanges
-	LoginPasswords      loginPasswordChanges
 	ServiceControls     serviceControls
 	PackageUpdates      packageUpdates
 	Reboots             reboots
@@ -96,18 +94,6 @@ func (c *ScreenContext) serviceControls() serviceControls {
 		c.ServiceControls = app.NewServiceControls()
 	}
 	return c.ServiceControls
-}
-
-type loginPasswordChanges interface {
-	Change(loginpassword.Password) <-chan app.LoginPasswordResult
-	Close()
-}
-
-func (c *ScreenContext) loginPasswords() loginPasswordChanges {
-	if c.LoginPasswords == nil {
-		c.LoginPasswords = app.NewLoginPasswordChanges()
-	}
-	return c.LoginPasswords
 }
 
 func (c *ScreenContext) syncthing() *app.Syncthing {

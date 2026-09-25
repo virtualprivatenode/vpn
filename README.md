@@ -130,16 +130,40 @@ explorer, miner, block signer, second Lightning node, or scenario controller.
 Testing profiles remain visibly marked in the TUI, and their coins have no
 mainnet value.
 
-**Access setup.** The installer creates a `vpn` admin user and
-shows every SSH key it finds on the box — with fingerprints and
-comments, and provider control lines excluded — for you to
-confirm, replace, or extend before they are copied. You also set
-a login password (16 bytes minimum) as the provider console
-fallback; whether password login over SSH stays enabled is
-preserved exactly as the installer OBSERVED it on your box —
-installing never silently changes it.
+**Access setup.** The installer creates the `vpn` owner account. Choose a login
+password of at least 16 bytes, preferably generated and saved in a password
+manager. Installation enables password SSH specifically for `vpn`, including
+when the provider disabled password login globally. SSH keys are optional;
+the installer offers supported keys found in standard authorized_keys files
+for you to review before copying. This discovery does not cover every provider
+or external authentication mechanism.
 
-Password paste preserves spaces and accepts one trailing newline. Input that
+The same account password authorizes unrestricted sudo for server maintenance.
+VPN leaves sudo credential caching at the host default. SSH opens the
+unprivileged TUI automatically; exiting returns to the `vpn` shell, where node
+CLI commands and sudo are available. Existing deployment accounts are retained.
+The shell and sudo remain available when the TUI or root helper is unavailable.
+If automatic TUI startup gets stuck, an explicit SSH command can bypass it:
+`ssh -t vpn@YOUR_SERVER /bin/bash --noprofile --norc`.
+
+To change the account password, use **System → SSH Keys → Change Login Password**.
+The TUI opens Debian's native `passwd` prompts as `vpn`, without sudo: enter the
+current password, then the new password twice. Debian's password policy applies
+to replacements. The TUI resumes when the command finishes. This password is
+separate from the LND wallet password and recovery seed. Root can still reset
+account passwords through normal host maintenance.
+
+After testing a new SSH connection with your key, you can disable password SSH
+for `vpn` from **System → SSH Keys**. The existing login banner confirms a vpn
+SSH login, which may use a password; it does not verify a specific replacement
+key or sudo access. Root SSH is disabled, but the root account is retained.
+The installation handoff opens the TUI through a separate pseudo-terminal;
+it does not change the identity of the original SSH connection or prove a new
+vpn SSH login. Ctrl+Z is ignored during this handoff; Ctrl+C exits to the
+original shell. When launched from the `vpn` shell, the TUI supports Ctrl+Z
+to pause and `fg` to resume. Keep the provider console or rescue route available.
+
+During installation, password paste preserves spaces and accepts one trailing newline. Input that
 would be altered or exceed the field's 128-character limit is rejected and
 cleared, rather than silently changing the password.
 
@@ -330,15 +354,15 @@ For the full setup guide, see
 
 ### Security
 
-- TUI runs as the unprivileged `vpn` admin user, which has **no sudo rights at all**. Privileged operations (service control, updates, config changes) go through a socket-activated root helper that serves a fixed menu of typed operations — no arbitrary commands, no arbitrary file reads — verifies the identity of every connecting process, and logs every operation to the system journal, which the admin user can read but not rewrite
+- The TUI runs unprivileged as the `vpn` owner. Its privileged node operations use a socket-activated root helper with fixed, validated operations and kernel peer-identity checks. General host maintenance requires sudo authentication. The helper cannot reset the owner password. Software running as `vpn` still has sensitive node credentials and can modify owner files; this model does not isolate the owner from a compromised TUI.
 - All connections through Tor (SOCKS5 port 9050)
 - IPv6 disabled to prevent Tor bypass
 - Stream isolation (separate circuit per connection)
 - UFW firewall: SSH only, on the port(s) sshd actually listens on (+ 9735, 8080 for hybrid P2P, 22000 for Syncthing)
 - Fail2ban: SSH brute-force protection
 - Root SSH disabled by the installer
-- SSH hardening: challenge-response, keyboard-interactive, and X11 forwarding disabled; password auth carried over exactly as OBSERVED on your box at install (toggle from System → SSH Keys once you've verified key auth works); login password changeable from the TUI
-- Bitcoin Core, LND, and Syncthing run as separate, non-login system users; `vpn` has no direct access to their private data directories
+- SSH password controls apply to `vpn`; other accounts retain their host password-authentication policy. Keyboard-interactive authentication and X11 forwarding are disabled for `vpn`. Native password changes require the current account password.
+- Bitcoin Core, LND, and Syncthing run as separate, non-login system users; unprivileged `vpn` has no direct access to their private data directories, while authenticated root maintenance can access them
 - Tor control-cookie access is granted only inside `bitcoind.service` and `lnd.service`; Syncthing and the backup exporter receive none
 - VPN and LND authenticate to Bitcoin Core with separate `rpcauth` identities. Bitcoin Core RPC-cookie generation is disabled for fresh v0.7 installations, and neither client reads a Core cookie or data directory. Unsupported legacy layouts are refused rather than modified, so VPN does not delete their historical cookie files
 - Channel backups cross through a dedicated `lnd` publisher into the project-owned `/var/lib/vpn/exports` boundary; Syncthing can read only the completed `channel.backup`, cannot write the export, and cannot read `/var/lib/lnd` or private staging

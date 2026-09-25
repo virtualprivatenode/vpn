@@ -60,7 +60,7 @@ func TestParseArgs(t *testing.T) {
 
 	cmd, opts, err = parseArgs([]string{
 		"install", "--unattended", "--allow-console-only"})
-	if err != nil || cmd != cmdInstall || !opts.AllowConsoleOnly {
+	if err == nil {
 		t.Errorf("allow-console-only: got (%v,%+v,%v)",
 			cmd, opts, err)
 	}

@@ -35,7 +35,6 @@ const (
 	VerbServiceAction        = "service-action"
 	VerbReboot               = "reboot"
 	VerbDirSize              = "dir-size"
-	VerbSetUserPassword      = "set-user-password"
 	VerbStageWalletPassword  = "stage-wallet-password"
 	VerbRemoveWalletPassword = "remove-wallet-password"
 	VerbStageLNDCredentials  = "stage-lnd-credentials"
@@ -122,13 +121,6 @@ type DirSizeParams struct {
 // human-formatted ("12G").
 type DirSizeResult struct {
 	Size string `json:"size"`
-}
-
-// SetUserPasswordParams changes only the vpn operator password. The helper
-// enforces the same loginpassword validation as installation and the TUI.
-type SetUserPasswordParams struct {
-	User     string `json:"user"`
-	Password string `json:"password"`
 }
 
 // StageWalletPasswordParams: enable LND auto-unlock. The

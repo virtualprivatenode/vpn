@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -189,9 +190,11 @@ type Model struct {
 	state     *RuntimeState
 	lndClient *lndrpc.Client
 	version   string
-	subview   wSubview
-	width     int
-	height    int
+
+	disableSuspend bool
+	subview        wSubview
+	width          int
+	height         int
 
 	// L16: shared context for screen components
 	screenCtx *ScreenContext
@@ -311,6 +314,8 @@ func Show(
 ) {
 	state := observeRuntimeState(cfg)
 	m := NewModel(cfg, prefs, state, version)
+	// The installer handoff has no job-control shell to resume a suspended TUI.
+	m.disableSuspend = os.Getenv("VPN_TUI_NO_SUSPEND") == "1"
 	// Bubble Tea does not cancel or join commands on exit. The workflow owner
 	// releases helper readers even when Run fails or provides no final model.
 	defer func() {
@@ -341,9 +346,6 @@ func Show(
 		m.statusCollector.Close()
 		if m.screenCtx.AutoUnlock != nil {
 			m.screenCtx.AutoUnlock.Close()
-		}
-		if m.screenCtx.LoginPasswords != nil {
-			m.screenCtx.LoginPasswords.Close()
 		}
 		if m.screenCtx.WalletCreation != nil {
 			m.screenCtx.WalletCreation.Close()

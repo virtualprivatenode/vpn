@@ -19,7 +19,7 @@ require (
 )
 
 require (
-	golang.org/x/term v0.41.0 // indirect
+	golang.org/x/term v0.41.0
 	rsc.io/qr v0.2.0
 )
 

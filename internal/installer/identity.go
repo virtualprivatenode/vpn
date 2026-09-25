@@ -144,7 +144,7 @@ type InstallDecisions struct {
 	// Empty means password-only access (operator's explicit
 	// choice, or nothing found under --unattended).
 	Keys []sshkeys.Key
-	// Password is validated using the shared login-password policy.
+	// Password is validated using the initial login-password policy.
 	Password loginpassword.Password
 	// GeneratedPassword is set only on the --unattended path
 	// (ruling vii: random generation survives only there);
@@ -161,28 +161,44 @@ type InstallDecisions struct {
 	// DbCacheMB is the hardware-fit step's confirmed dbcache
 	// (ruling viii).
 	DbCacheMB int
-	// Obs is the preflight sshd observation (wizard copy +
-	// config seed; the SSH step re-observes before writing).
-	Obs host.SSHObservation
 }
 
 // applyIdentityAccess coordinates access provisioning and password delivery.
 // Record successful password application before the marker and shell setup so
 // a later failure cannot obscure the credential that was already applied.
 func applyIdentityAccess(dec *InstallDecisions) error {
-	if err := host.CreateOperatorAccess(dec.Keys); err != nil {
+	return provisionIdentityAccess(dec, identityAccessOps{
+		create: host.CreateOperatorAccess, password: host.SetLoginPassword,
+		markPending: markPasswordPending, sudo: host.ConfigureOperatorSudo,
+		autoLaunch: host.ConfigureOperatorAutoLaunch,
+	})
+}
+
+// Keep password application and its delivery marker ahead of sudo and shell
+// setup. A failed password operation must never reach the sudo grant.
+type identityAccessOps struct {
+	create                        func([]sshkeys.Key) error
+	password                      func(loginpassword.Password) error
+	markPending, sudo, autoLaunch func() error
+}
+
+func provisionIdentityAccess(dec *InstallDecisions, ops identityAccessOps) error {
+	if err := ops.create(dec.Keys); err != nil {
 		return err
 	}
-	if err := host.SetLoginPassword(dec.Password); err != nil {
-		return fmt.Errorf("set admin password: %w", err)
+	if err := ops.password(dec.Password); err != nil {
+		return fmt.Errorf("set owner password: %w", err)
 	}
 	dec.PasswordApplied = true
 	if dec.GeneratedPassword != "" {
-		if err := markPasswordPending(); err != nil {
+		if err := ops.markPending(); err != nil {
 			return fmt.Errorf("record password-pending marker: %w", err)
 		}
 	}
-	return host.ConfigureOperatorAutoLaunch()
+	if err := ops.sudo(); err != nil {
+		return err
+	}
+	return ops.autoLaunch()
 }
 
 // generateAdminPassword returns a random alphanumeric password

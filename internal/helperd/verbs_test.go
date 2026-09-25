@@ -18,7 +18,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/autounlock"
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/servicecontrol"
 )
 
@@ -59,7 +58,6 @@ func TestVerbMenuIsExactlyTheRuledSet(t *testing.T) {
 		helper.VerbServiceAction,
 		helper.VerbReboot,
 		helper.VerbDirSize,
-		helper.VerbSetUserPassword,
 		helper.VerbStageWalletPassword,
 		helper.VerbRemoveWalletPassword,
 		helper.VerbStageLNDCredentials,
@@ -324,29 +322,6 @@ func TestDirSizeValidation(t *testing.T) {
 	}
 }
 
-func TestSetUserPasswordValidation(t *testing.T) {
-	old := setLoginPassword
-	t.Cleanup(func() { setLoginPassword = old })
-	setLoginPassword = func(loginpassword.Password) error { t.Fatal("invalid request reached host operation"); return nil }
-	ctx := &verbCtx{}
-	long := strings.Repeat("a", 20)
-	cases := []helper.SetUserPasswordParams{
-		{User: "root", Password: long},
-		{User: "bitcoin", Password: long},
-		{User: "", Password: long},
-		{User: "vpn", Password: "short"}, // under the minimum
-		{User: "vpn", Password: "with\nnl" + long},
-		{User: "vpn", Password: long + "\x00suffix"},
-		{User: "vpn", Password: ""},
-	}
-	for _, c := range cases {
-		if _, err := verbSetUserPassword(ctx, raw(t, c)); err == nil {
-			t.Errorf("accepted user=%q pwlen=%d",
-				c.User, len(c.Password))
-		}
-	}
-}
-
 // The self-update gate refuses before any network or disk
 // activity: bad target shapes, cross-major targets, and a
 // non-release running version all stop at the boundary.
@@ -498,31 +473,48 @@ func TestDecodeStrict(t *testing.T) {
 	}
 }
 
-func TestLoginPasswordMarkerFollowsConfirmedChange(t *testing.T) {
-	oldSet, oldClear := setLoginPassword, clearPasswordPendingMarker
-	t.Cleanup(func() { setLoginPassword, clearPasswordPendingMarker = oldSet, oldClear })
-	for _, tc := range []struct {
-		name             string
-		setErr, clearErr error
-		cleared          bool
-	}{
-		{"success", nil, nil, true},
-		{"unconfirmed change", errors.New("process failed"), nil, false},
-		{"cleanup failure after success", nil, errors.New("remove failed"), true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cleared := false
-			setLoginPassword = func(p loginpassword.Password) error {
-				if p.Text() != "test password for marker" {
-					t.Error("password altered at helper boundary")
-				}
-				return tc.setErr
-			}
-			clearPasswordPendingMarker = func() error { cleared = true; return tc.clearErr }
-			_, err := verbSetUserPassword(&verbCtx{}, raw(t, helper.SetUserPasswordParams{User: "vpn", Password: "test password for marker"}))
-			if (err != nil) != (tc.setErr != nil) || cleared != tc.cleared {
-				t.Fatalf("changed password and marker outcome conflated: %v", err)
-			}
-		})
+// A real admitted IPC request must reject the removed endpoint before it can
+// reach any host operation, even when the replacement password is valid.
+func TestRemovedPasswordResetRefusedOverIPC(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("kernel peer credentials require Linux")
+	}
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections := make([]net.Conn, 0, 2)
+	for _, fd := range fds {
+		file := os.NewFile(uintptr(fd), "password-refusal")
+		conn, err := net.FileConn(file)
+		file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, conn)
+	}
+	client, serverConn := connections[0], connections[1].(*net.UnixConn)
+	srv := &server{version: "0.7.0", allowed: map[uint32]bool{uint32(os.Getuid()): true}}
+	done := make(chan bool, 1)
+	go func() { done <- srv.handleConn(serverConn) }()
+	request := helper.Request{Verb: "set-user-password", Params: json.RawMessage(`{"user":"vpn","password":"a valid replacement password"}`)}
+	if err := json.NewEncoder(client).Encode(request); err != nil {
+		t.Fatal(err)
+	}
+	var event helper.Event
+	if err := json.NewDecoder(client).Decode(&event); err != nil || event.OK || event.Event != "end" || !strings.Contains(event.Error, "unknown verb") {
+		t.Fatalf("reset not refused: %+v %v", event, err)
+	}
+	select {
+	case retire := <-done:
+		if retire {
+			t.Fatal("reset request retired helper")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reset request did not finish")
 	}
 }

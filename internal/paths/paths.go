@@ -252,11 +252,8 @@ const (
 	SyncthingConfigXML = "/etc/syncthing/config.xml"
 	UFWDefault         = "/etc/default/ufw"
 	SSHDConfig         = "/etc/ssh/sshd_config"
-	// SSHDDropIn uses a 00- prefix so it is parsed before
-	// other drop-ins (notably 50-cloud-init.conf which
-	// declares PasswordAuthentication yes on cloud
-	// images). sshd's first-match-wins semantics mean
-	// loading first = winning.
+	// SSHDDropIn precedes ordinary provider drop-ins. Its Match blocks scope
+	// owner authentication; effective policy is verified before SSH restarts.
 	SSHDDropIn = "/etc/ssh/sshd_config.d/00-vpn-hardening.conf"
 
 	// OldSSHDDropIn is the pre-rename path. Its presence is
@@ -284,12 +281,8 @@ const (
 	AdminBashProfile   = AdminHome + "/.bash_profile"
 	AuthorizedKeysFile = AdminHome + "/.ssh/authorized_keys"
 
-	// AdminSudoers is where older builds granted the admin
-	// user NOPASSWD sudo. The install now DELETES this file
-	// and writes no replacement: the admin user has no sudo
-	// rights at all. Privileged operations go through the
-	// root helper's socket instead (vpn helperd), which
-	// serves a fixed menu of typed operations — not a shell.
+	// AdminSudoers is the owner grant installed after initial password creation.
+	// Unmarked pre-existing policy remains a fresh-install conflict.
 	AdminSudoers = "/etc/sudoers.d/" + AdminUser
 
 	// BinaryPath is where the installer places the running

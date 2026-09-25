@@ -3,7 +3,9 @@ package host
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -47,37 +49,6 @@ func TestParsePasswordAuth(t *testing.T) {
 			got, err := parsePasswordAuth(tt.input)
 			if (err != nil) != tt.wantErr || got != tt.want {
 				t.Fatalf("got %v, error %v; want %v, error %v", got, err, tt.want, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestBuildSSHHardeningConfig(t *testing.T) {
-	for _, setting := range []string{"yes", "no", ""} {
-		t.Run("password="+setting, func(t *testing.T) {
-			out := buildHardeningDropIn(setting)
-			// Unknown observations omit the directive; explicit choices emit it once.
-			wantCount := 0
-			if setting != "" {
-				wantCount = 1
-				if !strings.Contains(out, "PasswordAuthentication "+setting+"\n") {
-					t.Fatalf("missing requested password setting:\n%s", out)
-				}
-			}
-			if n := strings.Count(out, "PasswordAuthentication"); n != wantCount {
-				t.Fatalf("got %d password directives, want %d", n, wantCount)
-			}
-			for _, line := range []string{
-				"PermitRootLogin no", "PubkeyAuthentication yes",
-				"ChallengeResponseAuthentication no", "KbdInteractiveAuthentication no",
-				"X11Forwarding no",
-			} {
-				if !strings.Contains(out, line+"\n") {
-					t.Errorf("missing hardening directive %q", line)
-				}
-			}
-			if !strings.HasSuffix(out, "\n") {
-				t.Error("drop-in must end with a newline")
 			}
 		})
 	}
@@ -170,5 +141,89 @@ func TestSSHDisableGuardPrecedesHostWrites(t *testing.T) {
 	}
 	if err := rebuildSSHConfig(false, store, func(string) error { return nil }, func() (bool, error) { return false, errors.New("observation failed") }); err == nil {
 		t.Fatal("failed observation reported success")
+	}
+}
+
+// Use the installed OpenSSH parser: substring checks cannot prove Match scope,
+// Include behavior, or precedence against provider settings.
+func TestOwnerSSHPolicyWithNativeParser(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("native Linux SSH parser")
+	}
+	sshd, err := exec.LookPath("sshd")
+	if err != nil {
+		if os.Getenv("VPN_REQUIRE_ROOT_TESTS") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("sshd unavailable")
+	}
+	if _, err := os.Stat("/run/sshd"); err != nil {
+		if os.Getenv("VPN_REQUIRE_ROOT_TESTS") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("sshd runtime directory unavailable")
+	}
+	dir := t.TempDir()
+	key := filepath.Join(dir, "host_key")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key).CombinedOutput(); err != nil {
+		t.Fatalf("host key fixture: %s %v", out, err)
+	}
+	policy := filepath.Join(dir, "owner.conf")
+	config := filepath.Join(dir, "sshd_config")
+	for _, setting := range []string{"yes", "no"} {
+		for _, provider := range []string{"yes", "no"} {
+			if err := os.WriteFile(policy, []byte(buildHardeningDropIn(setting)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			body := "HostKey " + key + "\nInclude " + policy + "\nUsePAM yes\nPasswordAuthentication " + provider + "\nX11Forwarding yes\n"
+			if err := os.WriteFile(config, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			outputs := map[string]string{}
+			for _, user := range []string{"vpn", "root", "deployment"} {
+				out, err := exec.Command(sshd, "-T", "-f", config, "-C", "user="+user+",host=example,addr=192.0.2.1").CombinedOutput()
+				if err != nil {
+					t.Fatalf("sshd policy: %v %s", err, out)
+				}
+				outputs[user] = string(out)
+			}
+			if err := verifySSHPolicy(setting, outputs["vpn"], outputs["root"]); err != nil {
+				t.Fatal(err)
+			}
+			enabled, err := parsePasswordAuth(outputs["deployment"])
+			if err != nil || enabled != (provider == "yes") || !strings.Contains(outputs["deployment"], "x11forwarding yes") {
+				t.Fatal("changed deployment account policy")
+			}
+			// An earlier matching provider rule must cause refusal, not false success.
+			conflict := "Match User vpn\n PasswordAuthentication " + map[string]string{"yes": "no", "no": "yes"}[setting] + "\nMatch all\n"
+			// Includes restore global parsing state; put the conflict in an earlier include.
+			earlier := filepath.Join(dir, "earlier.conf")
+			if err := os.WriteFile(earlier, []byte(conflict), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(config, []byte("Include "+earlier+"\n"+body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command(sshd, "-T", "-f", config, "-C", "user=vpn,host=example,addr=192.0.2.1").CombinedOutput()
+			if err != nil {
+				t.Fatalf("conflict fixture invalid: %s %v", out, err)
+			}
+			if verifySSHPolicy(setting, string(out), outputs["root"]) == nil {
+				t.Fatal("conflicting effective authentication accepted")
+			}
+		}
+	}
+}
+
+func TestSSHPolicyRefusesRestrictionsBeforeActivation(t *testing.T) {
+	owner := "passwordauthentication yes\npubkeyauthentication yes\npermittty yes\nforcecommand none\nchrootdirectory none\nauthenticationmethods any\n"
+	root := "permitrootlogin no\n"
+	for _, pair := range [][2]string{{"pubkeyauthentication yes", "pubkeyauthentication no"}, {"permittty yes", "permittty no"}, {"forcecommand none", "forcecommand /bin/false"}, {"chrootdirectory none", "chrootdirectory /srv/jail"}, {"authenticationmethods any", "authenticationmethods publickey,password"}} {
+		if verifySSHPolicy("yes", strings.Replace(owner, pair[0], pair[1], 1), root) == nil {
+			t.Fatalf("accepted %s", pair[1])
+		}
+	}
+	if verifySSHPolicy("yes", owner, "permitrootlogin yes\n") == nil {
+		t.Fatal("accepted root SSH")
 	}
 }

@@ -14,8 +14,6 @@ import (
 	"github.com/virtualprivatenode/vpn/internal/config"
 	"github.com/virtualprivatenode/vpn/internal/helper"
 	"github.com/virtualprivatenode/vpn/internal/host"
-	"github.com/virtualprivatenode/vpn/internal/logger"
-	"github.com/virtualprivatenode/vpn/internal/loginpassword"
 	"github.com/virtualprivatenode/vpn/internal/p2p"
 	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/release"
@@ -52,10 +50,9 @@ var verbs = map[string]verbDef{
 	// LND uses its upstream readiness notification and permits up to 20
 	// minutes for an ordinary start. Keep the helper connection above the
 	// longest supported service start plus its graceful-stop allowance.
-	helper.VerbServiceAction:   {30 * time.Minute, verbServiceAction},
-	helper.VerbReboot:          {1 * time.Minute, verbReboot},
-	helper.VerbDirSize:         {2 * time.Minute, verbDirSize},
-	helper.VerbSetUserPassword: {1 * time.Minute, verbSetUserPassword},
+	helper.VerbServiceAction: {30 * time.Minute, verbServiceAction},
+	helper.VerbReboot:        {1 * time.Minute, verbReboot},
+	helper.VerbDirSize:       {2 * time.Minute, verbDirSize},
 	// LND permits a graceful stop to take up to five minutes. A failed
 	// transition can require a second stop/start recovery, so the helper
 	// connection must outlive both bounded systemd transactions.
@@ -78,21 +75,19 @@ var verbs = map[string]verbDef{
 }
 
 var (
-	setLoginPassword           = host.SetLoginPassword
-	clearPasswordPendingMarker = host.ClearPasswordPendingMarker
-	loadSystemConfig           = config.Load
-	setupAutoUnlock            = host.SetupAutoUnlock
-	disableAutoUnlock          = host.DisableAutoUnlock
-	upgradeP2P                 = host.UpgradeP2PToHybrid
-	installSyncthing           = host.InstallSyncthing
-	walletExists               = host.WalletExists
-	keyVerificationPending     = host.KeyVerificationPending
-	verifyAdminLogin           = host.VerifyAdminLogin
-	restageFacts               = restage
-	controlNodeService         = host.ControlService
-	updatePackages             = host.UpdatePackages
-	updateSelf                 = update.Self
-	requestReboot              = host.RequestReboot
+	loadSystemConfig       = config.Load
+	setupAutoUnlock        = host.SetupAutoUnlock
+	disableAutoUnlock      = host.DisableAutoUnlock
+	upgradeP2P             = host.UpgradeP2PToHybrid
+	installSyncthing       = host.InstallSyncthing
+	walletExists           = host.WalletExists
+	keyVerificationPending = host.KeyVerificationPending
+	verifyAdminLogin       = host.VerifyAdminLogin
+	restageFacts           = restage
+	controlNodeService     = host.ControlService
+	updatePackages         = host.UpdatePackages
+	updateSelf             = update.Self
+	requestReboot          = host.RequestReboot
 )
 
 // decode unmarshals params strictly: unknown fields are an
@@ -185,32 +180,6 @@ func verbDirSize(_ *verbCtx, params json.RawMessage) (any, error) {
 }
 
 // ── Passwords ────────────────────────────────────────────
-
-func verbSetUserPassword(_ *verbCtx, params json.RawMessage) (any, error) {
-	var p helper.SetUserPasswordParams
-	if err := decode(params, &p); err != nil {
-		return nil, err
-	}
-	if p.User != paths.AdminUser {
-		return nil, fmt.Errorf(
-			"only the %q user's password is managed here",
-			paths.AdminUser)
-	}
-	// Validate again at the privileged boundary using the shared contract.
-	pw, err := loginpassword.New(p.Password)
-	if err != nil {
-		return nil, err
-	}
-	if err := setLoginPassword(pw); err != nil {
-		return nil, err
-	}
-	// An operator-chosen password supersedes any generated one
-	// that was never displayed (the unattended-install marker).
-	if err := clearPasswordPendingMarker(); err != nil {
-		logger.Install("password changed, but password-delivery state remains pending: %v", err)
-	}
-	return nil, nil
-}
 
 func verbStageWalletPassword(_ *verbCtx, params json.RawMessage) (any, error) {
 	var p helper.StageWalletPasswordParams
