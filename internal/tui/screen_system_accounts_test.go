@@ -37,7 +37,7 @@ func TestAccountImportFreezesReviewAndRoutesHiddenCompletion(t *testing.T) {
 	}
 	a := accountaccess.Account{Name: "deploy", UID: 1000, Home: "/home/deploy", Shell: "/bin/bash"}
 	access := &accountScreenAccess{
-		accounts: []accountaccess.Account{a},
+		accounts: []accountaccess.Account{{Name: "daemon", UID: 1, Shell: "/usr/sbin/nologin"}, a},
 		detail:   app.AccountDetails{Detail: accountaccess.Detail{Account: a, Source: sshkeys.Source{User: "deploy", Keys: []sshkeys.Key{key}}}, Authorized: map[string]bool{}},
 	}
 	m.screenCtx.AccountAccess = access
@@ -57,7 +57,9 @@ func TestAccountImportFreezesReviewAndRoutesHiddenCompletion(t *testing.T) {
 		return msg
 	}
 	run(s.Init())
+	press(tea.KeyDown)
 	oldRead := run(press(tea.KeyEnter))
+	press(tea.KeyDown)
 	refresh := press('r')
 	if refresh == nil {
 		t.Fatal("refresh not admitted")
@@ -80,11 +82,17 @@ func TestAccountImportFreezesReviewAndRoutesHiddenCompletion(t *testing.T) {
 		t.Fatal("review admitted a new observation")
 	}
 	statusUpdate(&m, oldRead)
-	submit := press('y')
+	// Confirmation defaults to Go Back; merely pressing Enter cannot import.
+	if press(tea.KeyEnter) != nil || len(access.imported) != 0 || s.review != nil {
+		t.Fatal("default confirmation did not cancel without importing")
+	}
+	press(tea.KeyEnter)
+	press(tea.KeyRight)
+	submit := press(tea.KeyEnter)
 	if submit == nil {
 		t.Fatal("import not admitted")
 	}
-	if press('y') != nil {
+	if press(tea.KeyEnter) != nil {
 		t.Fatal("duplicate submit")
 	}
 	statusUpdate(&m, closeTabMsg{})

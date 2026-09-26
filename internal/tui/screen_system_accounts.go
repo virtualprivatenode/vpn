@@ -60,6 +60,8 @@ type AccountsScreen struct {
 	review                                *app.AccountKeyImport
 	resultErr                             error
 	scroll                                int
+	focusZone, btnIdx, confirmIdx         int
+	showAll, technical                    bool
 }
 
 func NewAccountsScreen(ctx *ScreenContext) *AccountsScreen { return &AccountsScreen{ctx: ctx} }
@@ -102,11 +104,12 @@ func (s *AccountsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 		s.loading, s.loaded, s.err = false, true, msg.err
 		if msg.err == nil {
 			var selected accountaccess.Ref
-			if s.cursor < len(s.accounts) {
-				selected = s.accounts[s.cursor].Ref()
+			visible := s.visibleAccounts()
+			if s.cursor < len(visible) {
+				selected = visible[s.cursor].Ref()
 			}
 			s.accounts, s.cursor = msg.accounts, 0
-			for i, a := range s.accounts {
+			for i, a := range s.visibleAccounts() {
 				if a.Ref() == selected {
 					s.cursor = i
 					break
@@ -145,6 +148,60 @@ func (s *AccountsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, nil
 }
 
+func (s *AccountsScreen) visibleAccounts() []accountaccess.Account {
+	if s.showAll {
+		return s.accounts
+	}
+	var visible []accountaccess.Account
+	for _, a := range s.accounts {
+		if a.KeyDiscoverySupported() {
+			visible = append(visible, a)
+		}
+	}
+	return visible
+}
+
+func (s *AccountsScreen) buttons() []string {
+	if s.technical {
+		return []string{"Back", "Refresh"}
+	}
+	if s.account != nil {
+		return []string{"Back", "Technical details", "Refresh"}
+	}
+	label := "Show all accounts"
+	if s.showAll {
+		label = "Show login accounts"
+	}
+	return []string{label, "Refresh"}
+}
+
+func (s *AccountsScreen) listLen() int {
+	if s.technical {
+		return 0
+	}
+	if s.account == nil {
+		return len(s.visibleAccounts())
+	}
+	if s.detail != nil {
+		return len(s.detail.Source.Keys)
+	}
+	return 0
+}
+
+func (s *AccountsScreen) back() tea.Cmd {
+	s.scroll, s.btnIdx, s.focusZone = 0, 0, sshZoneButtons
+	if s.technical {
+		s.technical = false
+		return nil
+	}
+	if s.account == nil {
+		return emitFocusParent
+	}
+	s.request++ // Retire any outstanding detail read.
+	s.account, s.detail, s.err, s.loading = nil, nil, nil, false
+	return s.refresh()
+}
+
 func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd) {
 	if k == "ctrl+c" {
 		return s, tea.Quit
@@ -153,8 +210,14 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 		return s, nil
 	}
 	if s.resultReady {
-		if k == "enter" {
+		switch k {
+		case "pgdown":
+			s.scroll += 8
+		case "pgup":
+			s.scroll = max(0, s.scroll-8)
+		case "enter":
 			s.resultReady, s.review, s.detail = false, nil, nil
+			s.focusZone, s.btnIdx, s.scroll = sshZoneButtons, 0, 0
 			return s, s.refresh()
 		}
 		return s, nil
@@ -164,11 +227,23 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 		case "pgdown":
 			s.scroll += 8
 		case "pgup":
-			s.scroll -= 8
-		case "n", "esc", "backspace":
-			s.review = nil
-			s.scroll = 0
-		case "y":
+			s.scroll = max(0, s.scroll-8)
+		case "left":
+			if s.confirmIdx == 0 {
+				return s, emitFocusSidebar
+			}
+			s.confirmIdx = 0
+		case "right":
+			s.confirmIdx = 1
+		case "up", "shift+tab":
+			return s, emitFocusTabBar
+		case "esc", "backspace":
+			s.review, s.scroll = nil, 0
+		case "enter":
+			if s.confirmIdx == 0 {
+				s.review, s.scroll = nil, 0
+				return s, nil
+			}
 			s.working = true
 			s.attempt++
 			attempt, review, access := s.attempt, *s.review, s.ctx.accountAccess()
@@ -178,47 +253,85 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 	}
 	switch k {
 	case "left":
-		return s, emitFocusSidebar
-	case "shift+tab":
-		return s, emitFocusTabBar
-	case "backspace", "esc":
-		if s.account == nil {
-			return s, emitFocusParent
+		if s.focusZone == sshZoneButtons && s.btnIdx > 0 {
+			s.btnIdx--
+			return s, nil
 		}
-		s.request++ // Retire any outstanding detail read.
-		s.account, s.detail, s.err, s.loading, s.scroll = nil, nil, nil, false, 0
-		return s, s.refresh()
+		return s, emitFocusSidebar
+	case "right":
+		if s.focusZone == sshZoneButtons {
+			s.btnIdx = min(len(s.buttons())-1, s.btnIdx+1)
+		}
+	case "up", "shift+tab":
+		s.scroll = 0
+		if s.focusZone == sshZoneButtons {
+			return s, emitFocusTabBar
+		}
+		cursor := &s.cursor
+		if s.account != nil {
+			cursor = &s.keyCursor
+		}
+		if k == "shift+tab" || *cursor == 0 {
+			s.focusZone, s.btnIdx = sshZoneButtons, 0
+		} else {
+			*cursor--
+		}
+	case "down", "tab":
+		s.scroll = 0
+		if s.listLen() == 0 {
+			return s, nil
+		}
+		if s.focusZone == sshZoneButtons {
+			s.focusZone = sshZoneKeys
+			return s, nil
+		}
+		if s.account == nil {
+			s.cursor = min(s.listLen()-1, s.cursor+1)
+		} else {
+			s.keyCursor = min(s.listLen()-1, s.keyCursor+1)
+		}
+	case "backspace", "esc":
+		return s, s.back()
 	case "r":
 		return s, s.refresh()
 	case "pgdown":
 		s.scroll += 8
 	case "pgup":
-		s.scroll -= 8
-	case "up":
-		s.scroll = 0
-		if s.account == nil {
-			if s.cursor == 0 {
-				return s, emitFocusTabBar
-			}
-			s.cursor--
-		} else {
-			s.keyCursor = max(0, s.keyCursor-1)
-		}
-	case "down", "tab":
-		s.scroll = 0
-		if s.account == nil {
-			s.cursor = min(max(0, len(s.accounts)-1), s.cursor+1)
-		} else if s.detail != nil {
-			s.keyCursor = min(max(0, len(s.detail.Source.Keys)-1), s.keyCursor+1)
-		}
+		s.scroll = max(0, s.scroll-8)
 	case "enter":
+		if s.focusZone == sshZoneButtons {
+			if s.account == nil && s.btnIdx == 0 {
+				selected := accountaccess.Ref{}
+				visible := s.visibleAccounts()
+				if s.cursor < len(visible) {
+					selected = visible[s.cursor].Ref()
+				}
+				s.showAll, s.cursor, s.scroll = !s.showAll, 0, 0
+				for i, a := range s.visibleAccounts() {
+					if a.Ref() == selected {
+						s.cursor = i
+						break
+					}
+				}
+				return s, nil
+			}
+			if s.account != nil && s.btnIdx == 0 {
+				return s, s.back()
+			}
+			if s.account != nil && !s.technical && s.btnIdx == 1 {
+				s.technical, s.btnIdx, s.scroll = true, 0, 0
+				return s, nil
+			}
+			return s, s.refresh()
+		}
 		if s.loading || s.err != nil {
 			return s, nil
 		}
 		if s.account == nil {
-			if s.cursor < len(s.accounts) {
-				a := s.accounts[s.cursor]
-				s.account, s.scroll = &a, 0
+			visible := s.visibleAccounts()
+			if s.cursor < len(visible) {
+				a := visible[s.cursor]
+				s.account, s.scroll, s.focusZone, s.btnIdx = &a, 0, sshZoneButtons, 0
 				return s, s.refresh()
 			}
 		} else if s.detail != nil && s.detail.Source.Problem == "" && s.detail.OwnerKeysProblem == "" &&
@@ -226,127 +339,215 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 			key := s.detail.Source.Keys[s.keyCursor]
 			if !s.detail.Authorized[key.Fingerprint] {
 				s.review = &app.AccountKeyImport{Account: s.detail.Account, Key: key}
-				s.scroll = 0
+				s.scroll, s.confirmIdx = 0, 0
 			}
 		}
 	}
 	return s, nil
 }
 
+// Keep navigation fixed while account lists, key lists and optional diagnostics scroll.
+func (s *AccountsScreen) renderBody(header, body *paneBuilder, w, h, cursor int) string {
+	head := header.render()
+	bodyText := body.render()
+	lines := strings.Count(bodyText, "\n") + 1
+	vpH := max(1, h-strings.Count(head, "\n")-1)
+	s.scroll = min(s.scroll, max(0, lines-vpH))
+	if s.scroll > 0 {
+		cursor += s.scroll + vpH - 1
+	}
+	cursor = min(lines-1, cursor)
+	return head + "\n" + renderViewport(bodyText, w, vpH, cursor, lines, true)
+}
+
+func accountText(p *paneBuilder, style lipgloss.Style, text string) {
+	wrapped := style.Width(max(1, p.w-2)).Render(theme.PlainText(text))
+	for _, line := range strings.Split(wrapped, "\n") {
+		p.line(" " + line)
+	}
+}
+
 func (s *AccountsScreen) View(w, h int) string {
 	w, h = max(1, w), max(1, h)
-	var lines []string
-	add := func(text string) {
-		wrapped := lipgloss.NewStyle().Width(max(1, w-2)).Render(theme.PlainText(text))
-		for _, line := range strings.Split(wrapped, "\n") {
-			lines = append(lines, " "+line)
-		}
+	if s.review != nil || s.resultReady {
+		return s.viewImport(w, h)
 	}
-	add("Local accounts")
-	lines = append(lines, "")
-	focusLine := 0
+	header, body := newPane(w), newPane(w)
+	title := "Accounts"
+	if s.account != nil {
+		title = theme.PlainText(s.account.Name)
+	}
+	if s.technical {
+		title += " · Technical details"
+	}
+	header.title(theme.Header, title).buttons(s.buttons(), s.btnIdx, s.ctx.ContentFocused && s.focusZone == sshZoneButtons)
+	cursor := 0
 	switch {
-	case s.resultReady:
-		if s.resultErr != nil {
-			add("Import was not confirmed: " + s.resultErr.Error())
-			add("Refresh the owner key list before retrying.")
-		} else {
-			add("Public key imported into vpn.")
-			add("Keep this session open and test a new SSH login as vpn with that key.")
-		}
-		add("Press Enter to return to the account.")
-	case s.review != nil:
-		add("Import public key into vpn?")
-		add("Source: " + s.review.Account.Name)
-		add("Fingerprint: " + s.review.Key.Fingerprint)
-		add("Comment: " + s.review.Key.Comment)
-		add("The holder of its private key will gain vpn SSH and node access, including wallet access. Import does not change sudo policy.")
-		add("The source account and its key file are retained.")
-		if s.working {
-			add("Rechecking source and importing...")
-		} else {
-			add("Import this key? [y/n]")
-		}
 	case s.err != nil:
-		add("Observation unavailable: " + s.err.Error())
-		add("Press r to retry.")
+		body.warn("Observation unavailable")
+		accountText(body, theme.Warning, s.err.Error())
+		body.blank().dim("Choose Refresh to try again.")
 	case s.account == nil:
-		add("Select an account to inspect its groups, sudo rules and supported public keys.")
-		add("Local accounts only. External identity services are not inventoried.")
+		body.valueWrap("Use an SSH key from another account to connect as vpn.").blank()
+		if !s.showAll {
+			body.dim("Service and non-login accounts are hidden.").blank()
+		}
 		if s.loading {
-			add("Refreshing accounts...")
+			body.dim("Refreshing accounts...").blank()
 		}
-		if s.loaded && len(s.accounts) == 0 {
-			add("No local accounts found.")
+		visible := s.visibleAccounts()
+		if s.loaded && len(visible) == 0 {
+			body.dim("No local accounts to show.")
 		}
-		for i, a := range s.accounts {
-			marker := "  "
-			if i == s.cursor {
-				marker = "> "
-				focusLine = len(lines)
+		for i, a := range visible {
+			selected := s.focusZone == sshZoneKeys && s.cursor == i
+			if selected {
+				cursor = len(body.lines)
 			}
-			add(fmt.Sprintf("%s%s  UID %d  %s", marker, a.Name, a.UID, a.Shell))
+			style, marker := theme.Value, " "
+			if selected && s.ctx.ContentFocused {
+				style, marker = theme.NavActive, "▸"
+			}
+			body.line(marker + " " + style.Render(theme.PlainText(a.Name)))
+			role := "Login account"
+			switch {
+			case a.Name == "vpn":
+				role = "Your node account"
+			case a.Name == "root":
+				role = "System owner"
+			case !a.KeyDiscoverySupported():
+				role = "Service or non-login account"
+			}
+			accountText(body, theme.Dim, "  "+role)
+			body.blank()
 		}
 	case s.detail == nil:
-		add("Reading account access...")
+		body.dim("Reading account access...")
+	case s.technical:
+		s.renderTechnical(body)
 	default:
 		d := s.detail
-		add(fmt.Sprintf("%s  UID %d  GID %d", d.Account.Name, d.Account.UID, d.Account.GID))
-		add("Home: " + d.Account.Home)
-		add("Shell: " + d.Account.Shell)
-		if d.GroupsProblem != "" {
-			add("Groups unavailable: " + d.GroupsProblem)
-		} else {
-			add("Local groups: " + strings.Join(d.Groups, ", "))
-		}
 		if s.loading {
-			add("Refreshing access...")
+			body.dim("Refreshing key status...").blank()
 		}
-		add("Public-key file: " + d.Source.Path)
-		if d.Source.Problem != "" {
-			add("Key discovery incomplete: " + d.Source.Problem)
-		} else if len(d.Source.Keys) == 0 {
-			add("No supported keys in this standard file.")
+		switch {
+		case !d.Account.KeyDiscoverySupported():
+			body.valueWrap("Key import is not offered for this service or non-login account.")
+		case d.Source.Problem != "":
+			body.warn("Key discovery unavailable").valueWrap("The keys could not be read safely. Open Technical details for the reason.")
+		case d.OwnerKeysProblem != "":
+			body.warn("vpn key status unavailable").valueWrap("We could not check which keys vpn already has. Refresh before importing.")
+		case d.Account.Name == "vpn":
+			body.valueWrap("These are your node's configured SSH keys. Use System → SSH Keys to add or remove keys.")
+		case len(d.Source.Keys) == 0:
+			body.valueWrap("No supported keys found in this account's standard SSH key file.")
+		default:
+			available := 0
+			for _, k := range d.Source.Keys {
+				if !d.Authorized[k.Fingerprint] {
+					available++
+				}
+			}
+			if available == 0 {
+				body.success("No import needed").valueWrap("All keys shown below are already configured for vpn.")
+			} else {
+				body.valueWrap("Select a key to review before adding it to vpn. Use a key only if you recognize its owner.")
+			}
 		}
 		if d.Source.Excluded > 0 {
-			add(fmt.Sprintf("%d restricted or unsupported key entries excluded.", d.Source.Excluded))
+			body.blank().valueWrap(fmt.Sprintf("%d restricted or unsupported key entries cannot be imported.", d.Source.Excluded))
 		}
-		if d.OwnerKeysProblem != "" {
-			add("vpn key status unavailable: " + d.OwnerKeysProblem)
-		}
+		body.blank()
 		for i, k := range d.Source.Keys {
-			marker, state := "  ", "Enter to review import"
-			if d.Authorized[k.Fingerprint] {
-				state = "Already configured for vpn"
+			selected := s.focusZone == sshZoneKeys && s.keyCursor == i
+			if selected {
+				cursor = len(body.lines)
 			}
-			if d.OwnerKeysProblem != "" {
-				state = "vpn key status unknown"
+			label := theme.PlainText(k.Comment)
+			if label == "" {
+				label = "SSH key"
 			}
-			if d.Account.Name == "vpn" {
-				state = "Owner key; manage in SSH Keys"
+			style, marker := theme.Value, " "
+			if selected && s.ctx.ContentFocused {
+				style, marker = theme.NavActive, "▸"
 			}
-			if i == s.keyCursor {
-				marker = "> "
-				focusLine = len(lines)
+			accountText(body, style, marker+" "+label)
+			body.monoWrap(k.Fingerprint)
+			switch {
+			case d.Source.Problem != "" || d.OwnerKeysProblem != "":
+				body.warn("  Status unavailable")
+			case d.Account.Name == "vpn" || d.Authorized[k.Fingerprint]:
+				body.success("  Already configured for vpn")
+			default:
+				body.dim("  Enter to review import")
 			}
-			add(marker + k.Fingerprint)
-			add("  " + k.Type + "  " + k.Comment)
-			add("  " + state)
-		}
-		add("Configured keys do not prove a working login. Custom key paths, SSH certificates and provider-managed access are not inventoried.")
-		lines = append(lines, "")
-		add("Sudo observation (group membership alone is not proof):")
-		if d.SudoProblem != "" {
-			add(d.SudoProblem)
-		}
-		for _, line := range strings.Split(d.SudoListing, "\n") {
-			add(line)
+			body.blank()
 		}
 	}
-	if s.scroll != 0 {
-		focusLine = max(0, min(len(lines)-1, focusLine+s.scroll))
+	return s.renderBody(header, body, w, h, cursor)
+}
+
+func (s *AccountsScreen) renderTechnical(p *paneBuilder) {
+	d := s.detail
+	p.field("UID: ", fmt.Sprint(d.Account.UID)).field("GID: ", fmt.Sprint(d.Account.GID))
+	accountText(p, theme.Value, "Home: "+d.Account.Home)
+	accountText(p, theme.Value, "Shell: "+d.Account.Shell)
+	p.blank().labelLine("Local groups")
+	if d.GroupsProblem != "" {
+		accountText(p, theme.Warning, d.GroupsProblem)
+	} else {
+		accountText(p, theme.Value, strings.Join(d.Groups, ", "))
 	}
-	return renderViewport(strings.Join(lines, "\n"), w, h, focusLine, len(lines), true)
+	p.blank().labelLine("Public-key source")
+	accountText(p, theme.Mono, d.Source.Path)
+	if d.Source.Problem != "" {
+		accountText(p, theme.Warning, d.Source.Problem)
+	}
+	if d.OwnerKeysProblem != "" {
+		accountText(p, theme.Warning, d.OwnerKeysProblem)
+	}
+	p.blank().valueWrap("Only the standard authorized_keys file is inspected. Custom paths, SSH certificates and provider-managed access are not inventoried. A configured key does not prove a working login.")
+	p.blank().labelLine("Sudo rules").valueWrap("Group membership alone does not prove sudo access.")
+	if d.SudoProblem != "" {
+		accountText(p, theme.Warning, d.SudoProblem)
+	}
+	for _, line := range strings.Split(d.SudoListing, "\n") {
+		accountText(p, theme.Mono, line)
+	}
+}
+
+func (s *AccountsScreen) viewImport(w, h int) string {
+	p := newPane(w)
+	labels, active, focused := []string{"Go Back", "Import Key"}, s.confirmIdx, s.ctx.ContentFocused
+	if s.resultReady {
+		labels, active = []string{"Return"}, 0
+		if s.resultErr != nil {
+			p.title(theme.Warning, "Import not confirmed")
+			accountText(p, theme.Warning, s.resultErr.Error())
+			p.blank().valueWrap("Refresh the SSH Keys list before retrying.")
+		} else {
+			p.title(theme.Success, "Key imported")
+			p.valueWrap("Keep this session open and test a new SSH connection as vpn using this key.")
+		}
+	} else {
+		p.title(theme.Header, "Import key into vpn")
+		p.field("From: ", theme.PlainText(s.review.Account.Name))
+		accountText(p, theme.Value, theme.PlainText(s.review.Key.Comment))
+		p.labelLine("Fingerprint:").monoWrap(s.review.Key.Fingerprint).blank()
+		p.warnWrapWords("The holder of this key will gain vpn SSH and node access, including wallet access.")
+		p.blank().valueWrap("The source account and key are kept. Sudo policy stays the same.")
+		if s.working {
+			labels, active, focused = []string{"Importing..."}, 0, false
+		}
+	}
+	// Keep the action reachable on short terminals while the explanation scrolls.
+	buttons := renderButtons(labels, active, focused, w)
+	vpH := max(1, h-strings.Count(buttons, "\n")-2)
+	text := p.render()
+	lines := strings.Count(text, "\n") + 1
+	s.scroll = min(s.scroll, max(0, lines-vpH))
+	content := renderViewport(text, w, vpH, min(lines-1, s.scroll+vpH-1), lines, true)
+	return content + "\n\n" + buttons
 }
 
 func (s *AccountsScreen) HelpBindings() []key.Binding {
@@ -354,11 +555,18 @@ func (s *AccountsScreen) HelpBindings() []key.Binding {
 		return waitingBindings()
 	}
 	if s.resultReady {
-		return []key.Binding{bind("enter", "return", "enter"), kQuit}
+		return []key.Binding{bind("enter", "return", "enter"), bind("pgup/pgdn", "scroll", "pgup", "pgdown"), kQuit}
 	}
-	if s.review != nil {
-		return confirmDialogBindings()
+	if s.review != nil || s.technical {
+		return append(tabButtonBindings(s.ctx.HasTabs), bind("pgup/pgdn", "scroll", "pgup", "pgdown"))
 	}
-	return []key.Binding{bind("↑↓", "select", "up", "down"), bind("enter", "open", "enter"),
-		bind("r", "refresh", "r"), bind("pgup/pgdn", "scroll", "pgup", "pgdown"), kBack, kSidebar, kQuit}
+	list := "accounts"
+	if s.account != nil {
+		list = "keys"
+	}
+	if s.focusZone == sshZoneButtons {
+		return manageButtonBindings(list, s.btnIdx, s.ctx.HasTabs)
+	}
+	return []key.Binding{bind("↑↓", list, "up", "down"), bind("enter", "open", "enter"),
+		bind("⇧tab", "buttons", "shift+tab"), bind("r", "refresh", "r"), bind("pgup/pgdn", "scroll", "pgup", "pgdown"), kBack, kSidebar, kQuit}
 }
