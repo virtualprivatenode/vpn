@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 	"github.com/virtualprivatenode/vpn/internal/system"
 )
 
@@ -19,8 +18,6 @@ type InstallFrontend func(InstallView, *InstallSession) (openConsole bool, err e
 // or executable installation steps.
 type InstallView struct {
 	NeedIdentity, NeedHardware bool
-	Sources                    []KeySource
-	KeyDiscoveryProblem        string
 	Hardware, Minimum          Hardware
 	DBCacheChoices             []int
 	RecommendedDBCache         int
@@ -37,7 +34,6 @@ type InstallStepView struct {
 
 // InteractiveInput contains the operator's confirmed installation choices.
 type InteractiveInput struct {
-	Keys      []sshkeys.Key
 	Password  loginpassword.Password
 	DBCacheMB int
 }
@@ -94,7 +90,6 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 	if s.started {
 		return errors.New("installation already started")
 	}
-	var keys []sshkeys.Key
 	var password loginpassword.Password
 	if s.needIdentity {
 		var err error
@@ -102,14 +97,6 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 		if err != nil {
 			return err
 		}
-		for _, key := range input.Keys {
-			parsed, err := sshkeys.Parse(key.RawLine)
-			if err != nil {
-				return fmt.Errorf("invalid confirmed SSH key: %w", err)
-			}
-			keys = append(keys, parsed)
-		}
-		keys = DedupeKeys([]KeySource{{Keys: keys}})
 	}
 	if s.needHardware {
 		if !slices.Contains(dbCacheChoices, input.DBCacheMB) {
@@ -120,7 +107,6 @@ func (s *InstallSession) Start(input InteractiveInput) error {
 		}
 	}
 	if s.needIdentity {
-		s.dec.Keys = keys
 		s.dec.Password = password
 	}
 	s.started = true
@@ -204,18 +190,9 @@ func runInstallInteractive(s *InstallSession, view InstallView, frontend Install
 
 func installView(s *InstallSession) InstallView {
 	hw := DetectHardware()
-	var sources []KeySource
-	var discoveryProblem string
-	if s.needIdentity {
-		var err error
-		sources, err = EnumerateKeySources()
-		if err != nil {
-			discoveryProblem = err.Error()
-		}
-	}
 	view := InstallView{
 		NeedIdentity: s.needIdentity, NeedHardware: s.needHardware,
-		Sources: SortKeySources(sources), KeyDiscoveryProblem: discoveryProblem, Hardware: hw,
+		Hardware:       hw,
 		Minimum:        Hardware{RAMMB: requiredRAMMB, DiskTotalGB: requiredDiskGB, Cores: requiredCores},
 		DBCacheChoices: slices.Clone(dbCacheChoices), RecommendedDBCache: RecommendDbCache(hw.RAMMB),
 		Address: system.PublicIPv4(),

@@ -56,25 +56,6 @@ func TestClassifyAuthorizedKeysSkipsNoise(t *testing.T) {
 	}
 }
 
-// ── DedupeKeys ───────────────────────────────────────────
-
-func TestDedupeKeys(t *testing.T) {
-	a, _ := Parse(testKeyA)
-	b, _ := Parse(testKeyB)
-	sources := []Source{
-		{User: "root", Keys: []Key{a, b}},
-		{User: "debian", Keys: []Key{a}}, // duplicate
-	}
-	out := DedupeSources(sources)
-	if len(out) != 2 {
-		t.Fatalf("got %d keys, want 2", len(out))
-	}
-	if out[0].Fingerprint != a.Fingerprint ||
-		out[1].Fingerprint != b.Fingerprint {
-		t.Error("order not first-seen")
-	}
-}
-
 func TestClassifyAuthorizedKeysReportsMalformedKeys(t *testing.T) {
 	keys, excluded := Classify("ssh-ed25519 YQ== malformed\nssh-dss YQ== obsolete\n" + testKeyA + "\n")
 	if len(keys) != 1 || excluded != 2 {

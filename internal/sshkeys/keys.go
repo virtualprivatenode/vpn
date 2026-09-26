@@ -23,7 +23,7 @@ type Key struct {
 	RawLine     string
 }
 
-// RecognizedType includes obsolete types so installer inventory can report exclusions.
+// RecognizedType includes obsolete types so account inspection can report exclusions.
 func RecognizedType(t string) bool {
 	switch t {
 	case "ssh-rsa", "ssh-ed25519", "ssh-dss", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com":

@@ -81,27 +81,6 @@ func ReadLocalAccount(ref accountaccess.Ref) (accountaccess.Detail, error) {
 	return detail, nil
 }
 
-// DiscoverSSHKeySources is shared by installer selection and runtime account
-// inspection. Installation excludes vpn because it is the destination.
-func DiscoverSSHKeySources() ([]sshkeys.Source, error) {
-	o, err := openAccountObserver()
-	if err != nil {
-		return nil, err
-	}
-	defer o.root.Close()
-	accounts, err := o.accounts()
-	if err != nil {
-		return nil, err
-	}
-	var sources []sshkeys.Source
-	for _, account := range accounts {
-		if account.Name != paths.AdminUser && account.KeyDiscoverySupported() {
-			sources = append(sources, o.keys(account))
-		}
-	}
-	return sources, nil
-}
-
 func (o *accountObserver) accounts() ([]accountaccess.Account, error) {
 	data, err := o.readFile("etc/passwd", o.systemUID, accountFileLimit)
 	if err != nil {

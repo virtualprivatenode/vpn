@@ -133,10 +133,12 @@ mainnet value.
 **Access setup.** The installer creates the `vpn` owner account. Choose a login
 password of at least 16 bytes, preferably generated and saved in a password
 manager. Installation enables password SSH specifically for `vpn`, including
-when the provider disabled password login globally. SSH keys are optional;
-the installer offers supported keys found in standard authorized_keys files
-for you to review before copying. This discovery does not cover every provider
-or external authentication mechanism.
+when the provider disabled password login globally. Use that password for your
+first SSH login as `vpn`. Installation does not discover, accept or copy SSH
+keys. After login, you can import an existing account's key from **System →
+Accounts** or add a key directly from **System → SSH Keys**. Unattended
+installation generates a password and displays it at completion; save it for
+your first login.
 
 The same account password authorizes unrestricted sudo for server maintenance.
 VPN leaves sudo credential caching at the host default. SSH opens the
@@ -163,8 +165,8 @@ rules, account IDs and paths. Only conventional `.ssh/authorized_keys` files
 are inspected for root, `vpn` and accounts using common interactive shells.
 Custom key paths, SSH certificates and provider-managed access
 are not inventoried. Restricted key entries are excluded without removing their
-options, and incomplete observations are reported. The installer uses the same
-discovery rules; unattended installation refuses incomplete key discovery.
+options, and incomplete observations are reported. Key discovery runs only
+when inspecting accounts after installation.
 
 After testing a new SSH connection with your key, you can disable password SSH
 for `vpn` from **System → SSH Keys**. The existing login banner confirms a vpn

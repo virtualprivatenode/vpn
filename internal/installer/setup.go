@@ -212,13 +212,7 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	var res RunResult
 	openConsole := false
 	if opts.Unattended && lifecycle.Disposition != lifecycleCompletionPending {
-		needIdentity := false
-		for i, planned := range planRun(steps, ledger) {
-			if steps[i].Key == "identity.access" && planned.Run {
-				needIdentity = true
-			}
-		}
-		if err := fillUnattendedDecisions(dec, needIdentity); err != nil {
+		if err := fillUnattendedDecisions(dec); err != nil {
 			return err
 		}
 		if ledger.Context.DbCacheMB == nil {
@@ -422,22 +416,9 @@ func printGeneratedPassword(password string) error {
 	return nil
 }
 
-// fillUnattendedDecisions copies supported keys only when identity provisioning
-// will run. An unrelated resume or bake does not depend on source key access.
-// Password delivery still follows the existing applied/pending-marker contract.
-func fillUnattendedDecisions(dec *InstallDecisions, needIdentity bool) error {
-	if needIdentity {
-		sources, err := EnumerateKeySources()
-		if err != nil {
-			return fmt.Errorf("discover initial SSH keys: %w", err)
-		}
-		for _, source := range sources {
-			if source.Problem != "" {
-				return fmt.Errorf("SSH key discovery for %s is incomplete: %s; review the source or use interactive installation", source.User, source.Problem)
-			}
-		}
-		dec.Keys = DedupeKeys(sources)
-	}
+// fillUnattendedDecisions prepares a generated password and hardware defaults.
+// Password delivery follows the applied/pending-marker contract.
+func fillUnattendedDecisions(dec *InstallDecisions) error {
 	if err := fillGeneratedPassword(dec); err != nil {
 		return err
 	}

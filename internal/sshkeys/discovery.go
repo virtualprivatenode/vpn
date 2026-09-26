@@ -36,20 +36,3 @@ func Classify(content string) ([]Key, int) {
 	}
 	return keys, excluded
 }
-
-func DedupeSources(sources []Source) []Key {
-	seen := make(map[string]bool)
-	var keys []Key
-	for _, source := range sources {
-		if source.Problem != "" {
-			continue
-		}
-		for _, key := range source.Keys {
-			if !seen[key.Fingerprint] {
-				seen[key.Fingerprint] = true
-				keys = append(keys, key)
-			}
-		}
-	}
-	return keys
-}

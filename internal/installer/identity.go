@@ -2,25 +2,16 @@
 
 package installer
 
-// Installer owns initial key-source inventory, confirmed decisions and generated
-// password delivery. Host owns account, authorized_keys and login-shell writes.
+// Installer owns confirmed decisions and generated password delivery.
+// Host owns account creation, password application and login-shell writes.
 
 import (
 	"crypto/rand"
 	"fmt"
-	"sort"
 
 	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
-
-// KeySource is an observed conventional public-key source.
-type KeySource = sshkeys.Source
-
-func EnumerateKeySources() ([]KeySource, error) { return host.DiscoverSSHKeySources() }
-
-func DedupeKeys(sources []KeySource) []sshkeys.Key { return sshkeys.DedupeSources(sources) }
 
 // ── Applying the decisions ───────────────────────────────
 
@@ -28,10 +19,6 @@ func DedupeKeys(sources []KeySource) []sshkeys.Key { return sshkeys.DedupeSource
 // steps. Collected before the steps run (interactively or by the
 // unattended defaults) and read by step closures at execution.
 type InstallDecisions struct {
-	// Keys are written to the admin user's authorized_keys.
-	// Empty means password-only access (operator's explicit
-	// choice, or nothing found under --unattended).
-	Keys []sshkeys.Key
 	// Password is validated using the initial login-password policy.
 	Password loginpassword.Password
 	// GeneratedPassword is set only on the --unattended path
@@ -56,7 +43,7 @@ type InstallDecisions struct {
 // a later failure cannot obscure the credential that was already applied.
 func applyIdentityAccess(dec *InstallDecisions) error {
 	return provisionIdentityAccess(dec, identityAccessOps{
-		create: host.CreateOperatorAccess, password: host.SetLoginPassword,
+		create: host.CreateOperatorAccount, password: host.SetLoginPassword,
 		markPending: markPasswordPending, sudo: host.ConfigureOperatorSudo,
 		autoLaunch: host.ConfigureOperatorAutoLaunch,
 	})
@@ -65,13 +52,13 @@ func applyIdentityAccess(dec *InstallDecisions) error {
 // Keep password application and its delivery marker ahead of sudo and shell
 // setup. A failed password operation must never reach the sudo grant.
 type identityAccessOps struct {
-	create                        func([]sshkeys.Key) error
+	create                        func() error
 	password                      func(loginpassword.Password) error
 	markPending, sudo, autoLaunch func() error
 }
 
 func provisionIdentityAccess(dec *InstallDecisions, ops identityAccessOps) error {
-	if err := ops.create(dec.Keys); err != nil {
+	if err := ops.create(); err != nil {
 		return err
 	}
 	if err := ops.password(dec.Password); err != nil {
@@ -112,18 +99,4 @@ func generateAdminPassword() string {
 		}
 	}
 	return string(out)
-}
-
-// SortKeySources orders sources root-first then by user name for
-// stable display.
-func SortKeySources(sources []KeySource) []KeySource {
-	out := make([]KeySource, len(sources))
-	copy(out, sources)
-	sort.SliceStable(out, func(i, j int) bool {
-		if (out[i].User == "root") != (out[j].User == "root") {
-			return out[i].User == "root"
-		}
-		return out[i].User < out[j].User
-	})
-	return out
 }
