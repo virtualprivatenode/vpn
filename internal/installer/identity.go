@@ -8,131 +8,19 @@ package installer
 import (
 	"crypto/rand"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/virtualprivatenode/vpn/internal/host"
 	"github.com/virtualprivatenode/vpn/internal/loginpassword"
-	"github.com/virtualprivatenode/vpn/internal/paths"
 	"github.com/virtualprivatenode/vpn/internal/sshkeys"
 )
 
-// KeySource is one authorized_keys file found on the box.
-type KeySource struct {
-	User     string // owning login ("root", "debian", "ripsline", …)
-	Path     string
-	Keys     []sshkeys.Key
-	Excluded int // malformed or unsupported key-bearing lines, including options
-}
+// KeySource is an observed conventional public-key source.
+type KeySource = sshkeys.Source
 
-// EnumerateKeySources scans every candidate authorized_keys
-// location: /root plus each directory under /home — except the
-// admin user's own (that file is this step's DESTINATION; on a
-// re-run it must not enumerate itself as a source). Unreadable or
-// missing files simply contribute nothing: enumeration informs a
-// decision the operator confirms on screen, so an empty result is
-// visible, not silent.
-func EnumerateKeySources() []KeySource {
-	type candidate struct{ user, path string }
-	cands := []candidate{
-		{"root", "/root/.ssh/authorized_keys"},
-	}
-	if entries, err := os.ReadDir("/home"); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() || e.Name() == paths.AdminUser {
-				continue
-			}
-			cands = append(cands, candidate{
-				e.Name(),
-				filepath.Join("/home", e.Name(),
-					".ssh", "authorized_keys"),
-			})
-		}
-	}
+func EnumerateKeySources() ([]KeySource, error) { return host.DiscoverSSHKeySources() }
 
-	var sources []KeySource
-	for _, c := range cands {
-		data, err := os.ReadFile(c.path)
-		if err != nil {
-			continue
-		}
-		keys, excluded := classifyAuthorizedKeys(string(data))
-		if len(keys) == 0 && excluded == 0 {
-			continue
-		}
-		sources = append(sources, KeySource{
-			User: c.user, Path: c.path,
-			Keys: keys, Excluded: excluded,
-		})
-	}
-	return sources
-}
-
-// classifyAuthorizedKeys splits authorized_keys content into
-// parseable keys and EXCLUDED key-bearing lines. Pure —
-// unit-tested.
-//
-// An excluded line is one that carries key material but does not
-// parse as a supported bare "type base64 [comment]" line, including
-// malformed keys and lines with options. The cloud-init
-// forced-command decoy is a common example (`no-port-forwarding,...,command="echo
-// 'Please login as ...'" ssh-rsa AAAA...`): copying it verbatim
-// would grant its key access under OUR user with the provider's
-// message semantics stripped of context (the IA-3-E decoy trap).
-// Counting exclusions — instead of dropping them silently — keeps
-// the screen honest about what was on the box.
-func classifyAuthorizedKeys(content string) ([]sshkeys.Key, int) {
-	var keys []sshkeys.Key
-	excluded := 0
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		info, err := sshkeys.Parse(line)
-		if err == nil {
-			keys = append(keys, info)
-			continue
-		}
-		if lineCarriesKeyMaterial(line) {
-			excluded++
-		}
-	}
-	return keys, excluded
-}
-
-// lineCarriesKeyMaterial reports whether an unparseable
-// authorized_keys line names a recognized key type, including malformed
-// bare keys and option-prefixed keys, as opposed to plain junk.
-// Pure — unit-tested.
-func lineCarriesKeyMaterial(line string) bool {
-	for _, field := range strings.Fields(line) {
-		if sshkeys.RecognizedType(field) {
-			return true
-		}
-	}
-	return false
-}
-
-// DedupeKeys flattens sources into a fingerprint-unique key list,
-// preserving first-seen order (root first, then /home in ReadDir
-// order). Pure — unit-tested.
-func DedupeKeys(sources []KeySource) []sshkeys.Key {
-	seen := map[string]bool{}
-	var out []sshkeys.Key
-	for _, s := range sources {
-		for _, k := range s.Keys {
-			if seen[k.Fingerprint] {
-				continue
-			}
-			seen[k.Fingerprint] = true
-			out = append(out, k)
-		}
-	}
-	return out
-}
+func DedupeKeys(sources []KeySource) []sshkeys.Key { return sshkeys.DedupeSources(sources) }
 
 // ── Applying the decisions ───────────────────────────────
 

@@ -638,6 +638,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+	case accountsMsg:
+		return m.routeSSHResult(msg.owner, msg)
+	case accountDetailMsg:
+		return m.routeSSHResult(msg.owner, msg)
+	case accountImportMsg:
+		return m.routeSSHResult(msg.owner, msg)
 	case sshKeysListMsg:
 		return m.routeSSHResult(msg.owner, msg)
 	case sshKeyAddMsg:

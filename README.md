@@ -153,6 +153,15 @@ to replacements. The TUI resumes when the command finishes. This password is
 separate from the LND wallet password and recovery seed. Root can still reset
 account passwords through normal host maintenance.
 
+Use **System → Accounts** to inspect local accounts, local groups, observed sudo
+rules and supported public keys. Select a key to review and import it into `vpn`;
+the source account is retained. Only conventional `.ssh/authorized_keys` files
+are inspected for root, `vpn` and accounts using common interactive shells.
+Custom key paths, SSH certificates and provider-managed access
+are not inventoried. Restricted key entries are excluded without removing their
+options, and incomplete observations are reported. The installer uses the same
+discovery rules; unattended installation refuses incomplete key discovery.
+
 After testing a new SSH connection with your key, you can disable password SSH
 for `vpn` from **System → SSH Keys**. The existing login banner confirms a vpn
 SSH login, which may use a password; it does not verify a specific replacement
@@ -203,7 +212,7 @@ five sections plus a dark/light theme toggle:
 - **Wallet** — send and receive Lightning payments; payment history
 - **On-Chain** — send and receive on-chain; UTXO coin control; transaction history with anchor sweep detection
 - **Add-On** — install and manage Syncthing (channel backup)
-- **System** — service status and logs; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
+- **System** — service status and logs; local account inspection and public-key import; SSH key management and password auth toggle; auto-unlock configuration; P2P mode upgrade; self-update
 
 System service actions keep their confirmed target while you navigate. Completion
 means systemd reported `active` after Start or Restart, or `inactive` after Stop.

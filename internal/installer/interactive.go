@@ -20,6 +20,7 @@ type InstallFrontend func(InstallView, *InstallSession) (openConsole bool, err e
 type InstallView struct {
 	NeedIdentity, NeedHardware bool
 	Sources                    []KeySource
+	KeyDiscoveryProblem        string
 	Hardware, Minimum          Hardware
 	DBCacheChoices             []int
 	RecommendedDBCache         int
@@ -203,9 +204,18 @@ func runInstallInteractive(s *InstallSession, view InstallView, frontend Install
 
 func installView(s *InstallSession) InstallView {
 	hw := DetectHardware()
+	var sources []KeySource
+	var discoveryProblem string
+	if s.needIdentity {
+		var err error
+		sources, err = EnumerateKeySources()
+		if err != nil {
+			discoveryProblem = err.Error()
+		}
+	}
 	view := InstallView{
 		NeedIdentity: s.needIdentity, NeedHardware: s.needHardware,
-		Sources: SortKeySources(EnumerateKeySources()), Hardware: hw,
+		Sources: SortKeySources(sources), KeyDiscoveryProblem: discoveryProblem, Hardware: hw,
 		Minimum:        Hardware{RAMMB: requiredRAMMB, DiskTotalGB: requiredDiskGB, Cores: requiredCores},
 		DBCacheChoices: slices.Clone(dbCacheChoices), RecommendedDBCache: RecommendDbCache(hw.RAMMB),
 		Address: system.PublicIPv4(),

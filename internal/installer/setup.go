@@ -212,7 +212,13 @@ func RunInstall(opts InstallOptions, frontend InstallFrontend) error {
 	var res RunResult
 	openConsole := false
 	if opts.Unattended && lifecycle.Disposition != lifecycleCompletionPending {
-		if err := fillUnattendedDecisions(dec); err != nil {
+		needIdentity := false
+		for i, planned := range planRun(steps, ledger) {
+			if steps[i].Key == "identity.access" && planned.Run {
+				needIdentity = true
+			}
+		}
+		if err := fillUnattendedDecisions(dec, needIdentity); err != nil {
 			return err
 		}
 		if ledger.Context.DbCacheMB == nil {
@@ -416,16 +422,22 @@ func printGeneratedPassword(password string) error {
 	return nil
 }
 
-// fillUnattendedDecisions supplies the wizard answers for
-// --unattended: every enumerated (non-decoy) key is copied — the
-// spiritual successor of the script's cascade, from enumeration
-// instead of guessing — and the password is randomly generated
-// (ruling vii: random survives ONLY here) and printed at the
-// end. dbcache takes the hardware recommendation.
-//
-// Initial installation establishes owner password SSH even without copied keys.
-func fillUnattendedDecisions(dec *InstallDecisions) error {
-	dec.Keys = DedupeKeys(EnumerateKeySources())
+// fillUnattendedDecisions copies supported keys only when identity provisioning
+// will run. An unrelated resume or bake does not depend on source key access.
+// Password delivery still follows the existing applied/pending-marker contract.
+func fillUnattendedDecisions(dec *InstallDecisions, needIdentity bool) error {
+	if needIdentity {
+		sources, err := EnumerateKeySources()
+		if err != nil {
+			return fmt.Errorf("discover initial SSH keys: %w", err)
+		}
+		for _, source := range sources {
+			if source.Problem != "" {
+				return fmt.Errorf("SSH key discovery for %s is incomplete: %s; review the source or use interactive installation", source.User, source.Problem)
+			}
+		}
+		dec.Keys = DedupeKeys(sources)
+	}
 	if err := fillGeneratedPassword(dec); err != nil {
 		return err
 	}

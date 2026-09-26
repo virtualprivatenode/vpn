@@ -277,7 +277,7 @@ func (s *SSHKeysScreen) openDetailTab() (Screen, tea.Cmd) {
 		return s, nil
 	}
 	k := s.keys[s.keyCursor]
-	label := k.Comment
+	label := theme.PlainText(k.Comment)
 	if label == "" {
 		label = k.Type
 	}
@@ -402,7 +402,7 @@ func (s *SSHKeysScreen) viewList(w, h int) string {
 			}
 			fpStr := pad(fp, fpW)
 
-			comment := k.Comment
+			comment := theme.PlainText(k.Comment)
 			if comment == "" {
 				comment = "(no comment)"
 			}
@@ -472,6 +472,8 @@ func (s *SSHKeysScreen) clampCursor() {
 
 func sshAccessBusy(screen Screen) bool {
 	switch s := screen.(type) {
+	case *AccountsScreen:
+		return s.working
 	case *ChangePasswordScreen:
 		return s.step == changePwStepWorking
 	case *SSHKeyAddScreen:

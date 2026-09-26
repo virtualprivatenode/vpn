@@ -303,15 +303,15 @@ func (m *wizardModel) enterPasswordScreen() {
 func (m wizardModel) viewAccess(p *wizPane) {
 	p.header("Identity and access")
 	p.blank()
-	p.text("This node's admin user is '" + paths.AdminUser +
+	p.text("This node's owner account is '" + paths.AdminUser +
 		"'. Every SSH login as " + paths.AdminUser +
 		" opens the node TUI.")
 	p.blank()
 
 	if len(m.keys) == 0 {
-		p.text("No SSH keys were found on this box.")
+		p.text("No supported keys were found in the inspected standard files.")
 	} else {
-		p.text("SSH keys found on this box. Confirmed keys " +
+		p.text("Supported public keys found. Confirmed keys " +
 			"are copied to " + paths.AdminUser + ":")
 	}
 	p.blank()
@@ -333,16 +333,22 @@ func (m wizardModel) viewAccess(p *wizPane) {
 		p.line(" " + sty.Render(line))
 		detail := "      " + k.Type
 		if k.Comment != "" {
-			detail += " (" + k.Comment + ")"
+			detail += " (" + theme.PlainText(k.Comment) + ")"
 		}
 		detail += "  [" + m.keySourceNames(k.Fingerprint) + "]"
 		p.dim(detail)
 	}
+	if m.info.KeyDiscoveryProblem != "" {
+		p.warn("Key discovery is incomplete: " + theme.PlainText(m.info.KeyDiscoveryProblem))
+	}
 	for _, s := range m.info.Sources {
+		if s.Problem != "" {
+			p.warn(theme.PlainText(s.User + ": " + s.Problem))
+		}
 		if s.Excluded > 0 {
 			p.dim(fmt.Sprintf(
-				"   %d provider control line(s) in %s excluded,"+
-					" not copied", s.Excluded, s.Path))
+				"   %d restricted or unsupported key line(s) in %s excluded,"+
+					" not copied", s.Excluded, theme.PlainText(s.Path)))
 		}
 	}
 	if m.accErr != "" {
