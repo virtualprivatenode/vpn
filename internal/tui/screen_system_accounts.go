@@ -61,7 +61,7 @@ type AccountsScreen struct {
 	resultErr                             error
 	scroll                                int
 	focusZone, btnIdx, confirmIdx         int
-	showAll, technical                    bool
+	technical                             bool
 }
 
 func NewAccountsScreen(ctx *ScreenContext) *AccountsScreen { return &AccountsScreen{ctx: ctx} }
@@ -149,9 +149,6 @@ func (s *AccountsScreen) HandleMsg(msg tea.Msg) (Screen, tea.Cmd) {
 }
 
 func (s *AccountsScreen) visibleAccounts() []accountaccess.Account {
-	if s.showAll {
-		return s.accounts
-	}
 	var visible []accountaccess.Account
 	for _, a := range s.accounts {
 		if a.KeyDiscoverySupported() {
@@ -168,11 +165,7 @@ func (s *AccountsScreen) buttons() []string {
 	if s.account != nil {
 		return []string{"Back", "Technical details", "Refresh"}
 	}
-	label := "Show all accounts"
-	if s.showAll {
-		label = "Show login accounts"
-	}
-	return []string{label, "Refresh"}
+	return []string{"Refresh"}
 }
 
 func (s *AccountsScreen) listLen() int {
@@ -300,21 +293,6 @@ func (s *AccountsScreen) HandleKey(k string, _ tea.KeyPressMsg) (Screen, tea.Cmd
 		s.scroll = max(0, s.scroll-8)
 	case "enter":
 		if s.focusZone == sshZoneButtons {
-			if s.account == nil && s.btnIdx == 0 {
-				selected := accountaccess.Ref{}
-				visible := s.visibleAccounts()
-				if s.cursor < len(visible) {
-					selected = visible[s.cursor].Ref()
-				}
-				s.showAll, s.cursor, s.scroll = !s.showAll, 0, 0
-				for i, a := range s.visibleAccounts() {
-					if a.Ref() == selected {
-						s.cursor = i
-						break
-					}
-				}
-				return s, nil
-			}
 			if s.account != nil && s.btnIdx == 0 {
 				return s, s.back()
 			}
@@ -389,9 +367,6 @@ func (s *AccountsScreen) View(w, h int) string {
 		body.blank().dim("Choose Refresh to try again.")
 	case s.account == nil:
 		body.valueWrap("Use an SSH key from another account to connect as vpn.").blank()
-		if !s.showAll {
-			body.dim("Service and non-login accounts are hidden.").blank()
-		}
 		if s.loading {
 			body.dim("Refreshing accounts...").blank()
 		}
@@ -414,9 +389,7 @@ func (s *AccountsScreen) View(w, h int) string {
 			case a.Name == "vpn":
 				role = "Your node account"
 			case a.Name == "root":
-				role = "System owner"
-			case !a.KeyDiscoverySupported():
-				role = "Service or non-login account"
+				role = "Protected system account"
 			}
 			accountText(body, theme.Dim, "  "+role)
 			body.blank()

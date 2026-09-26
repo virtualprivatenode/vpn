@@ -155,9 +155,10 @@ account passwords through normal host maintenance.
 
 Use **System → Accounts** to find supported SSH keys on other accounts and
 review a key before importing it into `vpn`. The source account is retained,
-and keys already configured for `vpn` need no import. The default list shows
-root, `vpn` and supported login accounts; **Show all accounts** also includes
-service accounts. **Technical details** contains local groups, observed sudo
+and keys already configured for `vpn` need no import. The list shows `vpn`
+and supported login accounts, plus root as a protected system account whose
+keys can also be imported. This screen does not remove accounts or change
+their access. **Technical details** contains local groups, observed sudo
 rules, account IDs and paths. Only conventional `.ssh/authorized_keys` files
 are inspected for root, `vpn` and accounts using common interactive shells.
 Custom key paths, SSH certificates and provider-managed access
